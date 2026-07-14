@@ -44,6 +44,42 @@ knowledge/              # Structured knowledge graph: JSON files per concept, re
 tests/                  # Test suite, mirrors the smartagent package structure
 ```
 
+## Running MARK
+
+```bash
+python -m smartagent.main
+```
+
+MARK boots all subsystems and drops into a persistent interactive console:
+
+```
+============================================================
+                    MARK AI OPERATING SYSTEM
+============================================================
+
+Owner        : Mr. Smart
+Agent        : MARK
+Version      : 0.9
+
+Brain        : Online
+Mind         : Online
+Memory       : Online
+Knowledge    : Online
+Skills       : Loaded
+Tools        : Loaded
+Models       : Ready
+Health       : Healthy
+
+Type "help" to begin.
+
+mark>
+```
+
+Type `help` to see all available commands, `status` for a full dashboard,
+or `exit` / `quit` / Ctrl+C to leave.
+
+---
+
 See `SMARTAGENT.md` for MARK's identity, mission, principles, and
 long-term architecture vision, and `ROADMAP.md` for the full development
 plan, milestone status, and coding standards — this repository is the

@@ -1,11 +1,16 @@
 """
 Entry point for running SmartAgent from the command line.
 
-This module wires together configuration, the core agent, and (eventually)
-voice/automation front-ends. For now it just boots the agent with default
-settings and drops into a minimal placeholder loop so the project is
-runnable end-to-end from day one, even though real behavior is not yet
-implemented.
+This module wires together configuration, logging, the core agent, and the
+interactive console.  Running::
+
+    python -m smartagent.main
+
+boots MARK and drops into a persistent interactive console where every
+command is available immediately.
+
+Logging is directed to ``logs/mark.log`` only — the console is kept clean
+from log noise so the REPL prompt is always readable.
 """
 
 from smartagent.brain.agent import SmartAgent
@@ -15,8 +20,10 @@ from smartagent.ui.cli import run as run_ui
 
 
 def main() -> None:
-    """Boot SmartAgent using default configuration and start the CLI front-end."""
-    configure_logging()
+    """Boot SmartAgent and start the interactive console."""
+    # Configure logging before any module-level loggers fire.
+    # File-only (no console): keeps the REPL display clean.
+    configure_logging(log_file="logs/mark.log", log_to_console=False)
     settings = Settings.load()
     agent = SmartAgent(settings=settings)
     run_ui(agent)

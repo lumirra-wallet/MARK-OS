@@ -1,0 +1,429 @@
+I would make Milestone 8 focused on **turning MARK into a usable operating system**, not adding more AI features. The goal is that when you run:
+
+```bash
+python -m smartagent.main
+```
+
+MARK stays alive and you can interact with it.
+
+Here's a prompt you can give Replit Agent:
+
+---
+
+# Milestone 8 – MARK Console OS v1
+
+## PROJECT
+
+Project Name: SmartAgent
+
+Agent Name: MARK
+
+Owner: Mr. Smart
+
+## OBJECTIVE
+
+Transform MARK from a backend framework into a fully interactive AI operating system.
+
+Currently `python -m smartagent.main` successfully initializes the Brain, Mind, Memory, Knowledge, Skills, Tools, Models, and EventBus, but then exits because the run loop is only a placeholder.
+
+Replace the placeholder run loop with a professional interactive console.
+
+Do **not** add any new AI capabilities or internet access.
+
+This milestone is only about making the existing architecture usable.
+
+---
+
+# Requirements
+
+## Startup Banner
+
+When MARK starts, display a clean startup screen similar to:
+
+```text
+============================================================
+                    MARK AI OPERATING SYSTEM
+============================================================
+
+Owner        : Mr. Smart
+Agent        : MARK
+Version      : 0.9
+
+Brain        : Online
+Mind         : Online
+Memory       : Online
+Knowledge    : Online
+Skills       : Loaded
+Tools        : Loaded
+Models       : Ready
+Health       : Healthy
+
+Type "help" to begin.
+
+mark>
+```
+
+Do **not** print Python logging to the console by default.
+
+Logging should continue writing to log files only.
+
+---
+
+# Interactive REPL
+
+Create a persistent REPL.
+
+The console must stay running until the user exits.
+
+Supported exits:
+
+```
+exit
+quit
+Ctrl+C
+```
+
+After every command the prompt should return:
+
+```
+mark>
+```
+
+---
+
+# Help Command
+
+Typing
+
+```
+help
+```
+
+should display every available command grouped into categories.
+
+Example:
+
+```
+SYSTEM
+
+status
+
+version
+
+clear
+
+exit
+
+MIND
+
+mind
+
+identity
+
+health
+
+state
+
+MEMORY
+
+remember
+
+recall
+
+search-memory
+
+KNOWLEDGE
+
+knowledge
+
+graph
+
+inbox
+
+approve
+
+reject
+
+SKILLS
+
+skills
+
+TOOLS
+
+tools
+
+MODELS
+
+models
+
+EVENTS
+
+events
+```
+
+---
+
+# Status Dashboard
+
+Typing
+
+```
+status
+```
+
+should show:
+
+* Brain status
+* Mind status
+* Knowledge statistics
+* Memory statistics
+* Skills loaded
+* Tools loaded
+* Active model
+* Pending inbox items
+* Health metrics
+* Current state
+
+The dashboard should be human-readable.
+
+---
+
+# Memory Commands
+
+Implement commands that use the existing MemoryManager.
+
+Examples:
+
+```
+remember I like Python
+
+remember My name is Mr. Smart
+
+search-memory Python
+
+recall
+```
+
+Do not create a second memory implementation.
+
+Use the existing one.
+
+---
+
+# Knowledge Commands
+
+Use the existing KnowledgeManager.
+
+Examples:
+
+```
+knowledge add
+
+knowledge search Python
+
+knowledge graph Python
+
+knowledge stats
+
+inbox
+
+approve 3
+
+reject 4
+```
+
+Everything must use the existing Knowledge Engine.
+
+---
+
+# Mind Commands
+
+Connect to the existing Mind package.
+
+Examples:
+
+```
+mind
+
+identity
+
+health
+
+state
+
+attention
+
+context
+```
+
+Display the current internal state of MARK.
+
+---
+
+# Skills
+
+```
+skills
+```
+
+Should list:
+
+* Skill ID
+* Version
+* Status
+* Permissions
+
+---
+
+# Tools
+
+```
+tools
+```
+
+Should list:
+
+* Tool name
+* Description
+* Availability
+
+---
+
+# Models
+
+```
+models
+```
+
+Should display:
+
+* Registered providers
+* Loaded provider
+* Active provider
+* Model health
+
+No Ollama integration yet.
+
+---
+
+# Events
+
+```
+events
+```
+
+Should show recent EventBus events.
+
+---
+
+# Clear Screen
+
+```
+clear
+```
+
+Should clear the terminal and redraw the MARK banner.
+
+---
+
+# Unknown Commands
+
+Never crash.
+
+Display:
+
+```
+Unknown command.
+
+Type "help" for available commands.
+```
+
+---
+
+# Architecture Rules
+
+The console is **presentation only**.
+
+Do not duplicate logic.
+
+Everything must go through the existing:
+
+* BrainRouter
+* MemoryManager
+* KnowledgeManager
+* Mind
+* SkillEngine
+* ToolEngine
+* ModelManager
+* EventBus
+
+---
+
+# Code Quality
+
+* Modular command handlers
+* Easy to extend
+* No duplicated logic
+* Type hints
+* Docstrings
+* Keep current architecture intact
+
+---
+
+# Testing
+
+Add comprehensive tests.
+
+Verify:
+
+* Startup
+* Help
+* Status
+* Memory commands
+* Knowledge commands
+* Mind commands
+* Unknown commands
+* Exit
+* Ctrl+C handling
+
+All existing tests must continue passing.
+
+---
+
+# Deliverables
+
+When complete:
+
+* `python -m smartagent.main` launches MARK into a persistent interactive console.
+* MARK no longer exits immediately.
+* The console becomes the primary interface for all future milestones.
+* No regressions.
+* Update `README.md`, `ROADMAP.md`, `CHANGELOG.md`, `SMARTAGENT.md`, and `ARCHITECTURE.md` to document the new console.
+
+---
+
+## One improvement I'd make
+
+I would also ask Replit to add a **command framework** now, even if there are only a few commands initially.
+
+Instead of a giant `if/elif` block, organize commands like this:
+
+```
+smartagent/
+├── ui/
+│   ├── console.py
+│   ├── repl.py
+│   ├── renderer.py
+│   ├── command_router.py
+│   └── commands/
+│       ├── system.py
+│       ├── memory.py
+│       ├── knowledge.py
+│       ├── mind.py
+│       ├── skills.py
+│       ├── tools.py
+│       ├── models.py
+│       └── events.py
+```
+
+That way, when you later add voice, cybersecurity, learning, browser automation, or Ollama, you'll simply add new command modules instead of rewriting the console. This keeps MARK's architecture clean and scalable as it grows.

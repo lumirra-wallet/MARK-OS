@@ -7,6 +7,112 @@ the architecture is still settling.
 
 ## [Unreleased]
 
+## v0.9 — MARK Console OS v1
+
+- `python -m smartagent.main` now launches a persistent interactive console
+  instead of exiting immediately. MARK stays alive and accepts commands until
+  the user types `exit`, `quit`, presses Ctrl+C, or sends EOF.
+
+- Startup banner printed on launch and on `clear`:
+  ```
+  ============================================================
+                      MARK AI OPERATING SYSTEM
+  ============================================================
+  Owner        : Mr. Smart        Version      : 0.9
+  Brain        : Online           Mind         : Online
+  Memory       : Online           Knowledge    : Online
+  Skills       : Loaded (N)       Tools        : Loaded (N)
+  Models       : Ready            Health       : Healthy
+  Type "help" to begin.
+  mark>
+  ```
+
+- New command framework under `smartagent/ui/` — no giant `if/elif` chain.
+  Each command group is a self-contained module with a `register(router)`
+  function. Adding new commands for future milestones requires only a new
+  module file and one line in `Console._register_commands()`.
+
+  ```
+  smartagent/ui/
+  ├── console.py          — Console coordinator (wires all pieces)
+  ├── repl.py             — Read-eval-print I/O loop (KeyboardInterrupt,
+  │                         EOF, ExitConsole handled here)
+  ├── renderer.py         — Pure formatting helpers (no I/O, fully
+  │                         testable in isolation)
+  ├── command_router.py   — CommandRouter: register/dispatch/help
+  │                         ExitConsole sentinel exception
+  └── commands/
+      ├── system.py       — help, status, version, clear, exit/quit
+      ├── memory.py       — remember, recall, search-memory
+      ├── knowledge.py    — knowledge (add/search/graph/stats),
+      │                     inbox, approve, reject
+      ├── mind.py         — mind, identity, health, state,
+      │                     attention, context
+      ├── skills.py       — skills
+      ├── tools.py        — tools
+      ├── models.py       — models
+      └── events.py       — events
+  ```
+
+- **`help`** — groups all commands by category (SYSTEM / MIND / MEMORY /
+  KNOWLEDGE / SKILLS / TOOLS / MODELS / EVENTS) with one-line descriptions.
+
+- **`status`** — full dashboard: Brain / Mind (state, goal, confidence) /
+  Memory (categories, recent count) / Knowledge (concepts, relationships,
+  avg confidence, inbox pending) / Skills / Tools / Models / Health metrics.
+
+- **Memory commands:**
+  - `remember <content>` — saves via `MemoryManager.remember()`; echoes
+    the truncated id.
+  - `recall` — lists last 10 memories via `MemoryManager.search("")`.
+  - `search-memory <query>` — searches via `MemoryManager.search()`.
+
+- **Knowledge commands:**
+  - `knowledge add <title>` — proposes a concept through the inbox.
+  - `knowledge search <query>` — searches via `KnowledgeManager.search()`.
+  - `knowledge graph <title>` — shows concept relationships as a text tree.
+  - `knowledge stats` — full statistics from `KnowledgeManager.stats()`.
+  - `inbox` — lists pending inbox items numbered 1-N.
+  - `approve <number>` — approves item by 1-based index (or raw id).
+  - `reject <number>` — rejects item by 1-based index.
+
+- **Mind commands** (all read from `agent.mind` — no behavior change):
+  - `mind` — full `ExecutiveController.describe()`.
+  - `identity` — agent name, mission, goal, task, state, confidence.
+  - `health` — runs `health_check()`, shows band / score / metrics / notes.
+  - `state` — current `InternalState` from `SelfModel`.
+  - `attention` — active processes and priority queue from the Mind.
+  - `context` — renders `ContextBundle` from `build_context()`.
+
+- **Listing commands:** `skills` (id / version / status / permissions),
+  `tools` (name / description / availability), `models` (registered
+  providers / loaded / active / health).
+
+- **`events`** — reads `agent.events.history()` directly; shows the 20 most
+  recent events with timestamps and payload previews.
+
+- **`clear`** — `os.system("clear")` + redraws the banner.
+
+- **Unknown commands** — never crash; print a friendly message with a
+  pointer to `help`.
+
+- **Logging:** `configure_logging()` now accepts `log_file` and
+  `log_to_console` parameters. `main.py` passes
+  `log_file="logs/mark.log", log_to_console=False` so log noise never
+  appears on the REPL screen. Tests and other callers are unaffected
+  (`get_logger()` no longer auto-triggers `configure_logging()`).
+
+- **Architecture rules kept:** the console is presentation-only. Every
+  handler goes through the existing `MemoryManager`, `KnowledgeManager`,
+  `ExecutiveController`, `SkillEngine`, `ToolEngine`, `ModelManager`, and
+  `EventBus`. No logic is duplicated.
+
+- 78 new tests in `tests/test_console.py` covering startup, banner,
+  renderer, CommandRouter unit tests, every command group, REPL I/O loop
+  (driven via patched `builtins.input`), Ctrl+C / EOF handling, exit,
+  unknown commands, and resilience when Mind subsystems raise exceptions.
+  Full suite: 652 passing, 0 regressions.
+
 ## v0.8 — Knowledge Engine v1
 
 - Added `smartagent.knowledge` as a full package — a structured knowledge

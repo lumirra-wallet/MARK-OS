@@ -5,7 +5,7 @@
 - **Agent Name:** MARK
 - **Owner:** Mr. Smart
 - **Project Name:** SmartAgent
-- **Version:** 0.8
+- **Version:** 0.9
 
 **Mission:**
 MARK is an intelligent AI Operating System created exclusively for Mr. Smart.
@@ -170,6 +170,15 @@ up. See `README.md` for the current package layout and status.
   observes and represents MARK's own state; it never drives Brain routing
   and changes no other subsystem's behavior. See `smartagent/mind/`,
   `ARCHITECTURE.md`, and `CHANGELOG.md v0.7`.
+- `ui` — **implemented (MARK Console OS v1).** Running
+  `python -m smartagent.main` launches a persistent interactive console —
+  a professional REPL with a startup banner, grouped `help` listing, a
+  `status` dashboard, and commands for every subsystem (memory, knowledge,
+  mind, skills, tools, models, events). Built as a modular command
+  framework (`CommandRouter` + one module per group) so future milestones
+  add commands without touching the REPL core. Logging is silenced from
+  the console (file-only via `logs/mark.log`). See `smartagent/ui/` and
+  `CHANGELOG.md v0.9`.
 - `knowledge` — **implemented (Knowledge Engine v1).** MARK now
   understands knowledge, not just remembers it. A structured knowledge
   graph (directed graph: concepts as nodes, relationships as edges) with

@@ -15,7 +15,7 @@ MARK's identity/mission/principles, `CHANGELOG.md` for what shipped, and
 | **Project Name** | SmartAgent |
 | **Owner** | Mr. Smart |
 | **AI Name** | MARK |
-| **Current Version** | v0.8 (Knowledge Engine v1) |
+| **Current Version** | v0.9 (MARK Console OS v1) |
 
 **Mission:** MARK is an intelligent AI Operating System created
 exclusively for Mr. Smart — a trusted executive assistant, engineer,
@@ -262,6 +262,27 @@ features" beyond what a milestone explicitly asks for.
    - `Settings.knowledge_path` added. No AI reasoning, no Ollama, no
      vector databases, no internet, no voice/vision/cybersecurity.
    - 119 new tests; all existing tests pass, 0 regressions.
+
+✅ Milestone 8 — MARK Console OS v1
+   - `python -m smartagent.main` now launches a persistent interactive console
+     instead of exiting immediately.  MARK stays alive until the user types
+     `exit`, `quit`, presses Ctrl+C, or sends EOF.
+   - Professional startup banner (name, version, all subsystem status).
+   - Command framework under `smartagent/ui/`: `console.py`,
+     `repl.py`, `renderer.py`, `command_router.py` + 8 command modules
+     under `commands/`.  No `if/elif` dispatch — each module has its own
+     `register(router)` call; new milestones add a new file and one line.
+   - Commands: `help`, `status`, `version`, `clear`, `exit`/`quit` (SYSTEM);
+     `mind`, `identity`, `health`, `state`, `attention`, `context` (MIND);
+     `remember`, `recall`, `search-memory` (MEMORY);
+     `knowledge add/search/graph/stats`, `inbox`, `approve`, `reject` (KNOWLEDGE);
+     `skills`, `tools`, `models`, `events`.
+   - All handlers are presentation-only: every operation goes through the
+     existing MemoryManager / KnowledgeManager / ExecutiveController /
+     SkillEngine / ToolEngine / ModelManager / EventBus.  No logic duplicated.
+   - Logging: `configure_logging()` gains `log_file` + `log_to_console` params.
+     `main.py` now routes logs to `logs/mark.log` only (console is clean).
+   - 78 new tests; full suite 652 passing, 0 regressions.
 
 Future milestones (order indicative — see Build Order below):
    - Research Engine (real trusted-source search + summarization)

@@ -303,7 +303,75 @@ BrainRouter.route()
 `KnowledgeGraph`, `KnowledgeStorage`, `KnowledgeInbox`, or any other
 sub-engine — all access goes through `KnowledgeManager`.
 
-## 7. What's still design-only
+## 8. Console OS v1 — command framework (Milestone 8)
+
+```
+python -m smartagent.main
+    │
+    ▼
+main.py
+  configure_logging(log_file="logs/mark.log", log_to_console=False)
+  SmartAgent(settings)
+  run_ui(agent)  ──────────────────────────────────────────────────►
+                                                               cli.py
+                                                          Console(agent)
+                                                                │
+                                    ┌───────────────────────────┘
+                                    ▼
+                              Console.__init__
+                              ┌──────────────────┐
+                              │ CommandRouter     │
+                              │  register(...)    │◄── system.register(router)
+                              │  dispatch(...)    │◄── mind.register(router)
+                              │  help_entries()   │◄── memory.register(router)
+                              └──────────────────┘◄── knowledge.register(router)
+                                    │             ◄── skills/tools/models/events
+                                    ▼
+                              renderer.banner(agent)
+                                    │
+                                    ▼
+                              Repl.run(agent, router, banner=...)
+                              ┌─────────────────────────────────────┐
+                              │  loop:                              │
+                              │    raw = input("mark> ")            │
+                              │    response = router.dispatch(...)  │
+                              │    print(response)                  │
+                              │                                     │
+                              │  KeyboardInterrupt → resume         │
+                              │  EOFError          → break          │
+                              │  ExitConsole       → "Goodbye."     │
+                              └─────────────────────────────────────┘
+```
+
+Command handler contract — every handler is a plain callable:
+
+```python
+Handler = Callable[[SmartAgent, list[str]], str]
+```
+
+Handlers return a string (the REPL prints it).  To exit, the handler
+raises `ExitConsole` — the REPL catches it and breaks the loop cleanly.
+
+Command module layout:
+
+```
+smartagent/ui/commands/
+├── system.py    → help, status, version, clear, exit, quit
+├── mind.py      → mind, identity, health, state, attention, context
+├── memory.py    → remember, recall, search-memory
+├── knowledge.py → knowledge (add/search/graph/stats), inbox, approve, reject
+├── skills.py    → skills
+├── tools.py     → tools
+├── models.py    → models
+└── events.py    → events
+```
+
+Each module calls only the public API of its subsystem (`agent.memory`,
+`agent.knowledge`, `agent.mind`, etc.) — no cross-module imports.
+`renderer.py` contains all display formatting; it is stateless and never
+calls `print()` directly, making it trivially testable.
+
+## 9. What's still design-only
 
 Per milestone specs, these are intentionally **not** implemented:
 
