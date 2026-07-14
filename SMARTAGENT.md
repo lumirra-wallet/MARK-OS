@@ -5,7 +5,7 @@
 - **Agent Name:** MARK
 - **Owner:** Mr. Smart
 - **Project Name:** SmartAgent
-- **Version:** 0.1
+- **Version:** 0.8
 
 **Mission:**
 MARK is an intelligent AI Operating System created exclusively for Mr. Smart.
@@ -168,11 +168,26 @@ up. See `README.md` for the current package layout and status.
   "sensations," and a synchronous self-check `tick()`). This is
   **computational self-awareness, not consciousness** — the Mind
   observes and represents MARK's own state; it never drives Brain routing
-  and changes no other subsystem's behavior. Knowledge, Learning,
-  Curiosity, Discovery, Wisdom, and Cybersecurity Engines, plus Voice/
-  Vision/Browser/Automation integration into the Mind, remain
-  design-only future work. See `smartagent/mind/`, `ARCHITECTURE.md`, and
-  `CHANGELOG.md v0.7`.
+  and changes no other subsystem's behavior. See `smartagent/mind/`,
+  `ARCHITECTURE.md`, and `CHANGELOG.md v0.7`.
+- `knowledge` — **implemented (Knowledge Engine v1).** MARK now
+  understands knowledge, not just remembers it. A structured knowledge
+  graph (directed graph: concepts as nodes, relationships as edges) with
+  full CRUD, BFS/DFS traversal, shortest path, and merge/split. 20-field
+  `Concept` model with rich metadata (category, tags, aliases, examples,
+  difficulty, confidence, importance, verification status, revision
+  history). 15 typed relationship types. Evidence and Source tracking for
+  every concept. Transparent `ConfidenceEngine` (evidence quality, source
+  reliability, contradiction penalty, verification bonus, age decay).
+  Knowledge Inbox — nothing enters permanent knowledge automatically;
+  every concept passes validation → conflict detection → confidence
+  scoring → Mr. Smart approval. Hierarchical `OntologyEngine` (7 default
+  root categories; path inheritance). Deterministic `KnowledgeSearch` (no
+  embeddings). Structured `QueryEngine` (12 query types). JSON storage in
+  `knowledge/` (separate from `vault/`). Live statistics with growth
+  history. Brain integration via `KnowledgeManager` — the Brain's
+  `knowledge_handler` calls `agent.knowledge` only. See
+  `smartagent/knowledge/` and `CHANGELOG.md v0.8`.
 - `voice`, `vision`, `automation` — registered as Brain v2 modules (via
   `smartagent/brain/module_bindings.py`) but still placeholder behavior
   underneath: each honestly reports it cannot yet handle arbitrary free text.

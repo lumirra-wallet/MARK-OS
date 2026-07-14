@@ -170,6 +170,25 @@ def register_default_modules(registry: ModuleRegistry, agent: "SmartAgent") -> N
             lambda: (False, "Automation is not implemented yet.", agent.automation.list_tasks()),
         )
 
+    def knowledge_handler(message: str) -> ActionResult:
+        # Milestone 7: the Brain never imports KnowledgeManager sub-engines
+        # directly — it communicates only through agent.knowledge (the
+        # KnowledgeManager). This handler does a keyword search and reports
+        # matching concepts if found. Confidence is set to 0.6 so the
+        # knowledge module takes priority after memory (0.8) and skills
+        # (dispatched first by SkillEngine), but before planning and research.
+        def probe() -> _ProbeResult:
+            results = agent.knowledge.search(message, limit=3)
+            if not results:
+                stats = agent.knowledge.describe()
+                return False, f"No relevant knowledge found. {stats}", []
+            summary = "; ".join(
+                f"{r.concept.title}: {r.concept.summary or r.concept.description[:80]}"
+                for r in results
+            )
+            return True, f"Here's what I know: {summary}", results
+        return _timed("knowledge", 0.6, probe)
+
     def unknown_handler(message: str) -> ActionResult:
         # Guaranteed final fallback (Decision Engine priority #7): always
         # succeeds so BrainRouter's chain never comes back empty-handed.
@@ -185,6 +204,7 @@ def register_default_modules(registry: ModuleRegistry, agent: "SmartAgent") -> N
     registry.register("memory", memory_handler)
     registry.register("skills", skills_handler)
     registry.register("tools", tools_handler)
+    registry.register("knowledge", knowledge_handler)
     registry.register("planning", planning_handler)
     registry.register("research", research_handler)
     registry.register("model", model_handler)

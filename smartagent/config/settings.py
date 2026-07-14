@@ -74,6 +74,7 @@ class Settings:
     )
     enabled_tools: list[str] = field(default_factory=list)
     workspace_path: str = "."
+    knowledge_path: str = "knowledge"
     voice_enabled: bool = False
     automation_enabled: bool = False
     granted_permissions: list[str] = field(default_factory=lambda: ["read_memory", "write_memory"])

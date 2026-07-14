@@ -222,17 +222,95 @@ tracker), which keeps this subsystem deterministic and directly testable.
 
 ---
 
-## 6. What's still design-only
+## 6. Knowledge Engine v1 overview (Milestone 7)
 
-Per the Milestone 6 spec, these are intentionally **not** implemented —
-no code, no stubs beyond what's noted:
+```
+                    KnowledgeManager (knowledge_manager.py)
+                       the sole entry point — Brain never
+                       imports sub-engines directly
+                              │
+    ┌──────────┬─────────────┬┴────────────┬──────────────┬──────────────┐
+    ▼          ▼             ▼             ▼              ▼              ▼
+┌────────┐ ┌────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+│Knowledge│ │Ontology│ │Knowledge │ │  Query   │ │Knowledge │ │Knowledge │
+│ Graph   │ │ Engine │ │  Inbox   │ │  Engine  │ │  Search  │ │  Stats   │
+│(graph/) │ │(ontol/)│ │ (inbox/) │ │(queries/)│ │(search/) │ │(stats/)  │
+│directed │ │hierarch│ │ approval │ │find_*    │ │determin. │ │live +    │
+│graph,   │ │category│ │  gate,   │ │12 query  │ │full-text,│ │history   │
+│BFS/DFS/ │ │tree,   │ │ persist  │ │types     │ │no embed. │ │snapshots │
+│shortest │ │inherit-│ │ queue    │ │          │ │          │ │          │
+│path,    │ │ance,   │ │          │ │          │ │          │ │          │
+│merge/   │ │ensure_ │ │          │ │          │ │          │ │          │
+│split    │ │path()  │ │          │ │          │ │          │ │          │
+└────────┘ └────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
+    │                       │
+    ▼                       ▼
+┌────────────────┐   ┌──────────────────────────────────────────────────┐
+│KnowledgeStorage│   │  KnowledgeInbox pipeline (propose → commit):     │
+│  (storage/)    │   │                                                  │
+│ concepts/      │   │  propose_concept()                               │
+│ relationships/ │   │    ↓ ConceptValidator (hard errors + warnings)   │
+│ sources/       │   │    ↓ Conflict Detection (contradiction_ids cross- │
+│ evidence/      │   │      reference against existing concepts)        │
+│ inbox/         │   │    ↓ ConfidenceEngine (initial score)            │
+│ (JSON files)   │   │    → InboxItem (pending / conflict / rejected)   │
+└────────────────┘   │                                                  │
+                     │  approve_concept(item_id)                        │
+                     │    ↓ _commit_concept() → storage + graph         │
+                     └──────────────────────────────────────────────────┘
+```
 
-- Knowledge Engine, Learning Engine, Curiosity Engine, Discovery Engine,
-  Wisdom Engine, Cybersecurity Engine
+Knowledge engine sub-models:
+
+```
+Concept (concepts/)
+  id, title, description, summary, category, tags, aliases, examples,
+  difficulty, status, confidence, importance, created_at, updated_at,
+  author, owner, source_ids, evidence_ids, relationship_ids,
+  dependency_ids, contradiction_ids, verification_status, revision_history
+
+Relationship (relationships/)
+  id, from_concept_id, to_concept_id, relation_type (15 types),
+  direction, strength, confidence, source, created_at, notes
+
+Source (sources/)
+  id, source_type (11 types), author, url, publication, date,
+  reliability_score, citation, notes
+
+Evidence (evidence/)
+  id, concept_id, description, source_id, evidence_type (5 types),
+  strength, confidence, timestamp, verification_status, notes
+
+ConfidenceFactors (computed, not stored)
+  evidence_score (40%), source_score (30%), source_count_bonus,
+  verification_bonus, age_penalty, contradiction_penalty,
+  manual_adjustment → final_score [0.0, 1.0]
+```
+
+Brain integration — module handler:
+
+```
+BrainRouter.route()
+  ...
+  → knowledge_handler(message)
+      agent.knowledge.search(message, limit=3)
+      → if hits: return concept summaries (confidence=0.6)
+      → if miss:  return knowledge stats  (success=False)
+```
+
+**Brain isolation:** `module_bindings.knowledge_handler` closes over
+`agent.knowledge` (a `KnowledgeManager`). The Brain never imports
+`KnowledgeGraph`, `KnowledgeStorage`, `KnowledgeInbox`, or any other
+sub-engine — all access goes through `KnowledgeManager`.
+
+## 7. What's still design-only
+
+Per milestone specs, these are intentionally **not** implemented:
+
+- Learning Engine, Curiosity Engine, Discovery Engine, Wisdom Engine,
+  Cybersecurity Engine
 - Voice, Vision, Browser, and Automation integration *into the Mind*
-  (the existing `smartagent.voice`/`vision`/`automation` packages are
-  unchanged Brain v2 module placeholders, unrelated to this work)
-- Any internet access or Ollama/model-provider integration triggered by
-  the Mind
+- Ollama/model-provider integration triggered by the Mind or Knowledge Engine
+- Internet access, vector databases, embeddings, AI reasoning in Knowledge
 
-See `ROADMAP.md`'s Milestone 6 entry and TODO tracker for what's next.
+See `ROADMAP.md` for what's next.

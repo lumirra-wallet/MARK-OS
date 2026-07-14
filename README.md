@@ -14,6 +14,11 @@ smartagent/
 ├── brain/              # Brain v2: BrainRouter, IntentAnalyzer, DecisionEngine,
 │                       # ModuleRegistry, ActionResult, EventBus, agent.py
 ├── memory/             # Persistent Markdown memory vault (see below)
+├── knowledge/          # Knowledge Engine v1: KnowledgeManager, KnowledgeGraph,
+│                       # Concept/Relationship/Source/Evidence models,
+│                       # ConfidenceEngine, KnowledgeInbox, OntologyEngine,
+│                       # QueryEngine, KnowledgeSearch, KnowledgeStorage,
+│                       # KnowledgeStats (see below)
 ├── models/             # Model Framework v1: ModelManager, ModelRegistry,
 │                       # BaseModel providers, PromptBuilder, ConversationContext,
 │                       # ResponseParser, ModelSettings (see below)
@@ -32,6 +37,10 @@ smartagent/
 ├── research/           # Trusted-source research, summarized + owner-approved before storage
 └── planning/           # Goal tracking and task decomposition
 vault/                  # Persistent memories, one human-readable .md file per memory
+knowledge/              # Structured knowledge graph: JSON files per concept, relationship,
+│                       # source, evidence item, and inbox item. Separate from vault/.
+│                       # knowledge/ontology.json — hierarchical category tree
+│                       # knowledge/stats_history.json — growth-over-time snapshots
 tests/                  # Test suite, mirrors the smartagent package structure
 ```
 

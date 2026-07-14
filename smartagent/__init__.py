@@ -32,6 +32,11 @@ Subpackages:
                   long-term memory. No internet browsing yet.
     planning    - Tracks owner goals and breaks them down into concrete,
                   orderable tasks.
+    knowledge   - Knowledge Engine v1: a structured knowledge graph of
+                  concepts, relationships, evidence, sources, and
+                  confidence scores. All knowledge enters via the inbox
+                  and requires Mr. Smart's approval. No AI reasoning,
+                  no embeddings, no vector databases.
 
 See `SMARTAGENT.md` at the project root for MARK's identity, mission,
 principles, and long-term architecture vision.

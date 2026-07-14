@@ -7,6 +7,137 @@ the architecture is still settling.
 
 ## [Unreleased]
 
+## v0.8 — Knowledge Engine v1
+
+- Added `smartagent.knowledge` as a full package — a structured knowledge
+  graph that transforms MARK from a system that only *remembers* information
+  into one that *understands* knowledge. This is **computational knowledge
+  architecture, not AI reasoning**: the engine represents concepts, relationships,
+  evidence, confidence, contradictions, dependencies, and understanding without
+  any AI model, embeddings, or vector databases.
+
+- Added `KnowledgeManager` (the single entry point): the Brain communicates
+  only through this class — never by importing sub-engines directly.
+  Satisfies Milestone 7's requirement: "Brain must not directly modify
+  knowledge. Brain communicates only through KnowledgeManager."
+
+- Added `smartagent.knowledge.concepts.Concept`: rich knowledge nodes with
+  20 structured fields — id, title, description, summary, category, tags,
+  aliases, examples, difficulty (`ConceptDifficulty` enum: beginner/
+  intermediate/advanced/expert), status (`ConceptStatus`), confidence,
+  importance, created_at, updated_at, author, owner, source_ids, evidence_ids,
+  relationship_ids, dependency_ids, contradiction_ids, verification_status
+  (`VerificationStatus`), and a full `revision_history` list of `RevisionEntry`
+  diffs. Concepts are editable, versioned, and fully serializable to/from JSON.
+
+- Added `smartagent.knowledge.graph.KnowledgeGraph`: in-memory directed
+  graph with complete CRUD (add/remove nodes and edges), BFS/DFS traversal,
+  shortest path (BFS), dependency lookup, relationship lookup, merge/split
+  nodes, graph statistics, and an adjacency dict export hook for future
+  visualization. Stores only IDs — actual objects live in storage.
+
+- Added `smartagent.knowledge.relationships.Relationship`: typed, weighted,
+  confidence-scored directed edges. 15 relationship types: `depends_on`,
+  `part_of`, `related_to`, `contradicts`, `extends`, `implements`, `inherits`,
+  `causes`, `uses`, `creates`, `requires`, `improves`, `replaces`, `supports`,
+  `references`. Each stores direction (forward/backward/bidirectional),
+  strength, confidence, source, and timestamp.
+
+- Added `smartagent.knowledge.sources.Source`: provenance tracking for every
+  piece of knowledge. 11 source types (`SourceType`): `manual_entry`, `memory`,
+  `research`, `books`, `documentation`, `internet`, `videos`, `courses`,
+  `personal_notes`, `future_obsidian`, `future_browser`. Each source stores
+  author, URL placeholder, publication, date, reliability score, and citation.
+
+- Added `smartagent.knowledge.evidence.Evidence`: factual support records
+  for each concept. 5 evidence types: `direct`, `indirect`, `anecdotal`,
+  `experimental`, `theoretical`. Each evidence item stores strength,
+  confidence, verification status, and links to a source.
+
+- Added `smartagent.knowledge.confidence.ConfidenceEngine`: transparent,
+  fully auditable evidence-based scoring. Score = weighted function of:
+  evidence quality (0.40), source reliability (0.30), source-count
+  corroboration bonus (capped at 5 sources → +0.10), verification bonus
+  (+0.10 for verified concepts), age penalty (linear decay after 365 days
+  for unverified concepts, max -0.15), and contradiction penalty (-0.15
+  per unresolved contradiction, capped at -0.60). Returns a `ConfidenceFactors`
+  breakdown with human-readable notes so MARK can explain every score.
+
+- Added `smartagent.knowledge.validation.ConceptValidator`: hard-error
+  structural validation (id, title, confidence/importance in [0.0, 1.0])
+  plus soft warnings (short description, no tags, no summary, default
+  confidence unchanged). Runs in the inbox pipeline before any concept
+  reaches the graph.
+
+- Added `smartagent.knowledge.inbox.KnowledgeInbox`: the approval gate.
+  Nothing enters permanent knowledge automatically. Workflow: propose →
+  validation → conflict detection → confidence scoring → Mr. Smart approval →
+  knowledge graph. Conflict detection checks existing concepts for
+  `contradiction_ids` cross-references. Each inbox item is persisted to
+  `knowledge/inbox/` immediately so the queue survives restarts.
+  `InboxItemStatus`: pending / approved / rejected / conflict.
+
+- Added `smartagent.knowledge.ontology.OntologyEngine`: hierarchical
+  category tree. Supports add/remove, parent/ancestor/descendant traversal,
+  `ensure_path()` (creates all missing path segments in one call), category
+  inheritance, alias search, and persistence to `knowledge/ontology.json`.
+  7 default root categories seeded on first run (Technology, Science,
+  Business, Personal, Research, History, Philosophy).
+
+- Added `smartagent.knowledge.queries.QueryEngine`: full structured query
+  set from the Milestone 7 spec — `find_concept`, `find_related`,
+  `find_dependencies`, `find_contradictions`, `find_missing_evidence`,
+  `find_low_confidence`, `find_orphans`, `find_duplicates`, `find_by_category`,
+  `find_by_tag`, `find_unverified`.
+
+- Added `smartagent.knowledge.search.KnowledgeSearch`: deterministic, no-
+  embeddings full-text search across title, aliases, tags, category,
+  description, and summary. Relevance scoring: title/alias exact match (+3),
+  partial match (+2), tag match (+1.5), category (+1), description/summary
+  (+0.5). Supports category prefix filter (hierarchical) and tag multi-filter.
+
+- Added `smartagent.knowledge.storage.KnowledgeStorage`: filesystem-based
+  JSON persistence in `knowledge/` (separate from the memory `vault/`).
+  One file per concept, relationship, source, evidence item, and inbox item.
+  Human-readable, indented JSON — openable and editable in any text editor.
+
+- Added `smartagent.knowledge.statistics.KnowledgeStats`: live + historical
+  stats — total concepts, relationships, average confidence, conflicts,
+  pending inbox items, verified/unverified/contradicted concept counts,
+  categories, sources, evidence, low-confidence (<0.5) and high-confidence
+  (≥0.8) buckets. Growth over time tracked by appending snapshots to
+  `knowledge/stats_history.json`.
+
+- Added `smartagent.knowledge.categories.Category`: simple value object for
+  category tree nodes with path computation, depth, ancestor check, and
+  round-trip serialization.
+
+- Brain integration: `module_bindings.knowledge_handler` registers
+  `agent.knowledge` (KnowledgeManager) as the "knowledge" module in the
+  `ModuleRegistry`, with confidence 0.6 — between memory (0.8) and planning
+  (0.5). Searches the graph and returns matching concept summaries. The
+  handler follows the same Brain v2 module contract as all other handlers:
+  returns `ActionResult`, publishes nothing directly.
+
+- `SmartAgent.__init__` now constructs `self.knowledge = KnowledgeManager()`
+  from `settings.knowledge_path` (new field in `Settings`, defaults to
+  `"knowledge/"`). Constructed before the `ModuleRegistry` is built so the
+  knowledge handler can close over the live instance.
+
+- Storage: `knowledge/` directory is kept separate from `vault/` — Memory
+  remains Markdown, Knowledge is JSON. No database, no embeddings, no vector
+  store.
+
+- Explicitly **not** implemented this milestone (per spec): AI reasoning,
+  Ollama, vector databases, embeddings, browser access, internet research,
+  voice, vision, cybersecurity. No modification to Memory, Mind, Brain
+  routing, Skills, Tools, or Model Framework behavior.
+
+- 120+ new tests in `tests/test_knowledge.py` covering all engines, storage,
+  graph operations, inbox workflow, ontology, search, queries, confidence,
+  statistics, and end-to-end manager operations including persistence across
+  instances.
+
 ## v0.7 — MARK Mind OS v1
 
 - Added `smartagent.mind` as a real package — a persistent internal mind

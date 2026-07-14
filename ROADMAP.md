@@ -15,7 +15,7 @@ MARK's identity/mission/principles, `CHANGELOG.md` for what shipped, and
 | **Project Name** | SmartAgent |
 | **Owner** | Mr. Smart |
 | **AI Name** | MARK |
-| **Current Version** | v0.7 (MARK Mind OS v1) |
+| **Current Version** | v0.8 (Knowledge Engine v1) |
 
 **Mission:** MARK is an intelligent AI Operating System created
 exclusively for Mr. Smart — a trusted executive assistant, engineer,
@@ -231,9 +231,40 @@ features" beyond what a milestone explicitly asks for.
    - 86 new tests; full suite 455 passing, 0 regressions
 ----------------------------------------------------------------------
 
+✅ Milestone 7 — Knowledge Engine v1
+   - `smartagent.knowledge` package: directed knowledge graph (concepts as
+     nodes, relationships as edges). 20-field Concept model (id, title,
+     description, summary, category, tags, aliases, examples, difficulty,
+     status, confidence, importance, created_at, updated_at, author, owner,
+     source_ids, evidence_ids, relationship_ids, dependency_ids,
+     contradiction_ids, verification_status, revision_history).
+   - KnowledgeGraph: BFS/DFS traversal, shortest path, merge/split,
+     dependency lookup, adjacency export for future visualization.
+   - 15 typed RelationshipTypes: depends_on, part_of, related_to,
+     contradicts, extends, implements, inherits, causes, uses, creates,
+     requires, improves, replaces, supports, references.
+   - Source + Evidence engines for provenance tracking.
+   - ConfidenceEngine: transparent scoring (evidence quality 40%,
+     source reliability 30%, corroboration bonus, verification bonus,
+     age decay, contradiction penalty, manual adjustment).
+   - KnowledgeInbox: approval gate (propose → validate → conflict detect
+     → confidence score → Mr. Smart approve → graph). Nothing enters
+     automatically. Contradiction detection flags conflicts without
+     overwriting.
+   - OntologyEngine: hierarchical category tree, path inheritance,
+     `ensure_path()`, 7 default root categories.
+   - QueryEngine: 12 structured query operations.
+   - KnowledgeSearch: deterministic full-text search, no embeddings.
+   - KnowledgeStorage: human-readable JSON in `knowledge/` (separate
+     from memory `vault/`). KnowledgeStats + growth history.
+   - Brain integration: `knowledge_handler` in ModuleRegistry (confidence
+     0.6). Brain communicates only through KnowledgeManager.
+   - `Settings.knowledge_path` added. No AI reasoning, no Ollama, no
+     vector databases, no internet, no voice/vision/cybersecurity.
+   - 119 new tests; all existing tests pass, 0 regressions.
+
 Future milestones (order indicative — see Build Order below):
    - Research Engine (real trusted-source search + summarization)
-   - Knowledge Inbox (structured review queue for research findings)
    - Plugin System (third-party module registration)
    - Browser Automation
    - Computer Control

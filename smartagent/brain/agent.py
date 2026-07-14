@@ -19,6 +19,7 @@ from smartagent.brain.module_bindings import register_default_modules
 from smartagent.brain.module_registry import ModuleRegistry
 from smartagent.brain.router import BrainRouter
 from smartagent.config.settings import Settings
+from smartagent.knowledge.knowledge_manager import KnowledgeManager
 from smartagent.logs.logger import get_logger
 from smartagent.memory.memory_manager import MemoryManager
 from smartagent.mind.executive.executive_controller import ExecutiveController, MindProviders
@@ -132,6 +133,14 @@ class SmartAgent:
         self.goals = GoalManager()
         self.task_planner = TaskPlanner()
         self.research = ResearchManager(memory=self.memory)
+
+        # Milestone 7: Knowledge Engine v1. The Brain communicates only
+        # through KnowledgeManager — never by importing sub-engines directly.
+        # knowledge_path is configurable (defaults to "knowledge/") so tests
+        # and deployments can redirect it without code changes.
+        self.knowledge = KnowledgeManager(
+            knowledge_path=getattr(settings, "knowledge_path", "knowledge")
+        )
         self.speech_to_text = SpeechToText(enabled=settings.voice_enabled)
         self.text_to_speech = TextToSpeech(enabled=settings.voice_enabled)
         self.vision = ImageAnalyzer()

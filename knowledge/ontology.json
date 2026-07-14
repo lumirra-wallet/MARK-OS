@@ -1,0 +1,51 @@
+[
+  {
+    "name": "Business",
+    "parent_path": "",
+    "path": "Business",
+    "description": "Business, economics, and strategy",
+    "aliases": []
+  },
+  {
+    "name": "History",
+    "parent_path": "",
+    "path": "History",
+    "description": "Historical events and context",
+    "aliases": []
+  },
+  {
+    "name": "Personal",
+    "parent_path": "",
+    "path": "Personal",
+    "description": "Personal growth and life skills",
+    "aliases": []
+  },
+  {
+    "name": "Philosophy",
+    "parent_path": "",
+    "path": "Philosophy",
+    "description": "Philosophical ideas and ethics",
+    "aliases": []
+  },
+  {
+    "name": "Research",
+    "parent_path": "",
+    "path": "Research",
+    "description": "Research findings and methods",
+    "aliases": []
+  },
+  {
+    "name": "Science",
+    "parent_path": "",
+    "path": "Science",
+    "description": "Scientific knowledge and discoveries",
+    "aliases": []
+  },
+  {
+    "name": "Technology",
+    "parent_path": "",
+    "path": "Technology",
+    "description": "Technical concepts and systems",
+    "aliases": []
+  }
+]
