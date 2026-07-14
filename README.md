@@ -3,20 +3,25 @@
 SmartAgent is a personal AI assistant, built incrementally. This repository
 currently contains a clean, modular project scaffold — placeholder
 implementations only. Real functionality (language model reasoning,
-persistent memory, tools, voice, and automations) will be layered in one
-feature at a time.
+persistent memory, skills, tools, voice, vision, and automations) will be
+layered in one feature at a time, inside the package structure below.
 
 ## Project layout
 
 ```
 smartagent/
-├── main.py             # CLI entry point — boots the agent
-├── core/               # The agent orchestrator (agent.py)
+├── main.py             # Process entry point — boots the agent and CLI
+├── brain/              # The agent orchestrator (agent.py)
 ├── memory/             # Conversation/fact storage and retrieval
-├── tools/              # Pluggable capabilities the agent can invoke
+├── models/             # Language model backend clients
+├── skills/             # Composed, user-facing capabilities
+├── tools/              # Low-level, single-purpose capabilities
 ├── voice/              # Speech-to-text / text-to-speech interfaces
+├── vision/             # Image/video understanding interfaces
+├── automation/         # Scheduled/background tasks
 ├── config/             # Centralized settings
-└── automation/         # Scheduled/background tasks
+├── ui/                 # User-facing front-ends (CLI today)
+└── logs/               # Centralized logging setup
 tests/                  # Test suite, mirrors the smartagent package structure
 ```
 

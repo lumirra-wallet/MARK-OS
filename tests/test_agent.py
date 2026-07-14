@@ -3,11 +3,11 @@ Tests for the core `SmartAgent` orchestrator.
 
 These currently assert against the placeholder behavior (echoing input)
 so they will need updating once real reasoning/tool/memory logic replaces
-the placeholder in `smartagent.core.agent`.
+the placeholder in `smartagent.brain.agent`.
 """
 
+from smartagent.brain.agent import SmartAgent
 from smartagent.config.settings import Settings
-from smartagent.core.agent import SmartAgent
 
 
 def test_agent_initializes_with_default_settings():

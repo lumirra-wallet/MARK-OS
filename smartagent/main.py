@@ -8,15 +8,18 @@ runnable end-to-end from day one, even though real behavior is not yet
 implemented.
 """
 
+from smartagent.brain.agent import SmartAgent
 from smartagent.config.settings import Settings
-from smartagent.core.agent import SmartAgent
+from smartagent.logs.logger import configure_logging
+from smartagent.ui.cli import run as run_ui
 
 
 def main() -> None:
-    """Boot SmartAgent using default configuration and start the main loop."""
+    """Boot SmartAgent using default configuration and start the CLI front-end."""
+    configure_logging()
     settings = Settings.load()
     agent = SmartAgent(settings=settings)
-    agent.run()
+    run_ui(agent)
 
 
 if __name__ == "__main__":
