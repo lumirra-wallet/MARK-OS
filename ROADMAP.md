@@ -15,7 +15,7 @@ MARK's identity/mission/principles, `CHANGELOG.md` for what shipped, and
 | **Project Name** | SmartAgent |
 | **Owner** | Mr. Smart |
 | **AI Name** | MARK |
-| **Current Version** | v0.3 (Brain v2) |
+| **Current Version** | v0.6 (Model Framework v1) |
 
 **Mission:** MARK is an intelligent AI Operating System created
 exclusively for Mr. Smart — a trusted executive assistant, engineer,
@@ -121,10 +121,48 @@ features" beyond what a milestone explicitly asks for.
      available tools via `ToolEngine.describe()`
    - `Settings.workspace_path` added (default: `"."`)
    - 148 new tests; full suite 276 passing, 0 regressions
+
+✅ Milestone 5 — Model Framework v1
+   - New `smartagent.models` package (`base/`, `providers/`, `registry/`,
+     `manager/`, `context/`, `prompts/`, `responses/`, `config/`) —
+     decouples the Brain from any specific AI provider
+   - `BaseModel` abstract contract: identity properties (`id`, `name`,
+     `provider`, `version`), lifecycle/action methods (`initialize`,
+     `load`, `generate`, `stream`, `embed`, `shutdown`), overridable
+     capability properties (`context_window`, `supports_streaming`,
+     `supports_tools`, `supports_images`, `supports_embeddings`,
+     `supports_functions`), concrete `metadata()`/`status()`/`health()`
+   - `MockModelProvider`: the one working provider — deterministic, no
+     real AI, safe for tests/CI; `embed()` explicitly not implemented
+   - `future_providers.py`: 12 design-only interface stubs (Ollama,
+     OpenAI, Anthropic, Gemini, LM Studio, OpenRouter, Azure OpenAI,
+     Bedrock, DeepSeek, Mistral, vLLM, llama.cpp) — each stays abstract
+     (uninstantiable) on purpose, so discovery never wires one up by accident
+   - `ModelRegistry` + `model_loader.discover_provider_classes()`:
+     register/unregister/find/list/reload/enable/disable/discover/
+     health_check/statistics, mirroring `ToolRegistry`/`SkillRegistry`
+   - `ModelManager`: the only component allowed to talk to providers —
+     load/unload/switch/select_default/generate/stream/health_check/
+     statistics/describe; publishes `ModelLoaded`/`ModelUnloaded`/
+     `ModelSwitched`/`ModelHealthChecked` onto the shared `EventBus`
+   - `PromptBuilder`/`Prompt`: assembles a provider-agnostic prompt from a
+     message, system prompt, `ConversationContext`, and skill context;
+     `render()` (flat string) and `to_messages()` (chat turns)
+   - `ConversationContext`: history, summaries, active goals/task, memory
+     refs, tool outputs, timestamps, token estimate — no auto-compression yet
+   - `ResponseParser`/`ParsedResponse`: normalizes any provider's raw
+     response shape into text/tool_requests/confidence/metadata/timing/usage
+   - `ModelSettings`: default model id, temperature/top_p/top_k/max_tokens,
+     streaming flag, timeout, placeholder `api_keys`/`local_model_paths`
+     (never hardcoded)
+   - Brain integration: `module_bindings.model_handler` now calls
+     `agent.model_manager.generate()`, never a provider directly.
+     `Settings.default_model_id` defaults to `""` so no model auto-loads —
+     behavior is unchanged from before this milestone unless a deployment
+     opts in
+   - Legacy `ModelClient`/`SkillContext.model` kept as-is for backward compatibility
+   - 93 new tests; full suite 369 passing, 0 regressions
 ----------------------------------------------------------------------
-🚧 Milestone 5 — Model Layer
-   - Pluggable `ModelClient` backends (multiple providers, no hardcoded
-     vendor), used behind the Decision Engine's `model` module
 
 Future milestones (order indicative — see Build Order below):
    - Research Engine (real trusted-source search + summarization)
@@ -157,7 +195,7 @@ the rest of the system.
 | --- | --- | --- | --- | --- |
 | `brain` | Central orchestrator (Brain v2) | Classify intent, decide which module handles a request, execute it, log the decision, publish events | `memory`, `models`, `skills`, `tools`, `planning`, `research`, `voice`, `vision`, `automation`, `config`, `logs` | Intent-aware module selection once skills/tools have real members; pluggable decision strategies |
 | `memory` | Persistent knowledge store (Memory v1) | Store/retrieve/search/update/delete Markdown memory files, organized by category | `logs`, `brain.events` (optional) | Semantic/vector search; multiple backends behind the same API |
-| `models` | Language model backend clients | Abstract over LLM providers | — | Real provider integrations (multi-provider, no hardcoded vendor) |
+| `models` | Model Framework v1 | `ModelManager` loads/switches providers behind `BaseModel`; `ModelRegistry`, `PromptBuilder`, `ConversationContext`, `ResponseParser`, `ModelSettings` | `logs`, `brain.events` (optional) | Real cloud/local provider integrations (Ollama, OpenAI, Anthropic, etc. — currently design-only stubs) |
 | `skills` | Composed, user-facing capabilities | Register/execute higher-level tasks built from tools + memory + models | `tools`, `memory`, `models` | First concrete skills |
 | `tools` | Low-level, single-purpose actions | Register/execute atomic capabilities (calculators, file access, etc.) | — | First concrete tools |
 | `voice` | Speech I/O | Transcribe audio, synthesize speech | — | Real STT/TTS backend |
@@ -280,8 +318,8 @@ Planned systems, once their prerequisite milestones land:
 | 2.1 — Roadmap & PM docs | ✅ Done | 100% | This file, CHANGELOG.md, CONTRIBUTING.md |
 | 3 — Skills Engine v1 | ✅ Done | 100% | PermissionManager, SkillEngine, 6 built-in skills, 128 tests |
 | 4 — Tool Engine v1 | ✅ Done | 100% | ToolEngine, 15 built-in tools, PathValidator safety, 276 tests |
-| 5 — Model Layer | 🚧 Not started | 0% | Needs a provider-agnostic backend design |
-| Research Engine | ⏳ Planned | 0% | Blocked on Model Layer for summarization |
+| 5 — Model Framework v1 | ✅ Done | 100% | ModelManager, ModelRegistry, MockModelProvider, PromptBuilder, ConversationContext, ResponseParser, 369 tests |
+| Research Engine | ⏳ Planned | 0% | Blocked on a real Model Framework provider for summarization |
 | Voice | ⏳ Planned | 0% | — |
 | Vision | ⏳ Planned | 0% | — |
 | Automation loop | ⏳ Planned | 0% | — |
@@ -295,7 +333,9 @@ milestone's status changes rather than adding a new table.*
 ## TODO Tracker
 
 **High Priority**
-- Decide on the first real `ModelClient` backend (Milestone 5).
+- Implement a first real Model Framework provider (Ollama is the natural
+  first choice — local, no API key) by fleshing out its `future_providers.py`
+  stub into a real `BaseModel` subclass and wiring `ModelSettings`.
 - Refactor existing skills (e.g. `MemorySkill`) to call `ToolEngine` for any filesystem work, now that `FileReadTool`/`FileWriteTool` exist (Skills must never manipulate the filesystem directly per the spec).
 - Add tests for `module_bindings.py`'s handler wiring specifically (currently covered indirectly via `test_brain_router.py` and `test_agent.py`).
 
@@ -311,7 +351,7 @@ milestone's status changes rather than adding a new table.*
 
 **Research Topics**
 - Trusted-source allowlist design for `ResearchManager.search()`.
-- Local vs. hosted model tradeoffs for the Model Layer.
+- Local vs. hosted model tradeoffs for the first real Model Framework provider.
 
 **Known Issues**
 - None currently tracked. File one here (with a short repro) before fixing, so the roadmap stays the single source of truth for outstanding work.

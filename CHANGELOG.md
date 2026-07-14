@@ -7,6 +7,102 @@ the architecture is still settling.
 
 ## [Unreleased]
 
+## v0.6 — Model Framework v1
+
+- Added `smartagent.models` as a real package (`base/`, `providers/`,
+  `registry/`, `manager/`, `context/`, `prompts/`, `responses/`, `config/`),
+  decoupling the Brain from any specific AI provider. The Milestone 1
+  placeholder `smartagent.models.model_client.ModelClient` is kept as-is
+  for backward compatibility (`SkillContext.model`, existing tests still
+  construct it directly) — new code uses `ModelManager` instead.
+
+- Added `smartagent.models.base.base_model.BaseModel`: abstract contract
+  every provider implements. Required abstract identity properties (`id`,
+  `name`, `provider`, `version`) and lifecycle/action methods
+  (`initialize`, `load`, `generate`, `stream`, `embed`, `shutdown`);
+  optional overridable capability properties (`context_window`,
+  `supports_streaming`, `supports_tools`, `supports_images`,
+  `supports_embeddings`, `supports_functions`), all defaulting to the most
+  conservative value. `metadata()`/`status()` are concrete snapshot
+  builders, mirroring `BaseTool`. `ModelMetadata`/`ModelHealth`/
+  `ModelStatus` supporting types.
+
+- Added `smartagent.models.providers.mock_provider.MockModelProvider`: the
+  one working, fully deterministic provider Milestone 5 ships — no real
+  AI backend, safe for tests/CI. `embed()` explicitly raises
+  `NotImplementedError` (embeddings are out of scope for this milestone).
+
+- Added `smartagent.models.providers.future_providers`: **design-only**
+  interface stubs for Ollama, OpenAI, Anthropic, Gemini, LM Studio,
+  OpenRouter, Azure OpenAI, Bedrock, DeepSeek, Mistral, vLLM, and
+  llama.cpp. Each subclasses `BaseModel` but only overrides the four
+  identity properties, so every stub stays abstract (`TypeError` on
+  instantiation) and is automatically excluded from provider discovery —
+  no accidental wiring of an unimplemented backend.
+
+- Added `smartagent.models.registry.model_loader.discover_provider_classes()`
+  (mirrors `skill_loader`'s single-level `pkgutil.iter_modules`) and
+  `smartagent.models.registry.model_registry.ModelRegistry`: register,
+  unregister, find, list, reload, enable, disable, discover, health_check,
+  statistics, record_generation. Design mirrors `ToolRegistry`/`SkillRegistry`.
+
+- Added `smartagent.models.manager.model_manager.ModelManager`: the *only*
+  component allowed to talk to providers (mirrors `ToolEngine` being the
+  only thing that calls a `BaseTool`). `load`/`unload`/`switch`/
+  `select_default`/`generate`/`stream`/`health_check`/`health`/
+  `statistics`/`describe`/`discover_providers`. Publishes `ModelLoaded`,
+  `ModelUnloaded`, `ModelSwitched`, `ModelHealthChecked` onto the shared
+  `EventBus`. `generate()`/`stream()` raise `NoActiveModelError` when no
+  model has been loaded/switched to and no `default_model_id` is
+  configured — the out-of-the-box state, so behavior is unchanged from
+  before this milestone until a deployment opts in.
+
+- Added `smartagent.models.prompts.prompt_builder`: `PromptBuilder.build()`
+  assembles a provider-agnostic `Prompt` (system prompt, user message,
+  history, memory context, skill context, tool results) from a message and
+  an optional `ConversationContext`. `Prompt.render()` flattens to one
+  string; `Prompt.to_messages()` renders chat-style `{role, content}` turns.
+  `future_context` (research/knowledge-graph/vision) is a placeholder field,
+  always empty in this milestone.
+
+- Added `smartagent.models.context.conversation_context.ConversationContext`:
+  history (`ConversationTurn` list), running summaries, active goals/task,
+  memory references, tool outputs, timestamps, and a character-heuristic
+  token estimate. No automatic compression yet — a future pass owns that.
+
+- Added `smartagent.models.responses.response_parser.ResponseParser`:
+  normalizes a provider's raw response (whatever shape `generate()`
+  returned) into a `ParsedResponse` (text, `tool_requests`, confidence,
+  metadata, `timing_ms`, usage stats), checking a small set of common key
+  names per field so a new provider's slightly different JSON shape
+  doesn't need a parser rewrite.
+
+- Added `smartagent.models.config.model_settings.ModelSettings`: default
+  model id, temperature, top_p, top_k, max_tokens, streaming flag, timeout,
+  and placeholder `api_keys`/`local_model_paths` dicts for future providers
+  (never populated with a hardcoded value).
+
+- Updated `smartagent.config.settings.Settings`: added `default_model_id: str = ""`
+  (empty by default — no Model Framework provider auto-loads).
+
+- Updated `smartagent.brain.events.Events`: added `MODEL_LOADED`,
+  `MODEL_UNLOADED`, `MODEL_SWITCHED`, `MODEL_HEALTH_CHECKED`.
+
+- Updated `smartagent.brain.agent.SmartAgent`: constructs `self.model_manager`
+  (a `ModelManager`) alongside the still-present legacy `self.model`
+  (`ModelClient`), and calls `discover_providers()` on startup so
+  `MockModelProvider` is registered and ready to load on demand.
+
+- Updated `smartagent.brain.module_bindings`: `model_handler` now calls
+  `agent.model_manager.generate()` instead of `agent.model.generate()` —
+  the Brain never imports a provider directly. Behavior is unchanged by
+  default (`success=False` via `NoActiveModelError`, exactly like the old
+  `ModelClient.generate()`'s `NotImplementedError`); setting
+  `Settings.default_model_id = "mock"` makes it succeed for real.
+
+- Added 93 new tests in `tests/test_models.py` covering all of the above.
+  Full suite: 369 passed, 0 failed.
+
 ## v0.5 — Tool Engine v1
 
 - Established the execution-layer architectural boundary:

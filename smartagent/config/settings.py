@@ -21,7 +21,16 @@ class Settings:
     Attributes:
         agent_name: Display name for the assistant.
         default_language_model: Identifier for the LLM/backend to use.
-            Placeholder only — no model is wired up yet.
+            Placeholder only — no model is wired up yet. Consumed by the
+            legacy `ModelClient` (kept for backward compatibility).
+        default_model_id: Id of the Model Framework v1 provider (see
+            `smartagent.models.registry.model_registry.ModelRegistry`) to
+            treat as the default in `ModelManager`. Empty string (the
+            default) means no provider auto-loads — `ModelManager.generate()`
+            raises `NoActiveModelError` until a model is explicitly loaded/
+            switched to, matching the pre-Milestone-5 "model always reports
+            not implemented" behavior. Set to `"mock"` to exercise the real
+            (deterministic) `MockModelProvider` end-to-end.
         memory_backend: Which memory implementation to use. Memory v1 only
             implements "markdown_vault" (a persistent Markdown file vault,
             see `smartagent.memory`); other values are accepted but fall
@@ -49,6 +58,7 @@ class Settings:
 
     agent_name: str = "SmartAgent"
     default_language_model: str = "placeholder-model"
+    default_model_id: str = ""
     memory_backend: str = "markdown_vault"
     vault_path: str = "vault"
     memory_categories: list[str] = field(

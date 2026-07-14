@@ -20,6 +20,8 @@ from smartagent.brain.module_registry import ModuleRegistry
 from smartagent.brain.router import BrainRouter
 from smartagent.config.settings import Settings
 from smartagent.memory.memory_manager import MemoryManager
+from smartagent.models.config.model_settings import ModelSettings
+from smartagent.models.manager.model_manager import ModelManager
 from smartagent.models.model_client import ModelClient
 from smartagent.planning.goal_manager import GoalManager
 from smartagent.planning.task_planner import TaskPlanner
@@ -100,7 +102,21 @@ class SmartAgent:
         # Auto-discover and register every built-in tool.
         self.tool_engine.load_tools()
 
+        # Milestone 1 placeholder client — kept only for backward compatibility
+        # with `SkillContext.model` and code written before Milestone 5. New
+        # code (and the Brain's `model` module handler below) must go through
+        # `self.model_manager` instead; see `smartagent.models.manager.model_manager`.
         self.model = ModelClient(model_name=settings.default_language_model)
+
+        # Milestone 5: ModelManager is the only component allowed to talk to
+        # model providers (Part 11). `default_model_id=""` means no provider
+        # is auto-loaded, so free-text routing behavior is unchanged from
+        # before Milestone 5 — see `ModelManager`'s module docstring for why.
+        self.model_manager = ModelManager(
+            settings=ModelSettings(default_model_id=settings.default_model_id),
+            event_bus=self.events,
+        )
+        self.model_manager.discover_providers()
 
         # Milestone 2 wires the previously-standalone planning/research/
         # voice/vision/automation packages into the agent so the Brain has

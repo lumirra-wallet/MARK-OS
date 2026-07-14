@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from smartagent.brain.action_result import ActionResult
 from smartagent.brain.module_registry import ModuleRegistry
+from smartagent.models.manager.model_manager import NoActiveModelError
 
 if TYPE_CHECKING:
     from smartagent.brain.agent import SmartAgent
@@ -140,11 +141,19 @@ def register_default_modules(registry: ModuleRegistry, agent: "SmartAgent") -> N
         )
 
     def model_handler(message: str) -> ActionResult:
+        # Milestone 5: routed through `ModelManager`, never a provider or
+        # the legacy `ModelClient` directly (Part 11). Out of the box no
+        # default model is configured (`Settings.default_model_id == ""`),
+        # so this raises `NoActiveModelError` and honestly reports
+        # `success=False`, exactly like the old `ModelClient.generate()`
+        # raising `NotImplementedError` — preserving the fallback chain's
+        # existing behavior until a deployment opts into a real model.
         def probe() -> _ProbeResult:
             try:
-                return True, agent.model.generate(message), None
-            except NotImplementedError as exc:
+                response = agent.model_manager.generate(message)
+            except NoActiveModelError as exc:
                 return False, str(exc), None
+            return True, response.text, response
 
         return _timed("model", 0.4, probe)
 

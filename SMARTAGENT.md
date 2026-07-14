@@ -144,8 +144,20 @@ up. See `README.md` for the current package layout and status.
   `tests/`. Five new `Permission` values were added for tool-specific
   permissions; the shared `PermissionManager` governs both skills and tools.
   See `smartagent/tools/` and `CHANGELOG.md v0.5`.
-- `models`, `voice`, `vision`, `automation` — registered as Brain v2 modules
-  (via `smartagent/brain/module_bindings.py`) but still placeholder behavior
+- `models` — **implemented (Model Framework v1).** A `ModelManager` is the
+  sole component allowed to talk to a model provider (`BaseModel`
+  subclasses discovered via `ModelRegistry`). One real, fully
+  deterministic `MockModelProvider` ships (no live AI backend); 12
+  design-only stubs exist for future providers (Ollama, OpenAI, Anthropic,
+  Gemini, LM Studio, OpenRouter, Azure OpenAI, Bedrock, DeepSeek, Mistral,
+  vLLM, llama.cpp) and are deliberately left abstract. `PromptBuilder`,
+  `ConversationContext`, and `ResponseParser` round out the framework. No
+  model auto-loads by default (`Settings.default_model_id == ""`), so the
+  Brain's `model` handler still honestly reports `success=False` for
+  arbitrary free text unless a deployment opts in — see
+  `smartagent/models/` and `CHANGELOG.md v0.6`.
+- `voice`, `vision`, `automation` — registered as Brain v2 modules (via
+  `smartagent/brain/module_bindings.py`) but still placeholder behavior
   underneath: each honestly reports it cannot yet handle arbitrary free text.
 - `config`, `ui`, `logs` — scaffolded with placeholder implementations.
 - `research`, `planning` — registered as Brain v2 modules; `research`

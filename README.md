@@ -14,7 +14,9 @@ smartagent/
 ├── brain/              # Brain v2: BrainRouter, IntentAnalyzer, DecisionEngine,
 │                       # ModuleRegistry, ActionResult, EventBus, agent.py
 ├── memory/             # Persistent Markdown memory vault (see below)
-├── models/             # Language model backend clients
+├── models/             # Model Framework v1: ModelManager, ModelRegistry,
+│                       # BaseModel providers, PromptBuilder, ConversationContext,
+│                       # ResponseParser, ModelSettings (see below)
 ├── skills/             # Composed, user-facing capabilities
 ├── tools/              # Low-level, single-purpose capabilities
 ├── voice/              # Speech-to-text / text-to-speech interfaces
@@ -213,12 +215,62 @@ User message
 
 **Permissions** — the same `PermissionManager` governs both Skills and Tools. New tool-specific permissions: `READ_FILES`, `WRITE_FILES`, `DELETE_FILES`, `CREATE_DIRECTORIES`, `READ_SYSTEM_INFO`. Total: 12 permissions.
 
+## Model Framework v1: decoupling the Brain from any AI provider
+
+Milestone 5 added `smartagent/models/` as a real package. The flow:
+
+```
+Brain (module_bindings.model_handler)
+  -> ModelManager.generate(prompt, model_id=None, context=None)
+       -> select_default()            # active model, else Settings.default_model_id, else None
+       -> ModelRegistry.find/load()   # never imports a provider class directly
+       -> BaseModel.generate()        # e.g. MockModelProvider — raw, provider-shaped output
+       -> ResponseParser.parse()      # normalizes into ParsedResponse (text, tool_requests, usage, ...)
+  <- ParsedResponse
+```
+
+- **`BaseModel`** — the abstract contract every provider implements:
+  identity (`id`, `name`, `provider`, `version`), lifecycle/action methods
+  (`initialize`, `load`, `generate`, `stream`, `embed`, `shutdown`), and
+  overridable capability properties (`supports_streaming`, `supports_tools`,
+  `context_window`, ...) that default to the most conservative value.
+- **`MockModelProvider`** — the one working provider Milestone 5 ships:
+  fully deterministic (SHA-256 digest of the prompt), no real AI, safe for
+  tests/CI. `embed()` explicitly raises `NotImplementedError`.
+- **`future_providers.py`** — 12 design-only stubs (Ollama, OpenAI,
+  Anthropic, Gemini, LM Studio, OpenRouter, Azure OpenAI, Bedrock,
+  DeepSeek, Mistral, vLLM, llama.cpp). Each only overrides the identity
+  properties, so it stays abstract and is automatically skipped by
+  provider discovery — implementing one for real is a future milestone.
+- **`ModelRegistry`** — register/unregister/find/list/reload/enable/
+  disable/discover/health_check/statistics, mirroring `ToolRegistry`.
+  `discover()` auto-finds provider classes via `pkgutil` — no hardcoded imports.
+- **`ModelManager`** — the *only* component allowed to talk to a provider
+  (mirrors `ToolEngine`). Handles load/unload/switch/select-default,
+  health, statistics, and publishes `ModelLoaded`/`ModelUnloaded`/
+  `ModelSwitched`/`ModelHealthChecked` events.
+- **`PromptBuilder`/`Prompt`** — assembles a provider-agnostic prompt from
+  a message, system prompt, and an optional `ConversationContext`;
+  `render()` for a flat string, `to_messages()` for chat-style turns.
+- **`ConversationContext`** — history, running summaries, active goals/
+  task, memory refs, tool outputs, token estimate.
+- **`ResponseParser`/`ParsedResponse`** — normalizes any provider's raw
+  response shape into one common structure.
+
+**No model auto-loads by default** — `Settings.default_model_id` is `""`,
+so `ModelManager.generate()` raises `NoActiveModelError` and the Brain's
+`model` handler reports `success=False`, exactly like before this
+milestone. Set `Settings.default_model_id = "mock"` to exercise the real
+(deterministic) `MockModelProvider` end-to-end. The Milestone 1 placeholder
+`ModelClient` (used by `SkillContext.model`) is unchanged.
+
 ## Status
 
-Four real subsystems now exist: **memory** (Markdown vault), **Brain v2**
-(routing pipeline), **Skills Engine v1** (6 built-in skills), and **Tool
-Engine v1** (15 built-in tools, safety sandbox). Planning and research have
-working goal/queue managers. Models, voice, vision, and automation are
-documented, honest placeholders — each reports `success=False` for arbitrary
-free text rather than silently doing nothing. See `ROADMAP.md` for the full
-milestone plan and what's next.
+Five real subsystems now exist: **memory** (Markdown vault), **Brain v2**
+(routing pipeline), **Skills Engine v1** (6 built-in skills), **Tool
+Engine v1** (15 built-in tools, safety sandbox), and **Model Framework v1**
+(`ModelManager` + one deterministic `MockModelProvider`, 12 design-only
+future provider stubs). Planning and research have working goal/queue
+managers. Voice, vision, and automation are documented, honest placeholders
+— each reports `success=False` for arbitrary free text rather than silently
+doing nothing. See `ROADMAP.md` for the full milestone plan and what's next.

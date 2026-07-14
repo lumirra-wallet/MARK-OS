@@ -69,6 +69,12 @@ class Events:
     REQUEST_RECEIVED = "RequestReceived"
     BRAIN_DECISION_MADE = "BrainDecisionMade"
 
+    # Models (smartagent.models) — Milestone 5, Model Framework v1.
+    MODEL_LOADED = "ModelLoaded"
+    MODEL_UNLOADED = "ModelUnloaded"
+    MODEL_SWITCHED = "ModelSwitched"
+    MODEL_HEALTH_CHECKED = "ModelHealthChecked"
+
 
 class EventBus:
     """
