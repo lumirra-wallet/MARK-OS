@@ -1,0 +1,1 @@
+- [SmartAgent Memory v1 vault](smartagent-memory-vault.md) — persistent memory is Markdown files on disk, not a DB; no YAML dep, hand-rolled frontmatter parser.

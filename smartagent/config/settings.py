@@ -22,8 +22,17 @@ class Settings:
         agent_name: Display name for the assistant.
         default_language_model: Identifier for the LLM/backend to use.
             Placeholder only — no model is wired up yet.
-        memory_backend: Which memory implementation to use
-            (e.g. "in_memory", "sqlite", "vector_store"). Placeholder only.
+        memory_backend: Which memory implementation to use. Memory v1 only
+            implements "markdown_vault" (a persistent Markdown file vault,
+            see `smartagent.memory`); other values are accepted but fall
+            back to it with a warning.
+        vault_path: Directory on disk where the memory vault lives. Kept
+            configurable (rather than hardcoded) so tests and deployments
+            can relocate it without code changes.
+        memory_categories: Category subfolders to ensure exist in the
+            vault. Mirrors `smartagent.memory.vault.DEFAULT_CATEGORIES` —
+            duplicated here (rather than imported) to keep `config` free of
+            a dependency on `memory`.
         enabled_tools: Names of tools the agent is allowed to invoke.
             Placeholder only — populated once real tools exist.
         voice_enabled: Whether voice input/output is active.
@@ -32,7 +41,19 @@ class Settings:
 
     agent_name: str = "SmartAgent"
     default_language_model: str = "placeholder-model"
-    memory_backend: str = "in_memory"
+    memory_backend: str = "markdown_vault"
+    vault_path: str = "vault"
+    memory_categories: list[str] = field(
+        default_factory=lambda: [
+            "Personal",
+            "Business",
+            "Projects",
+            "Knowledge",
+            "Research",
+            "Journal",
+            "Archive",
+        ]
+    )
     enabled_tools: list[str] = field(default_factory=list)
     voice_enabled: bool = False
     automation_enabled: bool = False

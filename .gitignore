@@ -55,3 +55,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+# Memory vault: keep the category folder structure (.gitkeep) tracked, but
+# don't commit actual personal memories written at runtime.
+vault/*/*.md

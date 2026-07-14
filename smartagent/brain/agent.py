@@ -35,7 +35,11 @@ class SmartAgent:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.memory = MemoryManager(backend=settings.memory_backend)
+        self.memory = MemoryManager(
+            backend=settings.memory_backend,
+            vault_path=settings.vault_path,
+            categories=settings.memory_categories,
+        )
         self.tools = ToolRegistry(enabled_tools=settings.enabled_tools)
         self.skills = SkillRegistry()
         self.model = ModelClient(model_name=settings.default_language_model)
@@ -44,15 +48,34 @@ class SmartAgent:
         """
         Process a single user message and return a response.
 
-        Placeholder implementation: echoes the message back. Will later
-        route through memory retrieval, skill/tool selection, and a
-        language model call via `self.model`.
+        Design decision: the brain always checks memory *before*
+        considering a model call. If MARK already knows something relevant
+        (a prior fact, note, or exchange stored in the vault), there is no
+        reason to ask a language model to reproduce it — this keeps
+        responses grounded in the owner's own persisted knowledge and
+        avoids unnecessary model calls once a real backend exists.
+
+        No model backend is wired up yet, so the "ask the model" branch
+        below still falls back to a placeholder echo via `NotImplementedError`.
         """
-        # TODO: retrieve relevant context via self.memory
-        # TODO: decide if a skill (self.skills) or tool (self.tools) call is needed
-        # TODO: call self.model to generate a reply
-        # TODO: store the exchange back into memory
-        return f"[{self.settings.agent_name} placeholder] You said: {message}"
+        # TODO: once skills/tools exist, decide here whether one should
+        # handle the message instead of falling through to memory/model.
+        memory_hits = self.memory.search(message, limit=3)
+
+        if memory_hits:
+            recalled = "; ".join(hit.content for hit in memory_hits)
+            response = f"[{self.settings.agent_name}] Here's what I remember: {recalled}"
+        else:
+            try:
+                response = self.model.generate(message)
+            except NotImplementedError:
+                response = f"[{self.settings.agent_name} placeholder] You said: {message}"
+
+        # Persist this exchange so future messages can find it via
+        # `self.memory.search()` — this is what lets memory checks above
+        # actually accumulate useful context over time.
+        self.memory.remember(message, category="Journal")
+        return response
 
     def run(self) -> None:
         """

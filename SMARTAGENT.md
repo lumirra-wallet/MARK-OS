@@ -108,8 +108,16 @@ incrementally, module by module, and most modules below are intentionally
 placeholders (documented, but not yet functional) until their turn comes
 up. See `README.md` for the current package layout and status.
 
-- `brain`, `memory`, `models`, `skills`, `tools`, `voice`, `vision`,
-  `automation`, `config`, `ui`, `logs` — scaffolded with placeholder
-  implementations.
+- `memory` — **implemented (Memory v1).** Persists every memory as a
+  human-readable Markdown file in a configurable `vault/` directory,
+  organized by category (Personal, Business, Projects, Knowledge,
+  Research, Journal, Archive). Supports remember/recall/search/update/
+  delete/list_categories. No database, no vector/semantic search, and no
+  AI model connected yet — see `smartagent/memory/` and the README.
+- `brain` — the orchestrator now consults memory before considering a
+  model call, but still has no real model backend, skill routing, or tool
+  use.
+- `models`, `skills`, `tools`, `voice`, `vision`, `automation`, `config`,
+  `ui`, `logs` — scaffolded with placeholder implementations.
 - `research`, `planning` — scaffolded with placeholder classes only; no
   internet browsing or autonomous learning is implemented yet.
