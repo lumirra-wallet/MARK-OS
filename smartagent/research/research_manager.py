@@ -91,7 +91,14 @@ class ResearchManager:
         if finding in self._pending:
             self._pending.remove(finding)
         if self.memory is not None:
-            self.memory.remember(finding.summary, metadata={"source": finding.source, "topic": finding.topic})
+            # NOTE: `MemoryManager.remember()`'s real (Memory v1) signature
+            # takes `category`/`tags`, not the old placeholder's `metadata`
+            # dict — this call previously referenced a parameter that no
+            # longer exists (and would have raised `TypeError` the first
+            # time a finding was approved). Fixed here to keep "approve a
+            # finding" actually working, per Milestone 2's "DO NOT break
+            # Memory v1" rule.
+            self.memory.remember(finding.summary, category="Research", tags=[finding.topic, finding.source])
 
     def reject(self, finding: ResearchFinding) -> None:
         """Discard a pending finding without storing it."""

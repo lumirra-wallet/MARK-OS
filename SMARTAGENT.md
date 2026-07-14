@@ -114,10 +114,22 @@ up. See `README.md` for the current package layout and status.
   Research, Journal, Archive). Supports remember/recall/search/update/
   delete/list_categories. No database, no vector/semantic search, and no
   AI model connected yet — see `smartagent/memory/` and the README.
-- `brain` — the orchestrator now consults memory before considering a
-  model call, but still has no real model backend, skill routing, or tool
-  use.
-- `models`, `skills`, `tools`, `voice`, `vision`, `automation`, `config`,
-  `ui`, `logs` — scaffolded with placeholder implementations.
-- `research`, `planning` — scaffolded with placeholder classes only; no
-  internet browsing or autonomous learning is implemented yet.
+- `brain` — **implemented (Brain v2, Decision Engine).** Every request now
+  passes through a `BrainRouter`: an `IntentAnalyzer` classifies it
+  (rule-based, no AI), a `DecisionEngine` orders candidate modules by a
+  fixed priority (Memory > Skills > Tools > Planning > Research > Model >
+  Unknown), and a `ModuleRegistry` executes the first one that succeeds.
+  The Brain itself never hardcodes module names or performs a task
+  directly — see `smartagent/brain/` and the README's "Brain v2" section
+  for the full pipeline diagram.
+- `models`, `skills`, `tools`, `voice`, `vision`, `automation` — now
+  registered as Brain v2 modules (via `smartagent/brain/module_bindings.py`)
+  but still placeholder behavior underneath: each honestly reports it
+  cannot yet handle arbitrary free text.
+- `config`, `ui`, `logs` — scaffolded with placeholder implementations.
+- `research`, `planning` — registered as Brain v2 modules; `research`
+  keeps its working owner-approval queue, `planning` keeps its working
+  goal tracker, but neither has internet browsing, summarization, or
+  decomposition logic yet.
+
+See `ROADMAP.md` for the full milestone-by-milestone development plan.

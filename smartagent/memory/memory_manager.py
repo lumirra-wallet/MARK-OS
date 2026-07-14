@@ -16,6 +16,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+from smartagent.brain.events import Events, EventBus
 from smartagent.logs.logger import get_logger
 from smartagent.memory.entry import MemoryEntry
 from smartagent.memory.vault import Vault
@@ -58,6 +59,11 @@ class MemoryManager:
             path.
         categories: Category subfolders to ensure exist in the vault. Defaults
             to the standard Memory v1 category set.
+        event_bus: Optional `EventBus` (see `smartagent.brain.events`) to
+            publish `MemorySaved`/`MemoryUpdated`/`MemoryDeleted` events onto.
+            Optional (defaults to None, meaning "publish nothing") so
+            `MemoryManager` stays usable standalone — e.g. in tests — without
+            needing a Brain wired up.
     """
 
     def __init__(
@@ -65,11 +71,13 @@ class MemoryManager:
         backend: str = "markdown_vault",
         vault_path: str = "vault",
         categories: list[str] | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         if backend not in ("markdown_vault", "in_memory"):
             logger.warning("Unknown memory backend %r requested; using markdown_vault.", backend)
         self.backend = "markdown_vault"
         self.vault = Vault(root=vault_path, categories=categories)
+        self.events = event_bus
         logger.info("MemoryManager ready (vault=%s)", self.vault.root)
 
     def remember(
@@ -96,6 +104,8 @@ class MemoryManager:
         )
         self.vault.write(entry)
         logger.info("Remembered %s in category %r (tags=%s)", entry.id, category, entry.tags)
+        if self.events is not None:
+            self.events.publish(Events.MEMORY_SAVED, id=entry.id, category=entry.category, tags=entry.tags)
         return entry
 
     def recall(self, memory_id: str) -> MemoryEntry | None:
@@ -159,6 +169,8 @@ class MemoryManager:
         entry.updated_at = _now_iso()
         self.vault.write(entry)
         logger.info("Updated memory %s", memory_id)
+        if self.events is not None:
+            self.events.publish(Events.MEMORY_UPDATED, id=entry.id, category=entry.category, tags=entry.tags)
         return entry
 
     def delete(self, memory_id: str) -> bool:
@@ -166,6 +178,8 @@ class MemoryManager:
         deleted = self.vault.delete(memory_id)
         if deleted:
             logger.info("Deleted memory %s", memory_id)
+            if self.events is not None:
+                self.events.publish(Events.MEMORY_DELETED, id=memory_id)
         else:
             logger.warning("Delete failed: memory %r not found", memory_id)
         return deleted

@@ -11,7 +11,8 @@ layered in one feature at a time, inside the package structure below.
 ```
 smartagent/
 ├── main.py             # Process entry point — boots the agent and CLI
-├── brain/              # The agent orchestrator (agent.py)
+├── brain/              # Brain v2: BrainRouter, IntentAnalyzer, DecisionEngine,
+│                       # ModuleRegistry, ActionResult, EventBus, agent.py
 ├── memory/             # Persistent Markdown memory vault (see below)
 ├── models/             # Language model backend clients
 ├── skills/             # Composed, user-facing capabilities
@@ -29,8 +30,16 @@ tests/                  # Test suite, mirrors the smartagent package structure
 ```
 
 See `SMARTAGENT.md` for MARK's identity, mission, principles, and
-long-term architecture vision — this repository is the implementation of
-that vision, built incrementally.
+long-term architecture vision, and `ROADMAP.md` for the full development
+plan, milestone status, and coding standards — this repository is the
+implementation of that vision, built incrementally.
+
+Additional project documents:
+
+- [`ROADMAP.md`](ROADMAP.md) — vision, milestones, architecture, build order, coding standards, TODOs.
+- [`SMARTAGENT.md`](SMARTAGENT.md) — MARK's identity, mission, principles, and safety rules.
+- [`CHANGELOG.md`](CHANGELOG.md) — version history.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to add new modules and code standards.
 
 ## Memory (v1): the Markdown vault
 
@@ -95,6 +104,68 @@ knowledge, it answers from that instead of asking a (still unimplemented)
 language model to rediscover it. Every exchange is then written back into
 the `Journal` category so future messages can find it.
 
+## Brain v2: the Decision Engine
+
+Milestone 2 replaced the hardcoded "check memory, then the model" logic in
+`SmartAgent` with a general routing pipeline every message passes through:
+
+```
+                 ┌────────────────────┐
+ User message -> │   BrainRouter      │
+                 │  (router.py)       │
+                 └─────────┬──────────┘
+                           │
+                           ▼
+                 ┌────────────────────┐
+                 │  IntentAnalyzer     │  rule-based classification:
+                 │ (intent_analyzer.py)│  MEMORY / RESEARCH / TOOL / SKILL /
+                 └─────────┬──────────┘  VISION / VOICE / PLANNING / MODEL /
+                           │             AUTOMATION / UNKNOWN
+                           ▼
+                 ┌────────────────────┐
+                 │  DecisionEngine     │  orders candidate modules:
+                 │ (decision_engine.py)│  Memory > Skills > Tools > Planning
+                 └─────────┬──────────┘  > Research > Model > Unknown
+                           │
+                           ▼
+                 ┌────────────────────┐
+                 │  ModuleRegistry     │  looks modules up **by name only**
+                 │ (module_registry.py)│  — the Brain never hardcodes them
+                 └─────────┬──────────┘
+                           │
+                           ▼
+                 ┌────────────────────┐
+                 │  Execute            │  the registry's handler runs and
+                 │ (module_bindings.py)│  returns a standardized ActionResult
+                 └─────────┬──────────┘
+                           │
+                           ▼
+                 ┌────────────────────┐
+                 │  Return Response    │  first module to report success
+                 │                     │  wins; EventBus is notified either
+                 └────────────────────┘  way (see below)
+```
+
+Key pieces, each in its own module under `smartagent/brain/`:
+
+| Module | Responsibility |
+| --- | --- |
+| `action_result.py` | `ActionResult` — the standard `{success, message, data, source, execution_time, confidence}` shape every module returns. |
+| `intent_analyzer.py` | `IntentAnalyzer` / `Intent` — lightweight, rule-based (no AI yet) request classification. |
+| `decision_engine.py` | `DecisionEngine` — orders registered modules by the fixed Milestone 2 priority (Memory > Skills > Tools > Planning > Research > Model > Unknown). |
+| `module_registry.py` | `ModuleRegistry` — the only place modules are looked up by name; `BrainRouter` never hardcodes which module handles what. |
+| `module_bindings.py` | Wires `SmartAgent`'s concrete subsystems (memory, skills, tools, planning, research, models, voice, vision, automation) into registry handlers. |
+| `events.py` | `EventBus` / `Events` — synchronous publish/subscribe; the router publishes `RequestReceived` and `BrainDecisionMade`, and `MemoryManager` publishes `MemorySaved`/`MemoryUpdated`/`MemoryDeleted`. |
+| `router.py` | `BrainRouter` — runs the pipeline above: tries each candidate module in priority order until one succeeds, logging every decision (intent, chosen module, execution time, result). |
+| `agent.py` | `SmartAgent` — the composition root: builds every subsystem, registers them, and delegates `handle_message()` to the router. |
+
+Design principle carried over from the spec: **the Brain never performs a
+task itself** — `BrainRouter` only classifies, decides, and delegates.
+Every module currently registered except `memory` and `model` is still an
+honest placeholder (it reports `success=False` for arbitrary text) — no
+new features were added while building this pipeline, only the routing
+structure around the features that already existed.
+
 ## Running it
 
 ```bash
@@ -113,8 +184,10 @@ pytest
 
 ## Status
 
-Mostly scaffold, with one real feature implemented: **memory** now
-persists to a Markdown vault (see above). Every other module under
-`smartagent/` still contains a documented, working placeholder (not empty
-stubs) so the project is importable and testable end-to-end. Features will
-continue to be implemented module by module next.
+Two real subsystems now exist: **memory** (Markdown vault) and **Brain
+v2** (the routing pipeline above). Every capability module underneath the
+Brain — skills, tools, planning, research, models, voice, vision,
+automation — is still a documented, working placeholder (not empty
+stubs), so the whole pipeline is importable and testable end-to-end even
+though most modules currently report "not available yet." See
+`ROADMAP.md` for the full milestone plan and what's next.

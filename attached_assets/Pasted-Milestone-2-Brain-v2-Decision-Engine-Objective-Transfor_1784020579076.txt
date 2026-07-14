@@ -1,0 +1,246 @@
+Milestone 2 – Brain v2 (Decision Engine)
+
+Objective
+
+Transform MARK from a simple assistant into an AI Operating System with a modular decision engine.
+
+Do NOT add random features.
+
+Improve the architecture while keeping every existing feature working.
+
+==========================================
+PART 1 – Brain Router
+==========================================
+
+Create a BrainRouter responsible for routing every request.
+
+Every user request must pass through this pipeline.
+
+Receive User Input
+
+↓
+
+Intent Analyzer
+
+↓
+
+Decision Engine
+
+↓
+
+Select Module
+
+↓
+
+Execute
+
+↓
+
+Return Response
+
+The BrainRouter should never directly perform tasks.
+
+It only decides who should perform the task.
+
+==========================================
+PART 2 – Intent Analyzer
+==========================================
+
+Create a lightweight IntentAnalyzer.
+
+It should classify requests into categories such as:
+
+MEMORY
+
+RESEARCH
+
+TOOL
+
+SKILL
+
+VISION
+
+VOICE
+
+PLANNING
+
+MODEL
+
+AUTOMATION
+
+UNKNOWN
+
+Use simple rule-based logic for now.
+
+Do NOT use AI yet.
+
+==========================================
+PART 3 – Decision Engine
+==========================================
+
+Create DecisionEngine.
+
+Decision priority:
+
+1. Memory
+
+2. Skills
+
+3. Tools
+
+4. Planning
+
+5. Research
+
+6. AI Model
+
+7. Unknown
+
+The Decision Engine decides which module should receive the request.
+
+==========================================
+PART 4 – Module Registry
+==========================================
+
+Create ModuleRegistry.
+
+Every module registers itself.
+
+Example:
+
+Memory
+
+Research
+
+Planning
+
+Voice
+
+Vision
+
+Tools
+
+Skills
+
+Models
+
+Automation
+
+The Brain must never hardcode module names.
+
+==========================================
+PART 5 – Action Result
+==========================================
+
+Create a standard ActionResult object.
+
+Every module returns:
+
+success
+
+message
+
+data
+
+source
+
+execution_time
+
+confidence
+
+This creates a common interface across the system.
+
+==========================================
+PART 6 – Event System
+==========================================
+
+Create EventBus.
+
+The Brain publishes events.
+
+Examples:
+
+MemorySaved
+
+MemoryUpdated
+
+ResearchStarted
+
+ResearchFinished
+
+TaskCompleted
+
+SkillExecuted
+
+Nothing should communicate directly if events make more sense.
+
+==========================================
+PART 7 – Logging
+==========================================
+
+Log every Brain decision.
+
+Example:
+
+Timestamp
+
+Intent
+
+Chosen Module
+
+Execution Time
+
+Result
+
+==========================================
+PART 8 – Tests
+==========================================
+
+Create unit tests for:
+
+Intent Analyzer
+
+Brain Router
+
+Decision Engine
+
+Module Registry
+
+ActionResult
+
+EventBus
+
+Keep every existing test passing.
+
+==========================================
+PART 9 – Documentation
+==========================================
+
+Update:
+
+README.md
+
+Architecture documentation
+
+SMARTAGENT.md
+
+Add diagrams explaining Brain v2.
+
+==========================================
+Rules
+
+DO NOT connect OpenAI.
+
+DO NOT connect Claude.
+
+DO NOT browse the Internet.
+
+DO NOT add databases.
+
+DO NOT remove existing features.
+
+DO NOT break Memory v1.
+
+Everything must remain modular.
+
+Explain every important design decision using comments.
