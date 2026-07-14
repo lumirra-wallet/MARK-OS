@@ -21,9 +21,15 @@ smartagent/
 ├── automation/         # Scheduled/background tasks
 ├── config/             # Centralized settings
 ├── ui/                 # User-facing front-ends (CLI today)
-└── logs/               # Centralized logging setup
+├── logs/               # Centralized logging setup
+├── research/           # Trusted-source research, summarized + owner-approved before storage
+└── planning/           # Goal tracking and task decomposition
 tests/                  # Test suite, mirrors the smartagent package structure
 ```
+
+See `SMARTAGENT.md` for MARK's identity, mission, principles, and
+long-term architecture vision — this repository is the implementation of
+that vision, built incrementally.
 
 ## Running it
 

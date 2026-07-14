@@ -27,6 +27,14 @@ Subpackages:
     ui          - User-facing front-ends (starting with a CLI) that drive
                   the brain.
     logs        - Centralized logging setup.
+    research    - Searches trusted sources, summarizes findings, and
+                  queues them for owner approval before they become
+                  long-term memory. No internet browsing yet.
+    planning    - Tracks owner goals and breaks them down into concrete,
+                  orderable tasks.
+
+See `SMARTAGENT.md` at the project root for MARK's identity, mission,
+principles, and long-term architecture vision.
 """
 
 __version__ = "0.1.0"
