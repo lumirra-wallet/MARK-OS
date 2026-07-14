@@ -7,6 +7,59 @@ the architecture is still settling.
 
 ## [Unreleased]
 
+## v0.4 — Skills Engine v1
+
+- Added `smartagent.skills.permissions`: `Permission` enum (7 values:
+  `READ_MEMORY`, `WRITE_MEMORY`, `RUN_TOOLS`, `ACCESS_FILES`,
+  `NETWORK_ACCESS`, `AUTOMATION`, `SYSTEM_COMMANDS`) and
+  `PermissionManager` — the single authority that decides whether a
+  permission is currently granted. Nothing is granted automatically;
+  defaults give only `READ_MEMORY`/`WRITE_MEMORY` (minimum for built-ins).
+- Added `smartagent.skills.base_skill`: `BaseSkill` abstract class
+  (`name`, `description`, `version`, `author`, `required_modules`,
+  `validate()`, `execute()`, `status()`), plus `SkillMetadata` (frozen
+  snapshot dataclass), `SkillContext` (dependency-injection container
+  passed to `execute()` instead of the full agent — avoids circular
+  imports), `SkillCategory`, and `SkillStatus`.
+- Added `smartagent.skills.skill_registry`: upgraded placeholder
+  registry into a production `SkillRegistry` with `register`,
+  `unregister`, `enable`, `disable`, `reload`, `list`, `find`, and
+  backward-compatible `list_available()`.
+- Added `smartagent.skills.skill_engine`: `SkillEngine` — the only thing
+  the Brain talks to for skills. Confidence-ordered dispatch with
+  permission enforcement and chain-of-responsibility fallthrough (mirrors
+  `BrainRouter`). Publishes `SKILL_EXECUTED` onto the shared `EventBus`.
+- Added `smartagent.skills.skill_loader`: `discover_skill_classes()`
+  auto-discovers `BaseSkill` subclasses in a package via `pkgutil` /
+  `importlib` — no hardcoded imports needed.
+- Added six built-in skills in `smartagent.skills.builtin`:
+  - `MemorySkill` — remember/recall/forget backed by `MemoryManager`
+  - `KnowledgeSkill` — notes/retrieves facts in the Knowledge category
+  - `PlanningSkill` — adds/lists goals via `GoalManager`
+  - `ResearchSkill` — queues research topics via `ResearchManager`
+    (requires `NETWORK_ACCESS` which is denied by default — a live demo
+    of permission enforcement)
+  - `ConversationSkill` — deterministic replies for greetings/thanks/farewells
+  - `SystemInfoSkill` — reports registered modules/skills (requires
+    `SYSTEM_COMMANDS`, denied by default)
+- Updated `smartagent.config.settings`: added `granted_permissions` list
+  (default `["read_memory", "write_memory"]`) — keeps `config` free of a
+  dependency on `skills` by storing permission names as plain strings.
+- Updated `smartagent.brain.agent`:
+  - Constructs `PermissionManager` from `settings.granted_permissions`.
+  - Constructs `SkillEngine` with the registry, permission manager, and
+    shared event bus, then auto-loads all built-in skills.
+  - `handle_message()` fixed double-memory bug: checks EventBus history
+    for a `MemorySaved` event fired during routing; skips the Journal
+    auto-persist if a skill already wrote to memory, preventing a "search
+    returns 2 results when 1 was expected" regression.
+- Updated `smartagent.brain.module_bindings`: `skills_handler` now calls
+  `agent.skill_engine.execute()` instead of returning a placeholder —
+  the Brain truly delegates to the Skills Engine and knows nothing about
+  which specific skill handles a request.
+- Added 74 new tests in `tests/test_skills.py` covering all of the above.
+  Full suite: 128 passed, 0 failed.
+
 ## v0.3 — Brain v2 (Decision Engine)
 
 - Added `smartagent.brain.router.BrainRouter`: routes every request

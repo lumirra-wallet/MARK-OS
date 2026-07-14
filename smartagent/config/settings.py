@@ -37,6 +37,14 @@ class Settings:
             Placeholder only — populated once real tools exist.
         voice_enabled: Whether voice input/output is active.
         automation_enabled: Whether scheduled/background automations run.
+        granted_permissions: Permission values (see
+            `smartagent.skills.permissions.Permission`) granted to skills
+            system-wide. Per Milestone 3's permission model, nothing is
+            granted automatically — this defaults to only
+            `read_memory`/`write_memory`, the minimum the first-party
+            built-in skills need. Every other permission (network access,
+            system commands, automation, file access, running tools)
+            starts denied until explicitly added here.
     """
 
     agent_name: str = "SmartAgent"
@@ -57,6 +65,7 @@ class Settings:
     enabled_tools: list[str] = field(default_factory=list)
     voice_enabled: bool = False
     automation_enabled: bool = False
+    granted_permissions: list[str] = field(default_factory=lambda: ["read_memory", "write_memory"])
 
     @classmethod
     def load(cls) -> "Settings":

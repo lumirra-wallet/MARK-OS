@@ -14,7 +14,7 @@ things.
 from __future__ import annotations
 
 from smartagent.automation.task_scheduler import TaskScheduler
-from smartagent.brain.events import EventBus
+from smartagent.brain.events import EventBus, Events
 from smartagent.brain.module_bindings import register_default_modules
 from smartagent.brain.module_registry import ModuleRegistry
 from smartagent.brain.router import BrainRouter
@@ -24,6 +24,8 @@ from smartagent.models.model_client import ModelClient
 from smartagent.planning.goal_manager import GoalManager
 from smartagent.planning.task_planner import TaskPlanner
 from smartagent.research.research_manager import ResearchManager
+from smartagent.skills.permissions import Permission, PermissionManager
+from smartagent.skills.skill_engine import SkillEngine
 from smartagent.skills.skill_registry import SkillRegistry
 from smartagent.tools.tool_registry import ToolRegistry
 from smartagent.vision.image_analysis import ImageAnalyzer
@@ -63,7 +65,30 @@ class SmartAgent:
             event_bus=self.events,
         )
         self.tools = ToolRegistry(enabled_tools=settings.enabled_tools)
+
+        # Milestone 3: build a PermissionManager from the config-supplied list of
+        # granted permissions (stored as plain strings so Settings doesn't import
+        # the Permission enum — keeping `config` free of a dependency on `skills`).
+        try:
+            granted = [Permission(p) for p in settings.granted_permissions]
+        except ValueError:
+            granted = []
+        perm_manager = PermissionManager(granted=granted)
+
+        # SkillRegistry is the low-level container; SkillEngine sits on top of it
+        # and is what the Brain (via module_bindings) actually talks to. Keeping
+        # `self.skills` pointing at the registry preserves backward-compatibility
+        # with any code that inspected `agent.skills` before Milestone 3.
         self.skills = SkillRegistry()
+        self.skill_engine = SkillEngine(
+            registry=self.skills,
+            permissions=perm_manager,
+            event_bus=self.events,
+        )
+        # Auto-discover and register every class in `smartagent.skills.builtin`.
+        loaded = self.skill_engine.load_skills()
+        # logger is not available here (no req context) — use the engine's own logging.
+
         self.model = ModelClient(model_name=settings.default_language_model)
 
         # Milestone 2 wires the previously-standalone planning/research/
@@ -95,13 +120,28 @@ class SmartAgent:
         All routing/decision logic now lives in `BrainRouter` (Brain v2) —
         this method's only remaining responsibilities are handing the
         message to the router and persisting the exchange afterward, so
-        future messages can find it via `self.memory.search()`. Persisting
-        unconditionally (regardless of which module answered) is what let
-        Milestone 1's "check memory before the model" behavior work, and
-        Brain v2 preserves it rather than special-casing memory.
+        future messages can find it via `self.memory.search()`.
+
+        Milestone 3 deduplication: if a skill (e.g. `MemorySkill`) already
+        wrote something to memory during routing, the event bus will have a
+        new `MemorySaved` entry in its history. We snapshot the history
+        length before routing and skip the unconditional Journal auto-persist
+        afterward if memory was already written — otherwise every explicit
+        "remember that X" request would store *two* entries (one from the
+        skill, one from the Journal persist), causing off-by-one failures in
+        memory search results.
+
+        Conversations and unknown-handler fallbacks still get persisted
+        because their handlers never emit `MemorySaved`.
         """
+        history_before = len(self.events.history())
         result = self.router.route(message)
-        self.memory.remember(message, category="Journal")
+        memory_written = any(
+            event.name == Events.MEMORY_SAVED
+            for event in self.events.history()[history_before:]
+        )
+        if not memory_written:
+            self.memory.remember(message, category="Journal")
         return result.message
 
     def run(self) -> None:

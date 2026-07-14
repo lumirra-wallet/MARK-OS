@@ -65,15 +65,32 @@ features" beyond what a milestone explicitly asks for.
 ✅ Milestone 2.1 — Project Management & Development Roadmap
    - ROADMAP.md, CHANGELOG.md, CONTRIBUTING.md
    - Documented architecture, build order, coding standards, project rules
+
+✅ Milestone 3 — Skills Engine v1
+   - `BaseSkill` abstract contract, `SkillMetadata`, `SkillContext` (DI)
+   - `SkillRegistry`: register/unregister/enable/disable/reload/list/find
+   - `SkillEngine`: confidence-ordered dispatch, permission enforcement,
+     chain-of-responsibility fallthrough (mirrors BrainRouter's design)
+   - `SkillLoader`: auto-discovers `BaseSkill` subclasses via `pkgutil` —
+     drop a file in `builtin/`, nothing else to edit
+   - `PermissionManager` + `Permission` enum (7 permissions; READ_MEMORY
+     and WRITE_MEMORY granted by default; everything else opt-in)
+   - Six built-in skills: `MemorySkill`, `KnowledgeSkill`, `PlanningSkill`,
+     `ResearchSkill`, `ConversationSkill`, `SystemInfoSkill`
+   - `module_bindings` upgraded: `skills_handler` now delegates to
+     `SkillEngine.execute()` instead of returning a placeholder
+   - Fixed double-memory bug: `handle_message` checks EventBus for a
+     `MemorySaved` event fired during routing; skips Journal auto-persist
+     if a skill already wrote to memory
+   - 74 new tests; full suite 128 passing, 0 regressions
 ----------------------------------------------------------------------
-🚧 Milestone 3 — Model Layer
+🚧 Milestone 4 — Model Layer
    - Pluggable `ModelClient` backends (multiple providers, no hardcoded
      vendor), used behind the Decision Engine's `model` module
 
 Future milestones (order indicative — see Build Order below):
    - Research Engine (real trusted-source search + summarization)
    - Knowledge Inbox (structured review queue for research findings)
-   - Skills Engine (first concrete Skill implementations)
    - Plugin System (third-party module registration)
    - Browser Automation
    - Computer Control
@@ -223,7 +240,8 @@ Planned systems, once their prerequisite milestones land:
 | 1.5 — Memory v1 | ✅ Done | 100% | Markdown vault; no DB, no vector search |
 | 2 — Brain v2 | ✅ Done | 100% | Router, Intent Analyzer, Decision Engine, Registry, ActionResult, EventBus |
 | 2.1 — Roadmap & PM docs | ✅ Done | 100% | This file, CHANGELOG.md, CONTRIBUTING.md |
-| 3 — Model Layer | 🚧 Not started | 0% | Needs a provider-agnostic backend design |
+| 3 — Skills Engine v1 | ✅ Done | 100% | PermissionManager, SkillEngine, 6 built-in skills, 128 tests |
+| 4 — Model Layer | 🚧 Not started | 0% | Needs a provider-agnostic backend design |
 | Research Engine | ⏳ Planned | 0% | Blocked on Model Layer for summarization |
 | Skills Engine | ⏳ Planned | 0% | Blocked on at least one real tool/model |
 | Voice | ⏳ Planned | 0% | — |

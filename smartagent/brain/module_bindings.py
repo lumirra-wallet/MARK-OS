@@ -63,6 +63,29 @@ def _probe_memory(agent: "SmartAgent", message: str) -> _ProbeResult:
     return True, f"Here's what I remember: {recalled}", hits
 
 
+def _build_skill_context(agent: "SmartAgent") -> "SkillContext":
+    """
+    Build a fresh `SkillContext` for one skill dispatch.
+
+    Built per-call (not cached) so `module_names`/`skill_names` always
+    reflect whatever is registered *right now* — cheap since it's just
+    bundling references the agent already owns, not copying any data.
+    """
+    from smartagent.skills.base_skill import SkillContext
+
+    return SkillContext(
+        memory=agent.memory,
+        tools=agent.tools,
+        goals=agent.goals,
+        research=agent.research,
+        model=agent.model,
+        settings=agent.settings,
+        events=agent.events,
+        module_names=agent.modules.list_modules(),
+        skill_names=agent.skill_engine.list_available(),
+    )
+
+
 def register_default_modules(registry: ModuleRegistry, agent: "SmartAgent") -> None:
     """
     Register a handler for every subsystem `agent` owns.
@@ -78,9 +101,11 @@ def register_default_modules(registry: ModuleRegistry, agent: "SmartAgent") -> N
         return _timed("memory", 0.8, lambda: _probe_memory(agent, message))
 
     def skills_handler(message: str) -> ActionResult:
-        return _timed(
-            "skills", 0.6, lambda: (False, "No skills are registered yet.", agent.skills.list_available())
-        )
+        # Milestone 3: the Brain no longer probes skills directly — it
+        # only ever asks the Skill Engine, which owns picking (and
+        # permission-checking) the actual matching skill. This keeps the
+        # Brain's control flow unaware of how any specific skill works.
+        return agent.skill_engine.execute(message, _build_skill_context(agent))
 
     def tools_handler(message: str) -> ActionResult:
         return _timed(

@@ -122,10 +122,21 @@ up. See `README.md` for the current package layout and status.
   The Brain itself never hardcodes module names or performs a task
   directly — see `smartagent/brain/` and the README's "Brain v2" section
   for the full pipeline diagram.
-- `models`, `skills`, `tools`, `voice`, `vision`, `automation` — now
-  registered as Brain v2 modules (via `smartagent/brain/module_bindings.py`)
-  but still placeholder behavior underneath: each honestly reports it
-  cannot yet handle arbitrary free text.
+- `skills` — **implemented (Skills Engine v1).** `SkillEngine` dispatches
+  requests to concrete `BaseSkill` subclasses using confidence-ordered,
+  permission-gated chain-of-responsibility. Six built-in skills ship:
+  `MemorySkill`, `KnowledgeSkill`, `PlanningSkill`, `ConversationSkill`,
+  `ResearchSkill` (requires `NETWORK_ACCESS`, denied by default), and
+  `SystemInfoSkill` (requires `SYSTEM_COMMANDS`, denied by default). New
+  skills are auto-discovered via `SkillLoader` — drop a file in
+  `smartagent/skills/builtin/` and it is registered automatically. A
+  `PermissionManager` enforces a "nothing granted automatically" policy;
+  only `READ_MEMORY` and `WRITE_MEMORY` are in the default grant list.
+  See `smartagent/skills/` and `CHANGELOG.md v0.4`.
+- `models`, `tools`, `voice`, `vision`, `automation` — registered as
+  Brain v2 modules (via `smartagent/brain/module_bindings.py`) but still
+  placeholder behavior underneath: each honestly reports it cannot yet
+  handle arbitrary free text.
 - `config`, `ui`, `logs` — scaffolded with placeholder implementations.
 - `research`, `planning` — registered as Brain v2 modules; `research`
   keeps its working owner-approval queue, `planning` keeps its working
