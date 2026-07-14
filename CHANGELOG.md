@@ -7,6 +7,79 @@ the architecture is still settling.
 
 ## [Unreleased]
 
+## v0.5 — Tool Engine v1
+
+- Established the execution-layer architectural boundary:
+  **Brain → Skill → ToolEngine → Tool → ActionResult**.
+  The Brain never calls a tool; Skills call `ToolEngine.run()` via
+  `SkillContext.tool_engine`. The Brain's `tools` module handler is now a
+  reporting endpoint (lists available tools; always returns `success=False`
+  so the Brain chain-of-responsibility never stops there).
+
+- Added `smartagent.tools.base_tool`: `BaseTool` abstract class (Milestone 4
+  Part 2) with mandatory properties (`id`, `name`, `description`, `version`,
+  `author`, `category`) and lifecycle hooks (`initialize`, `shutdown`, `health`);
+  `ToolMetadata` (frozen snapshot dataclass); `ToolContext` (DI bundle:
+  `settings`, `workspace_path`, `events`); `ToolCategory` enum (FILESYSTEM,
+  SYSTEM, UTILITIES, TEXT, FUTURE); `ToolStatus` enum.
+
+- Upgraded `smartagent.tools.tool_registry` from Milestone-1 placeholder to
+  full production registry (Part 3): `register`, `unregister`, `find`, `list`,
+  `reload`, `enable`, `disable`, `health_check`, `statistics`,
+  `record_execution`. Old `Tool` ABC (with `run()`) and `get()` method
+  preserved for backward compatibility.
+
+- Added `smartagent.tools.tool_loader`: `discover_tool_classes()` uses
+  `pkgutil.walk_packages` (recursive, unlike the skill loader's single-level
+  `iter_modules`) to auto-discover `BaseTool` subclasses across sub-packages.
+  Default package: `smartagent.tools.builtin`.
+
+- Added `smartagent.tools.tool_engine`: `ToolEngine` (Part 1) — register,
+  load, execute.  `run(tool_id, context, **params)` enforces: tool exists →
+  tool enabled → permissions granted → params valid → execute → publish
+  `ToolExecuted`.  Shares one `PermissionManager` with `SkillEngine`.
+
+- Added `smartagent.tools.safety`: `PathValidator` resolves paths and verifies
+  workspace containment; `check_not_protected_source()` additionally blocks
+  paths containing `"smartagent"` or `"tests"` components; `SafetyError`
+  (never a transient error — always a hard rejection).
+
+- Added 5 new `Permission` enum values in `smartagent.skills.permissions`
+  (total 12, up from 7): `READ_FILES`, `WRITE_FILES`, `DELETE_FILES`,
+  `CREATE_DIRECTORIES`, `READ_SYSTEM_INFO`.
+
+- Added 15 built-in tools (Python stdlib only, no new dependencies):
+  - `smartagent.tools.builtin.filesystem`: `FileReadTool`, `FileWriteTool`,
+    `DirectoryCreateTool`, `DirectoryListTool`, `CopyFileTool`, `MoveFileTool`,
+    `DeleteFileTool` (protected-source guard), `SearchFilesTool`
+  - `smartagent.tools.builtin.text`: `OpenTextFileTool`, `ReadMarkdownTool`
+    (parses heading structure)
+  - `smartagent.tools.builtin.system`: `SystemInfoTool`, `DateTimeTool`
+    (6 formats), `EnvironmentTool` (auto-redacts sensitive names)
+  - `smartagent.tools.builtin.utilities`: `UUIDTool` (v1/3/4/5),
+    `HashTool` (any `hashlib.algorithms_guaranteed` algorithm)
+
+- Updated `smartagent.skills.base_skill.SkillContext`: added optional
+  `tool_engine: ToolEngine | None = None` field so skills can call tools
+  via `context.tool_engine.run(...)` without importing `SmartAgent`.
+
+- Updated `smartagent.brain.agent.SmartAgent`: constructs `ToolEngine` after
+  `SkillEngine`, passing the *same* `PermissionManager`; stored as
+  `self.permissions` (shared), `self.skill_engine`, and `self.tool_engine`.
+  Auto-loads all built-in tools on startup.
+
+- Updated `smartagent.config.settings`: added `workspace_path: str = "."`.
+
+- Updated `smartagent.brain.events.Events`: added `TOOL_EXECUTED` and
+  `TOOL_LOADED` event name constants.
+
+- Updated `smartagent.brain.module_bindings`: `_build_skill_context` now
+  passes `tool_engine=agent.tool_engine`; `tools_handler` delegates to
+  `agent.tool_engine.describe()` instead of returning a hardcoded string.
+
+- Added 148 new tests in `tests/test_tools.py` covering all of the above.
+  Full suite: 276 passed, 0 failed.
+
 ## v0.4 — Skills Engine v1
 
 - Added `smartagent.skills.permissions`: `Permission` enum (7 values:

@@ -27,6 +27,7 @@ from smartagent.research.research_manager import ResearchManager
 from smartagent.skills.permissions import Permission, PermissionManager
 from smartagent.skills.skill_engine import SkillEngine
 from smartagent.skills.skill_registry import SkillRegistry
+from smartagent.tools.tool_engine import ToolEngine
 from smartagent.tools.tool_registry import ToolRegistry
 from smartagent.vision.image_analysis import ImageAnalyzer
 from smartagent.voice.speech_to_text import SpeechToText
@@ -66,14 +67,14 @@ class SmartAgent:
         )
         self.tools = ToolRegistry(enabled_tools=settings.enabled_tools)
 
-        # Milestone 3: build a PermissionManager from the config-supplied list of
-        # granted permissions (stored as plain strings so Settings doesn't import
-        # the Permission enum — keeping `config` free of a dependency on `skills`).
+        # Build a single PermissionManager from config-supplied permission names
+        # (stored as strings so `config` stays free of a dependency on `skills`).
+        # Shared by both SkillEngine and ToolEngine — one authority governs both.
         try:
             granted = [Permission(p) for p in settings.granted_permissions]
         except ValueError:
             granted = []
-        perm_manager = PermissionManager(granted=granted)
+        self.permissions = PermissionManager(granted=granted)
 
         # SkillRegistry is the low-level container; SkillEngine sits on top of it
         # and is what the Brain (via module_bindings) actually talks to. Keeping
@@ -82,12 +83,22 @@ class SmartAgent:
         self.skills = SkillRegistry()
         self.skill_engine = SkillEngine(
             registry=self.skills,
-            permissions=perm_manager,
+            permissions=self.permissions,
             event_bus=self.events,
         )
         # Auto-discover and register every class in `smartagent.skills.builtin`.
-        loaded = self.skill_engine.load_skills()
-        # logger is not available here (no req context) — use the engine's own logging.
+        self.skill_engine.load_skills()
+
+        # Milestone 4: ToolEngine wraps the same ToolRegistry and shares the same
+        # PermissionManager and EventBus so permission grants affect both layers
+        # and tool events appear on the same audit trail as skill events.
+        self.tool_engine = ToolEngine(
+            registry=self.tools,
+            permissions=self.permissions,
+            event_bus=self.events,
+        )
+        # Auto-discover and register every built-in tool.
+        self.tool_engine.load_tools()
 
         self.model = ModelClient(model_name=settings.default_language_model)
 

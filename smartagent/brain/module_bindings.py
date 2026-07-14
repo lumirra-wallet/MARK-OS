@@ -70,6 +70,10 @@ def _build_skill_context(agent: "SmartAgent") -> "SkillContext":
     Built per-call (not cached) so `module_names`/`skill_names` always
     reflect whatever is registered *right now* — cheap since it's just
     bundling references the agent already owns, not copying any data.
+
+    Milestone 4: `tool_engine` is now included so Skills can call
+    `context.tool_engine.run(tool_id, tool_ctx, **params)` without a
+    direct dependency on `SmartAgent` or any concrete tool class.
     """
     from smartagent.skills.base_skill import SkillContext
 
@@ -81,6 +85,7 @@ def _build_skill_context(agent: "SmartAgent") -> "SkillContext":
         model=agent.model,
         settings=agent.settings,
         events=agent.events,
+        tool_engine=agent.tool_engine,
         module_names=agent.modules.list_modules(),
         skill_names=agent.skill_engine.list_available(),
     )
@@ -108,9 +113,13 @@ def register_default_modules(registry: ModuleRegistry, agent: "SmartAgent") -> N
         return agent.skill_engine.execute(message, _build_skill_context(agent))
 
     def tools_handler(message: str) -> ActionResult:
-        return _timed(
-            "tools", 0.6, lambda: (False, "No tools are registered yet.", agent.tools.list_available())
-        )
+        # Milestone 4: report what's available via ToolEngine.  The Brain
+        # cannot route NL text to a specific tool without an AI model, so
+        # this handler remains success=False (skills are the routing layer).
+        # confidence=0.0 ensures the Brain never stops here on success.
+        available = agent.tool_engine.list_available()
+        msg = agent.tool_engine.describe()
+        return _timed("tools", 0.0, lambda: (False, msg, available))
 
     def planning_handler(message: str) -> ActionResult:
         return _timed(

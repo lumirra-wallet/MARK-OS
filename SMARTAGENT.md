@@ -133,10 +133,20 @@ up. See `README.md` for the current package layout and status.
   `PermissionManager` enforces a "nothing granted automatically" policy;
   only `READ_MEMORY` and `WRITE_MEMORY` are in the default grant list.
   See `smartagent/skills/` and `CHANGELOG.md v0.4`.
-- `models`, `tools`, `voice`, `vision`, `automation` — registered as
-  Brain v2 modules (via `smartagent/brain/module_bindings.py`) but still
-  placeholder behavior underneath: each honestly reports it cannot yet
-  handle arbitrary free text.
+- `tools` — **implemented (Tool Engine v1).** `ToolEngine` is the execution
+  layer that sits between Skills and the filesystem/system. The Brain never
+  calls tools; only Skills do, via `SkillContext.tool_engine.run(tool_id,
+  ctx, **params)`. 15 built-in tools cover filesystem (read/write/copy/move/
+  delete/search/list), text (open text, parse Markdown), system (OS info,
+  date/time, env vars), and utilities (UUID, hash). All tools are sandboxed
+  to `ToolContext.workspace_path` by `PathValidator`; `DeleteFileTool`
+  additionally blocks deletion of any path containing `smartagent/` or
+  `tests/`. Five new `Permission` values were added for tool-specific
+  permissions; the shared `PermissionManager` governs both skills and tools.
+  See `smartagent/tools/` and `CHANGELOG.md v0.5`.
+- `models`, `voice`, `vision`, `automation` — registered as Brain v2 modules
+  (via `smartagent/brain/module_bindings.py`) but still placeholder behavior
+  underneath: each honestly reports it cannot yet handle arbitrary free text.
 - `config`, `ui`, `logs` — scaffolded with placeholder implementations.
 - `research`, `planning` — registered as Brain v2 modules; `research`
   keeps its working owner-approval queue, `planning` keeps its working

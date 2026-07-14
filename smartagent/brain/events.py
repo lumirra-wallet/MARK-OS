@@ -61,6 +61,10 @@ class Events:
     # Skills (smartagent.skills)
     SKILL_EXECUTED = "SkillExecuted"
 
+    # Tools (smartagent.tools)
+    TOOL_EXECUTED = "ToolExecuted"
+    TOOL_LOADED = "ToolLoaded"
+
     # Brain (smartagent.brain) — the routing pipeline itself.
     REQUEST_RECEIVED = "RequestReceived"
     BRAIN_DECISION_MADE = "BrainDecisionMade"

@@ -89,13 +89,27 @@ class TestPermission:
         assert Permission.READ_MEMORY.value == "read_memory"
         assert Permission.NETWORK_ACCESS.value == "network_access"
 
-    def test_all_seven_permissions_exist(self):
-        expected = {
+    def test_original_seven_permissions_exist(self):
+        """The original seven Milestone-3 permissions must still be present."""
+        original = {
             "read_memory", "write_memory", "run_tools",
             "access_files", "network_access", "automation", "system_commands",
         }
         actual = {p.value for p in Permission}
-        assert actual == expected
+        assert original.issubset(actual)
+
+    def test_milestone4_tool_permissions_added(self):
+        """Milestone 4 added five tool-specific permissions to the enum."""
+        m4_additions = {
+            "read_files", "write_files", "delete_files",
+            "create_directories", "read_system_info",
+        }
+        actual = {p.value for p in Permission}
+        assert m4_additions.issubset(actual)
+
+    def test_total_permission_count(self):
+        """Total permission count is 12 after Milestone 4 additions."""
+        assert len(Permission) == 12
 
 
 class TestPermissionManager:

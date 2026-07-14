@@ -1,1 +1,2 @@
 - [SmartAgent Memory v1 vault](smartagent-memory-vault.md) — persistent memory is Markdown files on disk, not a DB; no YAML dep, hand-rolled frontmatter parser.
+- [Milestone 4 Tool Engine design](milestone4-tool-engine.md) — architecture, key decisions, permission model, and test patterns for the Tool Engine v1 layer.

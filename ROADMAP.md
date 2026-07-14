@@ -83,8 +83,46 @@ features" beyond what a milestone explicitly asks for.
      `MemorySaved` event fired during routing; skips Journal auto-persist
      if a skill already wrote to memory
    - 74 new tests; full suite 128 passing, 0 regressions
+
+✅ Milestone 4 — Tool Engine v1
+   - Clear architectural boundary: Brain → Skill → ToolEngine → Tool → ActionResult
+     (the Brain never calls tools directly; Skills call them by id)
+   - `BaseTool` abstract contract: `id`, `name`, `description`, `version`,
+     `author`, `category`, `permissions`, `required_os`,
+     `required_dependencies`; lifecycle hooks `initialize()`, `shutdown()`,
+     `health()`; `validate(params)`, `execute(params, context)`
+   - `ToolMetadata` (frozen snapshot), `ToolContext` (DI bundle: settings,
+     workspace_path, events — kept minimal so tools don't import the agent)
+   - `ToolCategory` enum: FILESYSTEM / SYSTEM / UTILITIES / TEXT / FUTURE
+   - `ToolRegistry`: register/unregister/find/list/reload/enable/disable/
+     health_check/statistics + backward-compat `get()`/`list_available()`
+   - `ToolEngine`: named tool dispatch, permission enforcement,
+     param validation, execution timing, EventBus publishing of
+     `ToolExecuted` and `ToolLoaded`; shares one `PermissionManager` with
+     `SkillEngine` — one authority for both layers
+   - `ToolLoader`: uses `pkgutil.walk_packages` (recursive) to discover
+     `BaseTool` subclasses across sub-packages automatically
+   - `PathValidator` + `SafetyError` (safety.py): sandboxes every filesystem
+     tool to `ToolContext.workspace_path`; `check_not_protected_source()`
+     blocks deletion of `smartagent/` or `tests/` regardless of location
+   - Five new `Permission` enum values: READ_FILES, WRITE_FILES,
+     DELETE_FILES, CREATE_DIRECTORIES, READ_SYSTEM_INFO (total: 12)
+   - 15 built-in tools across 4 sub-packages (stdlib only, no new deps):
+       filesystem/  FileReadTool, FileWriteTool, DirectoryCreateTool,
+                    DirectoryListTool, CopyFileTool, MoveFileTool,
+                    DeleteFileTool, SearchFilesTool
+       text/        OpenTextFileTool, ReadMarkdownTool
+       system/      SystemInfoTool, DateTimeTool, EnvironmentTool
+       utilities/   UUIDTool, HashTool
+   - `SkillContext.tool_engine` added so skills can call tools without
+     importing `SmartAgent` (avoids circular imports)
+   - `agent.tool_engine` shared with `agent.skill_engine` via same
+     `PermissionManager`; `module_bindings.tools_handler` now reports
+     available tools via `ToolEngine.describe()`
+   - `Settings.workspace_path` added (default: `"."`)
+   - 148 new tests; full suite 276 passing, 0 regressions
 ----------------------------------------------------------------------
-🚧 Milestone 4 — Model Layer
+🚧 Milestone 5 — Model Layer
    - Pluggable `ModelClient` backends (multiple providers, no hardcoded
      vendor), used behind the Decision Engine's `model` module
 
@@ -241,9 +279,9 @@ Planned systems, once their prerequisite milestones land:
 | 2 — Brain v2 | ✅ Done | 100% | Router, Intent Analyzer, Decision Engine, Registry, ActionResult, EventBus |
 | 2.1 — Roadmap & PM docs | ✅ Done | 100% | This file, CHANGELOG.md, CONTRIBUTING.md |
 | 3 — Skills Engine v1 | ✅ Done | 100% | PermissionManager, SkillEngine, 6 built-in skills, 128 tests |
-| 4 — Model Layer | 🚧 Not started | 0% | Needs a provider-agnostic backend design |
+| 4 — Tool Engine v1 | ✅ Done | 100% | ToolEngine, 15 built-in tools, PathValidator safety, 276 tests |
+| 5 — Model Layer | 🚧 Not started | 0% | Needs a provider-agnostic backend design |
 | Research Engine | ⏳ Planned | 0% | Blocked on Model Layer for summarization |
-| Skills Engine | ⏳ Planned | 0% | Blocked on at least one real tool/model |
 | Voice | ⏳ Planned | 0% | — |
 | Vision | ⏳ Planned | 0% | — |
 | Automation loop | ⏳ Planned | 0% | — |
@@ -257,7 +295,8 @@ milestone's status changes rather than adding a new table.*
 ## TODO Tracker
 
 **High Priority**
-- Decide on the first real `ModelClient` backend (Milestone 3).
+- Decide on the first real `ModelClient` backend (Milestone 5).
+- Refactor existing skills (e.g. `MemorySkill`) to call `ToolEngine` for any filesystem work, now that `FileReadTool`/`FileWriteTool` exist (Skills must never manipulate the filesystem directly per the spec).
 - Add tests for `module_bindings.py`'s handler wiring specifically (currently covered indirectly via `test_brain_router.py` and `test_agent.py`).
 
 **Medium Priority**

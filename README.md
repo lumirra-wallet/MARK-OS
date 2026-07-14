@@ -182,12 +182,43 @@ is no real reasoning yet.
 pytest
 ```
 
+## Tool Engine v1: the execution layer
+
+Milestone 4 added the layer between Skills and the system. The full pipeline is:
+
+```
+User message
+  -> BrainRouter  (intent classification + module routing)
+  -> SkillEngine  (which skill handles this? permission check)
+  -> Skill.execute()
+  -> ToolEngine.run(tool_id, context, **params)
+  -> Tool.execute()
+  -> ActionResult  (bubbles back up through each layer)
+```
+
+**15 built-in tools** across 4 categories — all Python stdlib, no new deps:
+
+| Category | Tools |
+| --- | --- |
+| `filesystem/` | `FileReadTool`, `FileWriteTool`, `DirectoryCreateTool`, `DirectoryListTool`, `CopyFileTool`, `MoveFileTool`, `DeleteFileTool`, `SearchFilesTool` |
+| `text/` | `OpenTextFileTool`, `ReadMarkdownTool` |
+| `system/` | `SystemInfoTool`, `DateTimeTool`, `EnvironmentTool` |
+| `utilities/` | `UUIDTool`, `HashTool` |
+
+**Adding a new tool** is just dropping a `.py` file with a `BaseTool` subclass into the right sub-package — `ToolLoader` auto-discovers it on the next startup.
+
+**Safety** is enforced at two levels:
+1. `PathValidator` — every filesystem tool resolves paths and rejects anything that escapes `Settings.workspace_path`.
+2. `DeleteFileTool` additionally checks `check_not_protected_source()` — any path component matching `"smartagent"` or `"tests"` is blocked, regardless of where the workspace is configured.
+
+**Permissions** — the same `PermissionManager` governs both Skills and Tools. New tool-specific permissions: `READ_FILES`, `WRITE_FILES`, `DELETE_FILES`, `CREATE_DIRECTORIES`, `READ_SYSTEM_INFO`. Total: 12 permissions.
+
 ## Status
 
-Two real subsystems now exist: **memory** (Markdown vault) and **Brain
-v2** (the routing pipeline above). Every capability module underneath the
-Brain — skills, tools, planning, research, models, voice, vision,
-automation — is still a documented, working placeholder (not empty
-stubs), so the whole pipeline is importable and testable end-to-end even
-though most modules currently report "not available yet." See
-`ROADMAP.md` for the full milestone plan and what's next.
+Four real subsystems now exist: **memory** (Markdown vault), **Brain v2**
+(routing pipeline), **Skills Engine v1** (6 built-in skills), and **Tool
+Engine v1** (15 built-in tools, safety sandbox). Planning and research have
+working goal/queue managers. Models, voice, vision, and automation are
+documented, honest placeholders — each reports `success=False` for arbitrary
+free text rather than silently doing nothing. See `ROADMAP.md` for the full
+milestone plan and what's next.

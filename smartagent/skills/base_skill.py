@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from smartagent.models.model_client import ModelClient
     from smartagent.planning.goal_manager import GoalManager
     from smartagent.research.research_manager import ResearchManager
+    from smartagent.tools.tool_engine import ToolEngine
     from smartagent.tools.tool_registry import ToolRegistry
 
 
@@ -96,6 +97,7 @@ class SkillContext:
     model: "ModelClient"
     settings: "Settings"
     events: "EventBus | None" = None
+    tool_engine: "ToolEngine | None" = None
     module_names: list[str] = field(default_factory=list)
     skill_names: list[str] = field(default_factory=list)
 

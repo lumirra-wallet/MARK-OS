@@ -31,15 +31,37 @@ logger = get_logger(__name__)
 
 
 class Permission(str, Enum):
-    """The fixed set of permissions a skill can request, per Milestone 3 Part 6."""
+    """
+    The fixed set of permissions a skill or tool can request.
 
+    Milestone 3 (Part 6) defined the original seven. Milestone 4 adds five
+    tool-specific permissions that map to the concrete filesystem and system
+    operations built-in tools perform. All are subject to the same
+    "nothing granted automatically" rule — only `read_memory` and
+    `write_memory` are in the default grant list.
+    """
+
+    # ---- Memory (Milestone 3) ----------------------------------------
     READ_MEMORY = "read_memory"
     WRITE_MEMORY = "write_memory"
+
+    # ---- Tool execution control (Milestone 3) ------------------------
     RUN_TOOLS = "run_tools"
-    ACCESS_FILES = "access_files"
+    ACCESS_FILES = "access_files"         # coarse "can touch the filesystem" gate
+
+    # ---- Network / automation / system (Milestone 3) -----------------
     NETWORK_ACCESS = "network_access"
     AUTOMATION = "automation"
     SYSTEM_COMMANDS = "system_commands"
+
+    # ---- Fine-grained filesystem permissions (Milestone 4) -----------
+    READ_FILES = "read_files"             # open & read file contents
+    WRITE_FILES = "write_files"           # create or overwrite files
+    DELETE_FILES = "delete_files"         # permanently remove files
+    CREATE_DIRECTORIES = "create_directories"   # mkdir (incl. parents)
+
+    # ---- System introspection (Milestone 4) --------------------------
+    READ_SYSTEM_INFO = "read_system_info"  # OS info, env vars, platform details
 
 
 class PermissionManager:
