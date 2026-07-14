@@ -17,6 +17,10 @@ smartagent/
 ├── models/             # Model Framework v1: ModelManager, ModelRegistry,
 │                       # BaseModel providers, PromptBuilder, ConversationContext,
 │                       # ResponseParser, ModelSettings (see below)
+├── mind/               # MARK Mind OS v1: ExecutiveController, SelfModel,
+│                       # IdentityEngine, WorkingMemory, AttentionManager,
+│                       # ContextManager, ConfidenceEngine, StateMachine,
+│                       # ReflectionEngine, Homeostasis (see below)
 ├── skills/             # Composed, user-facing capabilities
 ├── tools/              # Low-level, single-purpose capabilities
 ├── voice/              # Speech-to-text / text-to-speech interfaces
@@ -40,6 +44,7 @@ Additional project documents:
 
 - [`ROADMAP.md`](ROADMAP.md) — vision, milestones, architecture, build order, coding standards, TODOs.
 - [`SMARTAGENT.md`](SMARTAGENT.md) — MARK's identity, mission, principles, and safety rules.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — diagrams of the Brain, Model Framework, and Mind OS.
 - [`CHANGELOG.md`](CHANGELOG.md) — version history.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to add new modules and code standards.
 
@@ -264,13 +269,69 @@ milestone. Set `Settings.default_model_id = "mock"` to exercise the real
 (deterministic) `MockModelProvider` end-to-end. The Milestone 1 placeholder
 `ModelClient` (used by `SkillContext.model`) is unchanged.
 
+## MARK Mind OS v1: computational self-awareness
+
+Milestone 6 added `smartagent/mind/` — a persistent internal mind layered
+on top of everything above. This is **not** consciousness; it's a
+structured, inspectable representation of MARK's own state, kept honest by
+one rule: **the Mind observes and represents, it never drives Brain
+routing or changes any other subsystem's behavior.**
+
+```
+SmartAgent.__init__()
+  -> builds memory, skills, tools, models, planning, research, ... (as before)
+  -> builds self.mind = ExecutiveController(providers=MindProviders(...), event_bus=self.events)
+       -> SelfModelEngine     (who am I, what am I doing, how confident/healthy)
+       -> IdentityEngine      (round-trips SMARTAGENT.md's Markdown identity)
+       -> WorkingMemory       (short-term, TTL-based scratch space)
+       -> AttentionManager    (ranked focus + interrupt/resume stack)
+       -> ContextManager      (assembles a bounded context bundle)
+       -> ConfidenceEngine    (transparent, evidence-based scoring)
+       -> StateMachine        (idle/thinking/planning/.../error/recovering)
+       -> ReflectionEngine    (post-task self-assessment; flags, doesn't persist)
+       -> HomeostasisEngine + DigitalSensorySystem + DigitalHomeostasisLoop
+            (health scoring, computational "sensations", a synchronous tick())
+
+SmartAgent.handle_message(message)
+  -> (unchanged) BrainRouter.route(message) -> memory persist
+  -> (new, guarded) self.mind observes: state transition + reflection + self-model sync
+  -> returns result.message  # byte-for-byte identical to before this milestone
+```
+
+Key pieces, each in its own subpackage under `smartagent/mind/`:
+
+| Subpackage | Responsibility |
+| --- | --- |
+| `executive/` | `ExecutiveController` — the sole coordinator; `MindProviders`, a DI bag of read-only callables into live `SmartAgent` state (goals/skills/tools/active model), so the Mind never imports `SmartAgent` directly. |
+| `self_model/` | `SelfModel`/`SelfModelEngine` — MARK's answer to "who am I, what can I do, what am I doing, how confident, how healthy," diff-tracked. |
+| `identity/` | `Identity`/`IdentityEngine` — loads/parses/updates/saves `SMARTAGENT.md`'s existing Markdown structure; falls back to a built-in default if the file is missing. |
+| `working_memory/` | `WorkingMemory` — TTL-based short-term scratch space, explicitly distinct from the persistent Memory vault. |
+| `attention/` | `AttentionManager` — importance ranking, bounded concurrent focus with eviction, interrupt/resume stack. |
+| `context/` | `ContextManager`/`ContextBundle` — assembles a bounded context blob from conversation, working memory, knowledge, goals, research, reflections, tool outputs, and identity. |
+| `confidence/` | `ConfidenceEngine` — transparent heuristic scoring from evidence/conflicts/missing-information/unknowns; never a fabricated flat score. |
+| `state/` | `StateMachine`/`InternalState` — 12 named internal states with bounded transition history. |
+| `reflection/` | `ReflectionEngine` — post-task self-assessment; flags what's memory-worthy, never writes to the vault itself. |
+| `homeostasis/` | `HealthMetrics`/`HomeostasisEngine` (health scoring + band-change events), `DigitalSensorySystem` (10 named computational signals), `DigitalHomeostasisLoop` (a synchronous, explicitly-invoked `tick()` — not a background thread). |
+| `events/` | `mind_events.py` — thin re-export of the shared `Events` plus a null-safe `publish_mind_event()` helper; the Mind has no bus of its own. |
+
+`SmartAgent.handle_message()`'s Mind observation hook is wrapped in a
+`try/except` — a bug in the Mind can never break message handling, and
+`agent.mind.describe()` always gives a one-line summary of MARK's current
+internal state for debugging. See `ARCHITECTURE.md` for diagrams and
+`ROADMAP.md` for what's explicitly still design-only (Knowledge, Learning,
+Curiosity, Discovery, Wisdom, and Cybersecurity Engines; Voice/Vision/
+Browser/Automation integration into the Mind).
+
 ## Status
 
-Five real subsystems now exist: **memory** (Markdown vault), **Brain v2**
+Six real subsystems now exist: **memory** (Markdown vault), **Brain v2**
 (routing pipeline), **Skills Engine v1** (6 built-in skills), **Tool
-Engine v1** (15 built-in tools, safety sandbox), and **Model Framework v1**
+Engine v1** (15 built-in tools, safety sandbox), **Model Framework v1**
 (`ModelManager` + one deterministic `MockModelProvider`, 12 design-only
-future provider stubs). Planning and research have working goal/queue
-managers. Voice, vision, and automation are documented, honest placeholders
-— each reports `success=False` for arbitrary free text rather than silently
-doing nothing. See `ROADMAP.md` for the full milestone plan and what's next.
+future provider stubs), and **MARK Mind OS v1** (`ExecutiveController` +
+9 supporting engines — self-model, identity, working memory, attention,
+context, confidence, state, reflection, homeostasis). Planning and
+research have working goal/queue managers. Voice, vision, and automation
+are documented, honest placeholders — each reports `success=False` for
+arbitrary free text rather than silently doing nothing. See `ROADMAP.md`
+for the full milestone plan and what's next.

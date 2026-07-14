@@ -19,7 +19,10 @@ from smartagent.brain.module_bindings import register_default_modules
 from smartagent.brain.module_registry import ModuleRegistry
 from smartagent.brain.router import BrainRouter
 from smartagent.config.settings import Settings
+from smartagent.logs.logger import get_logger
 from smartagent.memory.memory_manager import MemoryManager
+from smartagent.mind.executive.executive_controller import ExecutiveController, MindProviders
+from smartagent.mind.state.state_machine import InternalState
 from smartagent.models.config.model_settings import ModelSettings
 from smartagent.models.manager.model_manager import ModelManager
 from smartagent.models.model_client import ModelClient
@@ -34,6 +37,8 @@ from smartagent.tools.tool_registry import ToolRegistry
 from smartagent.vision.image_analysis import ImageAnalyzer
 from smartagent.voice.speech_to_text import SpeechToText
 from smartagent.voice.text_to_speech import TextToSpeech
+
+_logger = get_logger(__name__)
 
 
 class SmartAgent:
@@ -140,6 +145,24 @@ class SmartAgent:
         register_default_modules(self.modules, self)
         self.router = BrainRouter(self.modules, event_bus=self.events)
 
+        # Milestone 6: the Mind observes the rest of SmartAgent through
+        # read-only providers (Part 1) — it never changes what Brain
+        # routing, Skills, Tools, or the Model Framework decide (see
+        # `smartagent.mind`'s package docstring). Constructed last so every
+        # provider closes over a fully-initialized `self`.
+        self.mind = ExecutiveController(
+            providers=MindProviders(
+                active_goal=lambda: next(
+                    (g.name for g in self.goals.list_goals(status="active")), None
+                ),
+                goals=lambda: [g.name for g in self.goals.list_goals()],
+                skills=lambda: self.skill_engine.list_available(),
+                tools=lambda: self.tool_engine.list_available(),
+                active_model=lambda: self.model_manager.active_model_id,
+            ),
+            event_bus=self.events,
+        )
+
     def handle_message(self, message: str) -> str:
         """
         Process a single user message and return a response.
@@ -162,6 +185,7 @@ class SmartAgent:
         because their handlers never emit `MemorySaved`.
         """
         history_before = len(self.events.history())
+        self.mind.state_machine.transition(InternalState.THINKING, reason="handling a message")
         result = self.router.route(message)
         memory_written = any(
             event.name == Events.MEMORY_SAVED
@@ -169,6 +193,22 @@ class SmartAgent:
         )
         if not memory_written:
             self.memory.remember(message, category="Journal")
+
+        # Milestone 6: the Mind observes the outcome (state + reflection)
+        # without altering it — `result.message` below is exactly what
+        # `BrainRouter` produced, unchanged. Wrapped defensively so a Mind
+        # bug can never break message handling itself.
+        try:
+            self.mind.reflection_engine.reflect(
+                task_name="handle_message",
+                succeeded=result.success,
+                what_happened=f"Routed via {result.source!r}: {result.message}",
+            )
+            self.mind.state_machine.transition(InternalState.IDLE, reason="message handled")
+            self.mind.sync_self_model()
+        except Exception:  # noqa: BLE001 — Mind observation must never break message handling
+            _logger.warning("Mind observation failed during handle_message", exc_info=True)
+
         return result.message
 
     def run(self) -> None:

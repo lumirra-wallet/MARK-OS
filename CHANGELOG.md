@@ -7,6 +7,129 @@ the architecture is still settling.
 
 ## [Unreleased]
 
+## v0.7 — MARK Mind OS v1
+
+- Added `smartagent.mind` as a real package — a persistent internal mind
+  layered on top of Brain/Memory/Skills/Tools/Models. Explicitly
+  **computational self-awareness, not consciousness**: the Mind observes
+  and represents MARK's own state; it never drives Brain routing and does
+  not change the behavior of any existing subsystem.
+
+- Added `smartagent.mind.executive.executive_controller.ExecutiveController`:
+  the sole coordinator across every Mind engine (self model, identity,
+  working memory, attention, context, confidence, state, reflection,
+  homeostasis). Added `MindProviders`: a dataclass of optional,
+  zero-argument callables (`active_goal`, `goals`, `skills`, `tools`,
+  `active_model`, `running_processes`) that `SmartAgent` binds to its own
+  live subsystems — keeps `smartagent.mind` free of any hard dependency
+  on `smartagent.brain.agent.SmartAgent`, avoiding a circular import.
+  Also provides goal/task lifecycle coordination (`set_current_goal`,
+  `start_task`/`complete_task`), a ranked priority queue
+  (`enqueue`/`next_in_queue`), interrupt/resume passthrough, confidence-
+  scored decisions (`decide`), context assembly (`build_context`), and
+  health checks (`health_check`).
+
+- Added `smartagent.mind.self_model`: `SelfModel` dataclass (name, owner,
+  mission, current activity/goal, known goals/skills/tools, active model,
+  confidence, health score, bounded `recent_changes` diff log) and
+  `SelfModelEngine` (`snapshot`, `update(**fields)`, `describe()`),
+  publishing `SelfModelUpdated`.
+
+- Added `smartagent.mind.identity`: `Identity` dataclass and
+  `IdentityEngine`, which genuinely parses `SMARTAGENT.md`'s existing
+  Markdown headings (`## Identity`, `## Core Principles`, `##
+  Personality`, `## Long-Term Goals`, `## Architecture Philosophy`, `##
+  Safety`) into a structured `Identity`, round-trips it back out via
+  `to_markdown()`/`save()`, and falls back to a built-in
+  `default_identity()` matching the current `SMARTAGENT.md` content if the
+  file is missing or unparseable.
+
+- Added `smartagent.mind.working_memory.WorkingMemory`: short-term,
+  TTL-based scratch space (`put`/`get`/`all`/`forget`/`purge_expired`/
+  `clear`) with an injectable clock for deterministic tests — explicitly
+  distinct from, and not a replacement for, the persistent Memory vault.
+
+- Added `smartagent.mind.attention.AttentionManager`: `FocusItem`
+  dataclass, importance-based ranking, a bounded `max_concurrent` focus
+  set with automatic lowest-importance eviction, and an interrupt/resume
+  stack for handling higher-priority items mid-focus. Publishes
+  `AttentionShifted`.
+
+- Added `smartagent.mind.context.ContextManager`/`ContextBundle`:
+  assembles a bounded context blob from up to 8 sources (conversation,
+  working memory, knowledge, goals, research, reflection, tool outputs,
+  identity), each capped to `max_items_per_source`; `ContextBundle.render()`
+  flattens it into a single, optionally length-truncated text blob.
+
+- Added `smartagent.mind.confidence.ConfidenceEngine`: transparent,
+  non-fabricated confidence scoring — a base score from evidence count,
+  with penalties for conflicts, missing information, and unknowns,
+  clamped to `[0.0, 1.0]`. Bounded scoring `history()`/`latest()`.
+  Publishes `ConfidenceChanged`.
+
+- Added `smartagent.mind.state.StateMachine`/`InternalState`: 12 named
+  internal states (idle, listening, thinking, planning, researching,
+  executing, reflecting, learning, waiting, sleeping, error, recovering),
+  deliberately permissive transitions (no forbidden-transition table —
+  the spec doesn't define one and false rejections would be worse than
+  permissive logging), bounded transition `history()`, `is_in()`.
+  Publishes `StateChanged`.
+
+- Added `smartagent.mind.reflection.ReflectionEngine`: post-task
+  self-assessment producing a `Reflection` with heuristic
+  `should_become_memory`/`could_improve_future_performance` flags.
+  Deliberately never writes to the Memory vault itself — only flags what
+  a Skill or future Learning Engine should decide to persist. Publishes
+  `ReflectionFinished`.
+
+- Added `smartagent.mind.homeostasis` (covers Parts 8, 12, and 13
+  together): `HealthMetrics` (memory usage, task load, errors, queue
+  length, latency, model/tool/skill availability) with a transparent
+  `score()`; `HomeostasisEngine` mapping the score into a
+  healthy/degraded/critical band and publishing `HealthChanged` only on
+  band transitions (not every check); `DigitalSensorySystem` +
+  `SensorySignal` enum (10 named computational signals — memory_changed,
+  high_cpu_load, low_confidence, knowledge_conflict, new_goal,
+  task_delay, module_failure, research_completed, tool_failure,
+  permission_denied) publishing `SensorySignalDetected`; and
+  `DigitalHomeostasisLoop.tick()`, a synchronous, explicitly-invoked
+  self-check (not a background thread/timer, keeping it deterministic and
+  testable) answering: is MARK healthy, overloaded, making progress, do
+  its goals match its mission (best-effort keyword match), is anything
+  failing, and should the owner be notified.
+
+- Added 10 new `Events` constants to `smartagent.brain.events.Events`
+  under a new "Mind" section: `GOAL_CHANGED`, `ATTENTION_SHIFTED`,
+  `CONFIDENCE_CHANGED`, `HEALTH_CHANGED`, `STATE_CHANGED`, `TASK_STARTED`,
+  `REFLECTION_FINISHED`, `SELF_MODEL_UPDATED`, `SENSORY_SIGNAL_DETECTED`,
+  `WORKING_MEMORY_UPDATED`. The existing `MEMORY_UPDATED`/`TASK_COMPLETED`
+  events are reused rather than duplicated. All Mind engines publish onto
+  the same shared `EventBus` — there is no separate Mind event bus.
+
+- `smartagent.brain.agent.SmartAgent.__init__` now constructs
+  `self.mind = ExecutiveController(...)` last, wired via `MindProviders`
+  into the agent's own `goals`/`skill_engine`/`tool_engine`/
+  `model_manager`. `handle_message()` gained a guarded (`try/except`)
+  observation hook: it transitions Mind state to `THINKING` before
+  routing and to `IDLE` after, records a `Reflection` on the outcome, and
+  re-syncs the `SelfModel` — all wrapped so a Mind bug can never break
+  message handling. Verified byte-for-byte: `handle_message()`'s returned
+  message is unchanged from before this milestone.
+
+- Explicitly **not** implemented this milestone (future-compatible,
+  design-only per the spec): Knowledge Engine, Learning Engine, Curiosity
+  Engine, Discovery Engine, Wisdom Engine, Cybersecurity Engine, and any
+  Voice/Vision/Browser/Automation integration into the Mind. No Ollama or
+  internet access was added. No change was made to the behavior of
+  Memory, Brain routing, Skills, Tools, or the Model Framework.
+
+- Added `ARCHITECTURE.md` with ASCII diagrams: MARK Mind OS overview,
+  data flow through `handle_message()`, and per-engine diagrams for the
+  Executive Controller, Self Model, Working Memory, Attention, State
+  Machine, and Homeostasis.
+
+- 86 new tests; full suite 455 passing, 0 regressions.
+
 ## v0.6 — Model Framework v1
 
 - Added `smartagent.models` as a real package (`base/`, `providers/`,

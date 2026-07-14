@@ -15,7 +15,7 @@ MARK's identity/mission/principles, `CHANGELOG.md` for what shipped, and
 | **Project Name** | SmartAgent |
 | **Owner** | Mr. Smart |
 | **AI Name** | MARK |
-| **Current Version** | v0.6 (Model Framework v1) |
+| **Current Version** | v0.7 (MARK Mind OS v1) |
 
 **Mission:** MARK is an intelligent AI Operating System created
 exclusively for Mr. Smart — a trusted executive assistant, engineer,
@@ -162,6 +162,73 @@ features" beyond what a milestone explicitly asks for.
      opts in
    - Legacy `ModelClient`/`SkillContext.model` kept as-is for backward compatibility
    - 93 new tests; full suite 369 passing, 0 regressions
+
+✅ Milestone 6 — MARK Mind OS v1
+   - New `smartagent.mind` package: a persistent internal mind layered on
+     top of Brain/Memory/Skills/Tools/Models — **computational
+     self-awareness, not consciousness** (per `SMARTAGENT.md` Part 0 of
+     the spec). The Mind observes and represents; it never drives Brain
+     routing or changes any existing subsystem's behavior.
+   - `executive/` — `ExecutiveController` (the sole coordinator, Part 1)
+     + `MindProviders` (DI bag of read-only callables `SmartAgent` binds
+     to its live goals/skills/tools/model state — avoids a circular
+     import back into `smartagent.brain.agent`)
+   - `identity/` — `Identity` dataclass + `IdentityEngine` (Part 3):
+     round-trips `SMARTAGENT.md`'s existing Markdown headings
+     (load/parse/update/save), falls back to a built-in
+     `default_identity()` if the file is missing/unparseable
+   - `self_model/` — `SelfModel` + `SelfModelEngine` (Part 2): answers
+     "who am I / what can I do / what am I doing / how confident / how
+     healthy", diff-tracked `recent_changes`, publishes `SelfModelUpdated`
+   - `working_memory/` — `WorkingMemory` (Part 4): short-term, TTL-based
+     scratch space, explicitly not a Memory-vault replacement
+   - `attention/` — `AttentionManager` (Part 5): importance ranking, a
+     bounded `max_concurrent` focus set with eviction, interrupt/resume
+     stack, publishes `AttentionShifted`
+   - `context/` — `ContextManager`/`ContextBundle` (Part 6): assembles a
+     bounded context blob from conversation/working-memory/knowledge/
+     goals/research/reflection/tool-output/identity sources
+   - `confidence/` — `ConfidenceEngine` (Part 7): transparent heuristic
+     scoring (evidence/conflicts/missing-info/unknowns), bounded history,
+     publishes `ConfidenceChanged` — never a fabricated flat score
+   - `state/` — `StateMachine`/`InternalState` (Part 9): 12 named
+     internal states (idle, listening, thinking, planning, researching,
+     executing, reflecting, learning, waiting, sleeping, error,
+     recovering), bounded transition history, publishes `StateChanged`
+   - `reflection/` — `ReflectionEngine` (Part 10): post-task
+     self-assessment flags (`should_become_memory`,
+     `could_improve_future_performance`) — never writes to the Memory
+     vault itself, only flags what's worth remembering
+   - `homeostasis/` — Parts 8, 12 & 13 together: `HealthMetrics` +
+     `HomeostasisEngine` (score → healthy/degraded/critical band,
+     `HealthChanged` only on band transitions), `DigitalSensorySystem` +
+     `SensorySignal` (10 named computational signals, e.g.
+     `high_cpu_load`, `low_confidence`, `tool_failure`), and
+     `DigitalHomeostasisLoop.tick()` — a synchronous, explicitly-invoked
+     self-check (not a background thread) answering "healthy? overloaded?
+     making progress? do goals match mission? anything failing? should I
+     notify the owner?"
+   - 10 new `Events` constants added to `smartagent.brain.events`:
+     `GoalChanged`, `AttentionShifted`, `ConfidenceChanged`,
+     `HealthChanged`, `StateChanged`, `TaskStarted`, `ReflectionFinished`,
+     `SelfModelUpdated`, `SensorySignalDetected`, `WorkingMemoryUpdated`
+     — published onto the same shared `EventBus`, no separate Mind bus
+   - `SmartAgent.__init__` now builds `self.mind = ExecutiveController(...)`
+     last, wired via `MindProviders` into the agent's own goals/skills/
+     tools/model_manager. `handle_message()` gained a guarded
+     (try/except) observation hook that transitions Mind state and
+     records a reflection around each request — wrapped so a Mind bug can
+     never break message handling, and verified to leave
+     `handle_message()`'s returned message byte-for-byte unchanged
+   - Explicitly **not** implemented this milestone (design-only,
+     future-compatible hooks per the spec): Knowledge/Learning/
+     Curiosity/Discovery/Wisdom/Cybersecurity Engines, Voice, Vision,
+     Browser, Automation integration into the Mind, Ollama/internet
+     access, and any change to Memory/Brain routing/Skills/Tools/Model
+     Framework behavior
+   - New `ARCHITECTURE.md` with ASCII diagrams for the Mind overview,
+     data flow, and each major engine
+   - 86 new tests; full suite 455 passing, 0 regressions
 ----------------------------------------------------------------------
 
 Future milestones (order indicative — see Build Order below):
@@ -196,6 +263,7 @@ the rest of the system.
 | `brain` | Central orchestrator (Brain v2) | Classify intent, decide which module handles a request, execute it, log the decision, publish events | `memory`, `models`, `skills`, `tools`, `planning`, `research`, `voice`, `vision`, `automation`, `config`, `logs` | Intent-aware module selection once skills/tools have real members; pluggable decision strategies |
 | `memory` | Persistent knowledge store (Memory v1) | Store/retrieve/search/update/delete Markdown memory files, organized by category | `logs`, `brain.events` (optional) | Semantic/vector search; multiple backends behind the same API |
 | `models` | Model Framework v1 | `ModelManager` loads/switches providers behind `BaseModel`; `ModelRegistry`, `PromptBuilder`, `ConversationContext`, `ResponseParser`, `ModelSettings` | `logs`, `brain.events` (optional) | Real cloud/local provider integrations (Ollama, OpenAI, Anthropic, etc. — currently design-only stubs) |
+| `mind` | MARK Mind OS v1 — computational self-awareness | `ExecutiveController` coordinates self-model, identity, working memory, attention, context, confidence, state, reflection, and homeostasis; observes the rest of the system via read-only `MindProviders`, never drives routing | `brain.events` (optional), reads `SMARTAGENT.md` for identity | Knowledge/Learning/Curiosity/Discovery/Wisdom/Cybersecurity Engines, Voice/Vision/Browser/Automation integration — all design-only today |
 | `skills` | Composed, user-facing capabilities | Register/execute higher-level tasks built from tools + memory + models | `tools`, `memory`, `models` | First concrete skills |
 | `tools` | Low-level, single-purpose actions | Register/execute atomic capabilities (calculators, file access, etc.) | — | First concrete tools |
 | `voice` | Speech I/O | Transcribe audio, synthesize speech | — | Real STT/TTS backend |
@@ -319,6 +387,7 @@ Planned systems, once their prerequisite milestones land:
 | 3 — Skills Engine v1 | ✅ Done | 100% | PermissionManager, SkillEngine, 6 built-in skills, 128 tests |
 | 4 — Tool Engine v1 | ✅ Done | 100% | ToolEngine, 15 built-in tools, PathValidator safety, 276 tests |
 | 5 — Model Framework v1 | ✅ Done | 100% | ModelManager, ModelRegistry, MockModelProvider, PromptBuilder, ConversationContext, ResponseParser, 369 tests |
+| 6 — MARK Mind OS v1 | ✅ Done | 100% | ExecutiveController, SelfModel, IdentityEngine, WorkingMemory, AttentionManager, ContextManager, ConfidenceEngine, StateMachine, ReflectionEngine, Homeostasis + Sensory + Loop, 455 tests |
 | Research Engine | ⏳ Planned | 0% | Blocked on a real Model Framework provider for summarization |
 | Voice | ⏳ Planned | 0% | — |
 | Vision | ⏳ Planned | 0% | — |
@@ -338,6 +407,8 @@ milestone's status changes rather than adding a new table.*
   stub into a real `BaseModel` subclass and wiring `ModelSettings`.
 - Refactor existing skills (e.g. `MemorySkill`) to call `ToolEngine` for any filesystem work, now that `FileReadTool`/`FileWriteTool` exist (Skills must never manipulate the filesystem directly per the spec).
 - Add tests for `module_bindings.py`'s handler wiring specifically (currently covered indirectly via `test_brain_router.py` and `test_agent.py`).
+- Wire a real periodic scheduler (via `smartagent.automation`) to call `agent.mind.homeostasis_loop.tick()` on an interval, instead of only ever being invoked manually/in tests.
+- Decide where `ReflectionEngine`'s `memory_worthy()` output should actually be persisted (a new Skill, or the future Learning Engine) — currently flagged but never written to the vault.
 
 **Medium Priority**
 - Give `DecisionEngine` intent-aware branching once `skills`/`tools` have real members worth disambiguating between.

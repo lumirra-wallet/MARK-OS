@@ -156,6 +156,23 @@ up. See `README.md` for the current package layout and status.
   Brain's `model` handler still honestly reports `success=False` for
   arbitrary free text unless a deployment opts in — see
   `smartagent/models/` and `CHANGELOG.md v0.6`.
+- `mind` — **implemented (MARK Mind OS v1).** MARK now has a persistent
+  internal mind: `ExecutiveController` coordinates a `SelfModel` (who am
+  I, what am I doing, how confident, how healthy), an `IdentityEngine`
+  that round-trips this very file's Markdown structure, short-term
+  `WorkingMemory`, an `AttentionManager` (ranked focus + interrupt/
+  resume), a `ContextManager`, a `ConfidenceEngine` (transparent,
+  evidence-based — never a fabricated certainty), a `StateMachine` (12
+  named internal states), a `ReflectionEngine` (post-task self-
+  assessment), and a Homeostasis subsystem (health scoring, computational
+  "sensations," and a synchronous self-check `tick()`). This is
+  **computational self-awareness, not consciousness** — the Mind
+  observes and represents MARK's own state; it never drives Brain routing
+  and changes no other subsystem's behavior. Knowledge, Learning,
+  Curiosity, Discovery, Wisdom, and Cybersecurity Engines, plus Voice/
+  Vision/Browser/Automation integration into the Mind, remain
+  design-only future work. See `smartagent/mind/`, `ARCHITECTURE.md`, and
+  `CHANGELOG.md v0.7`.
 - `voice`, `vision`, `automation` — registered as Brain v2 modules (via
   `smartagent/brain/module_bindings.py`) but still placeholder behavior
   underneath: each honestly reports it cannot yet handle arbitrary free text.

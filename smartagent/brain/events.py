@@ -75,6 +75,18 @@ class Events:
     MODEL_SWITCHED = "ModelSwitched"
     MODEL_HEALTH_CHECKED = "ModelHealthChecked"
 
+    # Mind (smartagent.mind) — Milestone 6, MARK Mind OS v1.
+    GOAL_CHANGED = "GoalChanged"
+    ATTENTION_SHIFTED = "AttentionShifted"
+    CONFIDENCE_CHANGED = "ConfidenceChanged"
+    HEALTH_CHANGED = "HealthChanged"
+    STATE_CHANGED = "StateChanged"
+    TASK_STARTED = "TaskStarted"
+    REFLECTION_FINISHED = "ReflectionFinished"
+    SELF_MODEL_UPDATED = "SelfModelUpdated"
+    SENSORY_SIGNAL_DETECTED = "SensorySignalDetected"
+    WORKING_MEMORY_UPDATED = "WorkingMemoryUpdated"
+
 
 class EventBus:
     """
