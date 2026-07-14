@@ -413,10 +413,67 @@ class TestToolsCommand:
         response = console.router.dispatch(tmp_agent, "tools")
         assert isinstance(response, str)
 
-    def test_tools_lists_available(self, console, tmp_agent):
+    def test_tools_no_error(self, console, tmp_agent):
+        """Regression: list_available() returns List[str], not List[dict].
+        The command must not crash with 'str object has no attribute get'."""
         response = console.router.dispatch(tmp_agent, "tools")
-        # The ToolEngine auto-discovers built-in tools.
-        assert "tool" in response.lower() or "available" in response.lower() or "loaded" in response.lower() or len(response) > 0
+        assert not response.startswith("[error]"), f"tools command raised: {response}"
+
+    def test_tools_shows_loaded_count(self, console, tmp_agent):
+        """Header must include the count of loaded tools."""
+        response = console.router.dispatch(tmp_agent, "tools")
+        # Either "No tools loaded." or "Tools (N loaded)" — both are valid.
+        assert "loaded" in response.lower()
+
+    def test_tools_shows_known_tool_name(self, console, tmp_agent):
+        """At least one built-in tool name must appear in the output."""
+        response = console.router.dispatch(tmp_agent, "tools")
+        # file_read is always auto-discovered from the builtin package.
+        assert "File Read Tool" in response or "No tools loaded." in response
+
+    def test_tools_shows_availability_label(self, console, tmp_agent):
+        """Each tool row must carry an availability label."""
+        response = console.router.dispatch(tmp_agent, "tools")
+        if "No tools loaded." not in response:
+            assert "✓ available" in response or "✗ unavailable" in response
+
+    def test_tools_disabled_tool_shows_unavailable(self, tmp_agent):
+        """A disabled tool must show ✗ unavailable, not ✓ available."""
+        from smartagent.ui.commands.tools import handle_tools
+
+        # Grab any registered tool id and disable it.
+        tool_ids = tmp_agent.tool_engine.registry.list_available()
+        if not tool_ids:
+            pytest.skip("No tools loaded — cannot test disabled label")
+        target_id = tool_ids[0]
+        tmp_agent.tool_engine.registry.disable(target_id)
+
+        response = handle_tools(tmp_agent, [])
+        assert "✗ unavailable" in response
+
+    def test_tools_enabled_tool_shows_available(self, tmp_agent):
+        """An enabled tool must show ✓ available."""
+        from smartagent.ui.commands.tools import handle_tools
+
+        tool_ids = tmp_agent.tool_engine.registry.list_available()
+        if not tool_ids:
+            pytest.skip("No tools loaded — cannot test enabled label")
+        target_id = tool_ids[0]
+        tmp_agent.tool_engine.registry.enable(target_id)
+
+        response = handle_tools(tmp_agent, [])
+        assert "✓ available" in response
+
+    def test_tools_empty_registry_returns_message(self):
+        """An agent with no tools loaded returns a clear 'no tools' message."""
+        from unittest.mock import MagicMock
+        from smartagent.tools.tool_registry import ToolRegistry
+        from smartagent.ui.commands.tools import handle_tools
+
+        mock_agent = MagicMock()
+        mock_agent.tool_engine.registry = ToolRegistry()
+        response = handle_tools(mock_agent, [])
+        assert response == "No tools loaded."
 
 
 class TestModelsCommand:

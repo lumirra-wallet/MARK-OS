@@ -15,17 +15,18 @@ if TYPE_CHECKING:
 def handle_tools(agent: "SmartAgent", args: list[str]) -> str:
     """List all loaded tools with name, description, and availability."""
     try:
-        tools = agent.tool_engine.list_available()
+        # registry.list(enabled_only=False) returns List[BaseTool] objects,
+        # each with .id, .name, .description, and a queryable enabled status.
+        tools = agent.tool_engine.registry.list(enabled_only=False)
         if not tools:
             return "No tools loaded."
         lines = [f"Tools ({len(tools)} loaded)", ""]
         for t in tools:
-            name = str(t.get("name", t.get("id", "?")))
-            desc = str(t.get("description", ""))
-            avail = t.get("available", t.get("enabled", True))
-            avail_label = "✓ available" if avail else "✗ unavailable"
+            enabled = agent.tool_engine.registry.is_enabled(t.id)
+            avail_label = "✓ available" if enabled else "✗ unavailable"
+            desc = str(t.description) if t.description else ""
             desc_short = (desc[:56] + "…") if len(desc) > 56 else desc
-            lines.append(f"  {avail_label}  {name}")
+            lines.append(f"  {avail_label}  {t.name}")
             if desc_short:
                 lines.append(f"             {desc_short}")
         return "\n".join(lines)
