@@ -1,0 +1,388 @@
+Milestone 5 – Model Framework v1
+
+PROJECT
+
+Project Name: SmartAgent
+
+Owner: Mr. Smart
+
+Primary AI: MARK
+
+Current Version: v0.5
+
+OBJECTIVE
+
+Build a production-quality Model Framework that completely separates MARK's Brain from any specific AI provider.
+
+IMPORTANT
+
+This milestone is NOT about integrating Ollama yet.
+
+It is about creating a clean architecture that allows any model provider to be plugged in without modifying the Brain.
+
+The Brain must never know which model is being used.
+
+=========================================================
+PART 1 – Model Architecture
+=========================================================
+
+Create a new package:
+
+smartagent/models/
+
+Organize it into:
+
+base/
+providers/
+registry/
+manager/
+context/
+prompts/
+responses/
+config/
+
+=========================================================
+PART 2 – BaseModel
+=========================================================
+
+Create an abstract BaseModel class.
+
+Every provider must implement:
+
+initialize()
+
+load()
+
+generate()
+
+stream()
+
+embed()
+
+health()
+
+shutdown()
+
+metadata()
+
+status()
+
+Properties:
+
+id
+
+name
+
+provider
+
+version
+
+context_window
+
+supports_streaming
+
+supports_tools
+
+supports_images
+
+supports_embeddings
+
+supports_functions
+
+=========================================================
+PART 3 – Model Manager
+=========================================================
+
+Create ModelManager.
+
+Responsibilities:
+
+Load models
+
+Unload models
+
+Switch models
+
+Select default model
+
+Health monitoring
+
+Provider discovery
+
+Configuration
+
+Statistics
+
+Only ModelManager communicates with providers.
+
+=========================================================
+PART 4 – Model Registry
+=========================================================
+
+Implement dynamic registration.
+
+Support:
+
+register()
+
+unregister()
+
+reload()
+
+list()
+
+find()
+
+enable()
+
+disable()
+
+discover()
+
+statistics()
+
+=========================================================
+PART 5 – Prompt Builder
+=========================================================
+
+Create PromptBuilder.
+
+Responsibilities:
+
+System prompt
+
+User prompt
+
+Conversation history
+
+Memory context
+
+Skill context
+
+Tool results
+
+Future research context
+
+Future knowledge graph context
+
+Future vision context
+
+PromptBuilder should assemble prompts without knowing the provider.
+
+=========================================================
+PART 6 – Conversation Context
+=========================================================
+
+Create ConversationContext.
+
+Store:
+
+history
+
+summaries
+
+active goals
+
+active task
+
+memory references
+
+tool outputs
+
+timestamps
+
+token estimates
+
+Prepare for future context compression.
+
+=========================================================
+PART 7 – Response Parser
+=========================================================
+
+Create ResponseParser.
+
+Normalize responses into a common format regardless of provider.
+
+Include:
+
+text
+
+tool requests
+
+confidence
+
+metadata
+
+timing
+
+usage statistics
+
+=========================================================
+PART 8 – Configuration
+=========================================================
+
+Create ModelSettings.
+
+Support:
+
+default model
+
+temperature
+
+top_p
+
+top_k
+
+max_tokens
+
+streaming
+
+timeouts
+
+future API keys
+
+future local models
+
+No secrets should be hardcoded.
+
+=========================================================
+PART 9 – Mock Provider
+=========================================================
+
+Implement MockModelProvider.
+
+Purpose:
+
+Testing
+
+Development
+
+CI
+
+Offline testing
+
+It returns deterministic responses without using any AI.
+
+=========================================================
+PART 10 – Future Providers
+=========================================================
+
+Design interfaces only.
+
+DO NOT IMPLEMENT.
+
+Prepare for:
+
+Ollama
+
+OpenAI
+
+Anthropic
+
+Gemini
+
+LM Studio
+
+OpenRouter
+
+Azure
+
+Bedrock
+
+DeepSeek
+
+Mistral
+
+vLLM
+
+Llama.cpp
+
+=========================================================
+PART 11 – Brain Integration
+=========================================================
+
+Update Brain so it communicates only with:
+
+ModelManager
+
+Brain must never import providers directly.
+
+=========================================================
+PART 12 – Logging
+=========================================================
+
+Log:
+
+Model loaded
+
+Model unloaded
+
+Prompt size
+
+Context size
+
+Response time
+
+Errors
+
+Switches
+
+Health
+
+=========================================================
+PART 13 – Testing
+=========================================================
+
+Maintain all existing tests.
+
+Add comprehensive tests for:
+
+ModelManager
+
+Registry
+
+PromptBuilder
+
+ConversationContext
+
+Mock Provider
+
+ResponseParser
+
+Configuration
+
+Health monitoring
+
+No regressions.
+
+=========================================================
+PART 14 – Documentation
+=========================================================
+
+Update:
+
+README.md
+
+ROADMAP.md
+
+SMARTAGENT.md
+
+CHANGELOG.md
+
+Create architecture diagrams explaining the complete Model Framework.
+
+=========================================================
+RULES
+=========================================================
+
+DO NOT integrate Ollama yet.
+
+DO NOT connect to any cloud provider.
+
+DO NOT implement embeddings.
+
+DO NOT implement internet access.
+
+DO NOT change Memory, Brain, Skills or Tool Engine behavior.
+
+Focus entirely on creating a scalable, provider-independent Model Framework that will support Ollama as the first provider in the next milestone.

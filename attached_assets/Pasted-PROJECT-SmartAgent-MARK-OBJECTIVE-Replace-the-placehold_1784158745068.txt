@@ -1,0 +1,271 @@
+PROJECT:
+SmartAgent (MARK)
+
+OBJECTIVE
+
+Replace the placeholder Mock Model with a real Ollama integration while preserving the existing architecture.
+
+IMPORTANT
+
+Do NOT bypass the ModelManager.
+
+The Brain must NEVER communicate directly with Ollama.
+
+The architecture must remain:
+
+Brain
+    ↓
+ModelManager
+    ↓
+BaseModel interface
+    ↓
+OllamaProvider
+    ↓
+Ollama Local API
+
+No shortcuts.
+
+--------------------------------------------
+
+Create:
+
+smartagent/models/providers/ollama_provider.py
+
+The provider must implement the existing BaseModel interface.
+
+Implement:
+
+• load()
+• unload()
+• generate()
+• chat()
+• embeddings() (placeholder if unavailable)
+• health_check()
+• model_info()
+
+--------------------------------------------
+
+Connect to the local Ollama server.
+
+Default URL:
+
+http://127.0.0.1:11434
+
+Make the URL configurable in Settings.
+
+--------------------------------------------
+
+Automatically detect installed models.
+
+Equivalent to:
+
+ollama list
+
+Store:
+
+model name
+
+size
+
+family
+
+modified date
+
+status
+
+--------------------------------------------
+
+ModelManager must support
+
+list_models()
+
+load_model()
+
+unload_model()
+
+switch_model()
+
+active_model()
+
+health()
+
+statistics()
+
+without changing the public API.
+
+--------------------------------------------
+
+Default model:
+
+llama3.1:8b
+
+Coding model:
+
+qwen2.5-coder:7b
+
+Allow switching between them.
+
+--------------------------------------------
+
+Add console commands
+
+models
+
+model use <name>
+
+model current
+
+model info
+
+chat
+
+Example
+
+mark> model use llama3.1:8b
+
+Active model:
+llama3.1:8b
+
+Example
+
+mark> hi
+
+Hello Mr. Smart.
+How can I help you today?
+
+Example
+
+mark> write a python web scraper
+
+MARK automatically routes coding requests to qwen2.5-coder:7b.
+
+--------------------------------------------
+
+Conversation memory
+
+Every conversation sent to Ollama must include:
+
+Working Memory
+
+Relevant Vault memories
+
+Relevant Knowledge concepts
+
+Current Mind state
+
+Current Identity
+
+Current Goals
+
+Current Context
+
+The PromptBuilder should assemble this automatically.
+
+--------------------------------------------
+
+System Prompt
+
+Create a permanent MARK system prompt.
+
+It should include:
+
+Owner:
+Mr. Smart
+
+Identity:
+MARK
+
+Mission:
+Serve Mr. Smart.
+
+Protect data.
+
+Never fabricate actions.
+
+Use Memory.
+
+Use Knowledge.
+
+Use Skills.
+
+Use Tools.
+
+Think before responding.
+
+When uncertain, say so.
+
+--------------------------------------------
+
+Fallback behavior
+
+If Ollama is unavailable:
+
+do NOT crash.
+
+Return
+
+"Ollama server unavailable."
+
+The rest of MARK must continue working.
+
+--------------------------------------------
+
+Tests
+
+Add extensive unit tests.
+
+Mock Ollama responses.
+
+No internet required.
+
+No real model required.
+
+All previous tests must continue passing.
+
+--------------------------------------------
+
+Documentation
+
+Update
+
+README
+
+ROADMAP
+
+CHANGELOG
+
+ARCHITECTURE
+
+SMARTAGENT
+
+Document:
+
+How to install Ollama
+
+How to download models
+
+How to switch models
+
+How MARK communicates with Ollama
+
+--------------------------------------------
+
+Do NOT add:
+
+Internet browsing
+
+Autonomous agents
+
+Learning
+
+Voice
+
+Vision
+
+Browser control
+
+Automation
+
+Those belong to future milestones.
+
+Only complete the Ollama integration cleanly using the existing architecture.

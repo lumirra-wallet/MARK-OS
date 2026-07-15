@@ -1,33 +1,33 @@
 """
-PromptBuilder — Milestone 5, Part 5.
+PromptBuilder — Milestone 5, Part 5 / updated Milestone 9.
 
 Assembles a `Prompt` from a system prompt, the current user message,
 conversation history, memory context, skill context, and tool results —
 without ever knowing which provider will consume it. `ModelManager` is
 the only thing that hands a `Prompt` to a `BaseModel`; providers decide
 for themselves whether they want `Prompt.render()` (a single flat string,
-what `MockModelProvider` consumes) or `Prompt.to_messages()` (a chat-style
-list of `{"role", "content"}` dicts, the shape a real chat-completion
-provider would want).
+what `MockModelProvider` / `OllamaProvider` consume via flat text) or
+`Prompt.to_messages()` (a chat-style list of `{"role", "content"}` dicts,
+the shape a real chat-completion provider would want).
 
-`future_context` exists but is deliberately left empty by `build()` for
-now — Part 5 lists research, knowledge-graph, and vision context as
-future integration points, none of which are implemented in Milestone 5.
-The field is here so `PromptBuilder`'s shape does not need to change again
-once those subsystems exist; it is just never populated yet.
+Milestone 9 additions (all new fields default to empty so existing call
+sites are entirely unaffected):
+  - `knowledge_context` — relevant concepts from the Knowledge Engine.
+  - `mind_state`        — current Mind OS state string.
+  - `identity`          — MARK identity summary line.
+  - `goals`             — active goal descriptions from GoalManager.
+
+`future_context` is preserved for backward compatibility but no longer
+used internally — the new typed fields supersede it.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 if TYPE_CHECKING:
     from smartagent.models.context.conversation_context import ConversationContext
-
-#: Placeholder categories for future context sources (Part 5). None of these
-#: are populated by `PromptBuilder.build()` in Milestone 5 — see module docstring.
-_FUTURE_CONTEXT_KEYS: tuple[str, ...] = ("research", "knowledge_graph", "vision")
 
 
 @dataclass
@@ -36,14 +36,17 @@ class Prompt:
     A fully-assembled prompt, ready for `ModelManager` to hand to any provider.
 
     Attributes:
-        system_prompt: Instructions establishing the assistant's role/behavior.
-        user_message: The current request being answered.
-        history_lines: Rendered `"role: content"` lines from conversation history.
-        memory_context: Memory snippets relevant to this request.
-        skill_context: Free-text notes about what skills/capabilities are available.
-        tool_results: Recent tool outputs relevant to this request.
-        future_context: Placeholder dict for research/knowledge-graph/vision
-            context (Part 5) — always empty in Milestone 5.
+        system_prompt:      Instructions establishing the assistant's role/behavior.
+        user_message:       The current request being answered.
+        history_lines:      Rendered ``"role: content"`` lines from conversation history.
+        memory_context:     Memory snippets relevant to this request.
+        skill_context:      Free-text notes about what skills/capabilities are available.
+        tool_results:       Recent tool outputs relevant to this request.
+        future_context:     Kept for backward compatibility; prefer typed fields below.
+        knowledge_context:  Knowledge-Engine concepts relevant to this request (M9).
+        mind_state:         Current Mind OS state label, e.g. ``"thinking"`` (M9).
+        identity:           One-line identity summary injected as system context (M9).
+        goals:              Active goal descriptions from GoalManager (M9).
     """
 
     system_prompt: str
@@ -53,6 +56,11 @@ class Prompt:
     skill_context: str = ""
     tool_results: tuple[str, ...] = ()
     future_context: dict[str, str] = field(default_factory=dict)
+    # Milestone 9 additions — all default to empty for backward compatibility.
+    knowledge_context: tuple[str, ...] = ()
+    mind_state: str = ""
+    identity: str = ""
+    goals: tuple[str, ...] = ()
 
     def render(self) -> str:
         """
@@ -63,8 +71,16 @@ class Prompt:
         system prompt and user message.
         """
         sections: list[str] = [f"System: {self.system_prompt}"]
+        if self.identity:
+            sections.append(f"Identity: {self.identity}")
+        if self.mind_state:
+            sections.append(f"Current state: {self.mind_state}")
+        if self.goals:
+            sections.append("Active goals:\n" + "\n".join(f"- {g}" for g in self.goals))
         if self.memory_context:
             sections.append("Relevant memory:\n" + "\n".join(f"- {m}" for m in self.memory_context))
+        if self.knowledge_context:
+            sections.append("Relevant knowledge:\n" + "\n".join(f"- {k}" for k in self.knowledge_context))
         if self.skill_context:
             sections.append(f"Available skills: {self.skill_context}")
         if self.history_lines:
@@ -77,8 +93,16 @@ class Prompt:
     def to_messages(self) -> list[dict[str, str]]:
         """Render as a chat-style message list, for providers that take structured turns."""
         messages: list[dict[str, str]] = [{"role": "system", "content": self.system_prompt}]
+        if self.identity:
+            messages.append({"role": "system", "content": f"Identity: {self.identity}"})
+        if self.mind_state:
+            messages.append({"role": "system", "content": f"Current state: {self.mind_state}"})
+        if self.goals:
+            messages.append({"role": "system", "content": "Active goals:\n" + "\n".join(f"- {g}" for g in self.goals)})
         if self.memory_context:
             messages.append({"role": "system", "content": "Relevant memory:\n" + "\n".join(self.memory_context)})
+        if self.knowledge_context:
+            messages.append({"role": "system", "content": "Relevant knowledge:\n" + "\n".join(self.knowledge_context)})
         if self.skill_context:
             messages.append({"role": "system", "content": f"Available skills: {self.skill_context}"})
         if self.tool_results:
@@ -90,7 +114,7 @@ class Prompt:
         return messages
 
     def token_estimate(self) -> int:
-        """Rough combined size estimate (~4 chars/token), for logging (Part 12: "log prompt size")."""
+        """Rough combined size estimate (~4 chars/token), for logging."""
         return max(0, len(self.render()) // 4)
 
 
@@ -105,24 +129,30 @@ class PromptBuilder:
         context: "ConversationContext | None" = None,
         history_limit: int = 10,
         skill_context: str = "",
+        # Milestone 9 additions — all keyword-only with empty defaults so
+        # every existing call site continues to work without modification.
+        knowledge_snippets: Sequence[str] = (),
+        mind_state: str = "",
+        identity: str = "",
+        goals: Sequence[str] = (),
     ) -> Prompt:
         """
         Assemble a `Prompt` for `message`.
 
         Args:
-            message: The current user message.
-            system_prompt: Overridable system instructions.
-            context: A `ConversationContext` to pull history/memory/tool
-                context from. Optional — omitting it produces a minimal
-                prompt with just the system prompt and message, which is
-                exactly what a stateless one-off call needs.
-            history_limit: Maximum number of recent turns from `context` to include.
-            skill_context: Free-text description of currently available
-                skills/modules, typically `", ".join(context.skill_names)`-shaped
-                text supplied by the caller (Brain integration), not derived here.
+            message:            The current user message.
+            system_prompt:      Overridable system instructions.
+            context:            A `ConversationContext` to pull history/memory/tool
+                                context from. Optional.
+            history_limit:      Maximum number of recent turns from `context` to include.
+            skill_context:      Free-text description of currently available skills.
+            knowledge_snippets: Knowledge-Engine concept summaries (M9).
+            mind_state:         Current Mind OS state label (M9).
+            identity:           One-line identity string (M9).
+            goals:              Active goal descriptions (M9).
 
         Returns:
-            A `Prompt`. `future_context` is always empty (see module docstring).
+            A fully assembled `Prompt`.
         """
         history_lines: tuple[str, ...] = ()
         memory_context: tuple[str, ...] = ()
@@ -141,4 +171,8 @@ class PromptBuilder:
             skill_context=skill_context,
             tool_results=tool_results,
             future_context={},
+            knowledge_context=tuple(knowledge_snippets),
+            mind_state=mind_state,
+            identity=identity,
+            goals=tuple(goals),
         )

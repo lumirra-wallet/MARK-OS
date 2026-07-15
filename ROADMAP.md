@@ -15,7 +15,7 @@ MARK's identity/mission/principles, `CHANGELOG.md` for what shipped, and
 | **Project Name** | SmartAgent |
 | **Owner** | Mr. Smart |
 | **AI Name** | MARK |
-| **Current Version** | v0.9 (MARK Console OS v1) |
+| **Current Version** | v1.0 (Ollama Integration) |
 
 **Mission:** MARK is an intelligent AI Operating System created
 exclusively for Mr. Smart — a trusted executive assistant, engineer,
@@ -283,6 +283,36 @@ features" beyond what a milestone explicitly asks for.
    - Logging: `configure_logging()` gains `log_file` + `log_to_console` params.
      `main.py` now routes logs to `logs/mark.log` only (console is clean).
    - 78 new tests; full suite 652 passing, 0 regressions.
+
+✅ Milestone 9 — Ollama Integration
+   - Architecture enforced: Brain → ModelManager → BaseModel → OllamaProvider
+     → Ollama Local API.  Nothing above ModelManager ever imports OllamaProvider.
+   - `OllamaProvider` (smartagent/models/providers/ollama_provider.py):
+     one instance per Ollama model name; `_exclude_from_discovery = True`
+     prevents auto-registration with wrong settings.
+   - `OllamaModelDiscovery.list_models()` — `GET /api/tags`; returns `[]`
+     (never raises) when the server is offline.
+   - `OllamaModelInfo` dataclass: name, size, family, modified_at, status.
+   - `ModelManager.load_ollama_models()` — registers llama3.1:8b,
+     qwen2.5-coder:7b, and any extras installed on the server.
+   - New alias methods on `ModelManager`: `list_models()`, `load_model()`,
+     `unload_model()`, `switch_model()`, `active_model()`.
+   - `model_loader.discover_provider_classes()` respects
+     `_exclude_from_discovery` on any provider class.
+   - `ModelSettings` + `Settings` gain `ollama_base_url`,
+     `ollama_default_model`, `ollama_coding_model` (all configurable).
+   - `MARK_SYSTEM_PROMPT` constant in `mark_system_prompt.py`.
+   - `Prompt` dataclass extended with `knowledge_context`, `mind_state`,
+     `identity`, `goals` (all default-empty; fully backward-compatible).
+   - `PromptBuilder.build()` accepts matching keyword-only args.
+   - Console commands: `models`, `model use/current/info/list`, `chat`.
+   - Coding auto-routing: programming keywords → qwen2.5-coder:7b.
+   - `CommandRouter.set_fallback()` + free-text fallback in Console.
+   - Fallback behaviour: Ollama offline → "Ollama server unavailable.",
+     no crash, rest of MARK fully operational.
+   - SmartAgent.init calls `load_ollama_models()` at startup.
+   - 105 new tests; full suite 763 passing, 0 regressions.
+   - Uses stdlib only (urllib) — no new dependencies.
 
 Future milestones (order indicative — see Build Order below):
    - Research Engine (real trusted-source search + summarization)

@@ -58,6 +58,10 @@ def discover_provider_classes(package: str = DEFAULT_PROVIDERS_PACKAGE) -> list[
                 and candidate is not BaseModel
                 and not inspect.isabstract(candidate)
                 and candidate.__module__ == module.__name__
+                # Respect the opt-out marker — providers that manage their own
+                # registration (e.g. OllamaProvider, which needs per-model-name
+                # instances) set ``_exclude_from_discovery = True`` on the class.
+                and not getattr(candidate, "_exclude_from_discovery", False)
             ):
                 discovered.append(candidate)
                 logger.info("Discovered model provider class %s in %s", candidate.__name__, module_info.name)

@@ -1,0 +1,9 @@
+# SmartAgent dependencies.
+#
+# Kept minimal for the initial scaffold — only what's needed to run the
+# placeholder project and its test suite. Real dependencies (an LLM SDK,
+# a memory/vector store client, speech libraries, a scheduler, etc.) will
+# be added here as each feature is implemented.
+
+pytest>=8.0
+pytest

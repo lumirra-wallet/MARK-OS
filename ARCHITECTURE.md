@@ -362,7 +362,7 @@ smartagent/ui/commands/
 ├── knowledge.py → knowledge (add/search/graph/stats), inbox, approve, reject
 ├── skills.py    → skills
 ├── tools.py     → tools
-├── models.py    → models
+├── models.py    → models, model (use/current/info/list), chat
 └── events.py    → events
 ```
 
@@ -371,14 +371,91 @@ Each module calls only the public API of its subsystem (`agent.memory`,
 `renderer.py` contains all display formatting; it is stateless and never
 calls `print()` directly, making it trivially testable.
 
-## 9. What's still design-only
+Free-text fallback (Milestone 9): `CommandRouter.set_fallback(handler)` lets
+the `Console` wire a catch-all handler for unrecognised input.  When a model
+is active, the raw input routes to it.  When no model is active, the
+original "Unknown command" response is returned.
+
+---
+
+## 9. Ollama Integration (Milestone 9)
+
+```
+Brain
+  ↓
+ModelManager              ← only component that talks to providers
+  ↓
+BaseModel interface       ← abstract contract every provider implements
+  ↓
+OllamaProvider            ← smartagent/models/providers/ollama_provider.py
+  ↓
+Ollama Local API          ← http://127.0.0.1:11434 (configurable)
+```
+
+`OllamaProvider` manages one specific Ollama model (e.g. `llama3.1:8b`).
+Multiple instances — one per model name — are registered by
+`ModelManager.load_ollama_models()`, which is called from
+`SmartAgent.__init__` after `discover_providers()`.
+
+**Auto-discovery flow:**
+
+```
+SmartAgent.__init__()
+  → model_manager.discover_providers()     # registers MockModelProvider
+  → model_manager.load_ollama_models()
+      → OllamaProvider("llama3.1:8b")      # default model — always registered
+      → OllamaProvider("qwen2.5-coder:7b") # coding model — always registered
+      → GET /api/tags                       # optional: register extras found on server
+```
+
+**`OllamaProvider` exclusion from auto-discovery:**
+
+```python
+class OllamaProvider(BaseModel):
+    _exclude_from_discovery: bool = True   # model_loader respects this flag
+```
+
+`discover_provider_classes()` checks `getattr(candidate, "_exclude_from_discovery", False)`
+and skips the class.  `ModelManager.load_ollama_models()` registers instances
+explicitly with the correct `base_url` and `model_name` from `Settings`.
+
+**Conversation context assembled by `chat` command:**
+
+```
+Working Memory   → agent.memory.search(message, limit=3)
+Knowledge        → agent.knowledge.search(message, limit=2)
+Mind state       → agent.mind.state_machine.current_state.value
+Identity         → MARK identity string
+Goals            → agent.goals.list_goals(status="active")
+System prompt    → MARK_SYSTEM_PROMPT (mark_system_prompt.py)
+```
+
+**Coding auto-routing:**
+
+When the user message contains programming keywords (`python`, `code`,
+`script`, `sql`, `debug`, …), the `chat` command routes to
+`qwen2.5-coder:7b` automatically, even if the active model is different.
+A header line announces the rerouting.
+
+**Fallback behaviour:**
+
+If Ollama is unreachable:
+- `load()` — sets status `LOADED` anyway (so model switching still works).
+  Logs a warning.
+- `generate()` / `chat()` — returns `{"content": "Ollama server unavailable."}`.
+  Never raises.
+- `health()` — reports `healthy=False`, message contains "unreachable".
+- The rest of MARK continues working normally.
+
+---
+
+## 10. What's still design-only
 
 Per milestone specs, these are intentionally **not** implemented:
 
 - Learning Engine, Curiosity Engine, Discovery Engine, Wisdom Engine,
   Cybersecurity Engine
 - Voice, Vision, Browser, and Automation integration *into the Mind*
-- Ollama/model-provider integration triggered by the Mind or Knowledge Engine
 - Internet access, vector databases, embeddings, AI reasoning in Knowledge
 
 See `ROADMAP.md` for what's next.

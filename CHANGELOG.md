@@ -7,6 +7,92 @@ the architecture is still settling.
 
 ## [Unreleased]
 
+## v1.0 — Ollama Integration
+
+- **OllamaProvider** (`smartagent/models/providers/ollama_provider.py`) — full
+  `BaseModel` implementation that talks to a locally-running Ollama server.
+  Uses Python's `urllib` standard library; no new dependencies required.
+  - `load()` — verifies the model is available on the server (never crashes if
+    Ollama is offline); always sets status `LOADED` so model switching works.
+  - `generate()` / `chat()` — `POST /api/chat` with `stream: false`; returns
+    provider-shaped dict compatible with `ResponseParser`.
+  - `stream()` — `POST /api/chat` with `stream: true`; yields tokens as they
+    arrive via newline-delimited JSON.
+  - `health()` — probes `GET /api/tags` directly; distinguishes "server
+    unreachable" from "server up but model not installed".
+  - `model_info()` — returns an `OllamaModelInfo` snapshot (name, size,
+    family, modified date, status).
+  - `embed()` — raises `NotImplementedError` (embeddings are a future milestone).
+  - `_exclude_from_discovery = True` — `model_loader` skips this class; all
+    instances are registered explicitly by `ModelManager.load_ollama_models()`.
+
+- **OllamaModelDiscovery** — queries `GET /api/tags` to list installed models.
+  Never raises; returns an empty list when the server is unreachable.
+
+- **OllamaModelInfo** — dataclass storing `name`, `size`, `family`,
+  `modified_at`, `status` for one installed Ollama model.
+
+- **ModelManager** new API (`smartagent/models/manager/model_manager.py`):
+  - `list_models()` — all registered `BaseModel` instances.
+  - `load_model(id)` / `unload_model(id)` / `switch_model(id)` — aliases for
+    `load()`/`unload()`/`switch()` matching the spec-mandated public surface.
+  - `active_model()` — returns the live `BaseModel` instance (not just the id).
+  - `load_ollama_models(base_url, default_model, coding_model)` — creates and
+    registers `OllamaProvider` instances for the default model
+    (`llama3.1:8b`), the coding model (`qwen2.5-coder:7b`), and any
+    additional models discovered on the running Ollama server.
+
+- **Settings** (`smartagent/config/settings.py`) — three new fields:
+  `ollama_base_url` (default `http://127.0.0.1:11434`),
+  `ollama_default_model` (`llama3.1:8b`), `ollama_coding_model`
+  (`qwen2.5-coder:7b`).  All configurable without code changes.
+
+- **ModelSettings** (`smartagent/models/config/model_settings.py`) — mirrors
+  the three new Ollama fields from `Settings`.
+
+- **MARK System Prompt** (`smartagent/models/prompts/mark_system_prompt.py`) —
+  permanent `MARK_SYSTEM_PROMPT` constant: owner `Mr. Smart`, identity `MARK`,
+  mission (serve, protect, never fabricate, use Memory/Knowledge/Skills/Tools,
+  think before responding, say so when uncertain).
+
+- **PromptBuilder** (`smartagent/models/prompts/prompt_builder.py`) — four new
+  context fields added to `Prompt` (all default to empty for backward
+  compatibility): `knowledge_context`, `mind_state`, `identity`, `goals`.
+  Both `render()` and `to_messages()` include them when non-empty.
+  `PromptBuilder.build()` accepts matching keyword-only arguments.
+
+- **Console commands** (`smartagent/ui/commands/models.py`):
+  - `models` — lists all registered providers with status and active marker.
+  - `model use <name>` — switches the active model; graceful error if unknown.
+  - `model current` — shows id, name, provider, and status of the active model.
+  - `model info` — detailed metadata including Ollama server info when available.
+  - `model list` — alias for `models`.
+  - `chat <message>` — sends a message with full MARK context (working memory,
+    knowledge, mind state, identity, goals) to the active model.
+
+- **Coding auto-routing** — `chat` (and free-text input) inspects the message
+  for programming keywords and routes to `qwen2.5-coder:7b` automatically.
+  A header `[Routing to qwen2.5-coder:7b — coding request detected]` is
+  prepended when routing differs from the active model.
+
+- **Free-text fallback** (`smartagent/ui/command_router.py`) — `CommandRouter`
+  now supports an optional `set_fallback(handler)`.  `Console` wires it to
+  `fallback_chat`: when no command matches AND a model is active, the raw input
+  is routed to the model.  When no model is active the original "Unknown
+  command" message is returned, preserving all pre-v1.0 behaviour.
+
+- **Fallback behaviour** — Ollama unavailable? `generate()` returns a dict
+  with `content = "Ollama server unavailable."`, which surfaces cleanly in the
+  console without a crash.  The rest of MARK continues working normally.
+
+- **SmartAgent init** (`smartagent/brain/agent.py`) — calls
+  `model_manager.load_ollama_models()` after `discover_providers()` so Ollama
+  providers are always registered at startup (even when Ollama is offline).
+
+- **Tests** (`tests/test_ollama.py`) — 105 new tests; all 763 total pass.
+  All HTTP calls are mocked via `unittest.mock.patch("urllib.request.urlopen")`.
+  No network, no real Ollama server required.
+
 ## v0.9 — MARK Console OS v1
 
 - `python -m smartagent.main` now launches a persistent interactive console

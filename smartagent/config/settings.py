@@ -75,6 +75,11 @@ class Settings:
     enabled_tools: list[str] = field(default_factory=list)
     workspace_path: str = "."
     knowledge_path: str = "knowledge"
+    # Ollama integration (Milestone 9)
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_default_model: str = "llama3.1:8b"
+    ollama_coding_model: str = "qwen2.5-coder:7b"
+
     voice_enabled: bool = False
     automation_enabled: bool = False
     granted_permissions: list[str] = field(default_factory=lambda: ["read_memory", "write_memory"])

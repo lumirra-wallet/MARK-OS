@@ -81,6 +81,13 @@ class Console:
         models.register(self._router)
         events.register(self._router)
 
+        # Milestone 9: free-text fallback — when the user types something that
+        # isn't a recognised command AND a model is active, route the raw input
+        # to the model.  When no model is active the fallback returns the
+        # standard "Unknown command" message so all pre-M9 behaviour is preserved.
+        from smartagent.ui.commands.models import fallback_chat
+        self._router.set_fallback(fallback_chat)
+
     # ------------------------------------------------------------------
     # Expose internals for testing
     # ------------------------------------------------------------------

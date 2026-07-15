@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from smartagent.brain.agent import SmartAgent
 
 Handler = Callable[["SmartAgent", list[str]], str]
+FallbackHandler = Callable[["SmartAgent", str], str]
 
 
 class ExitConsole(Exception):
@@ -62,10 +63,23 @@ class CommandRouter:
 
     def __init__(self) -> None:
         self._entries: dict[str, CommandEntry] = {}
+        self._fallback: FallbackHandler | None = None
 
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
+
+    def set_fallback(self, handler: FallbackHandler) -> None:
+        """
+        Register a handler called when no command matches the input.
+
+        The fallback receives the agent and the full raw input string
+        (not just the args).  Used by the Console to route free-text
+        messages to the active model when one is loaded.
+
+        If no fallback is set, unknown commands return a friendly error.
+        """
+        self._fallback = handler
 
     def register(
         self,
@@ -104,6 +118,8 @@ class CommandRouter:
 
         entry = self._entries.get(name)
         if entry is None:
+            if self._fallback is not None:
+                return self._fallback(agent, raw.strip())
             return f'Unknown command: "{name}"\nType "help" for available commands.'
 
         try:

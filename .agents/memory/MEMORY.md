@@ -3,3 +3,4 @@
 - [Milestone 5 Model Framework v1](milestone5-model-framework.md) — ModelManager/ModelRegistry/BaseModel design, abstract-stub discovery trick, no-auto-load default.
 - [Milestone 6 MARK Mind OS v1](milestone6-mind-os.md) — observe-not-drive constraint, MindProviders avoids circular import, homeostasis is sync tick() not a thread, IdentityEngine parses SMARTAGENT.md.
 - [Milestone 8 Console OS v1](milestone8-console-os.md) — command framework design, KnowledgeManager API quirks, logging race-condition fix, REPL test patterns.
+- [Milestone 9 Ollama Integration](milestone9-ollama.md) — OllamaProvider exclusion trick, health() direct-HTTP pattern, fallback_chat wiring, coding auto-routing, PromptBuilder extensions.

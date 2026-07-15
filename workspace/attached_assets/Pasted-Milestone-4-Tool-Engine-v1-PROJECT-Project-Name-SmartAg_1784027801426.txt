@@ -1,0 +1,425 @@
+Milestone 4 – Tool Engine v1
+
+PROJECT
+
+Project Name: SmartAgent
+
+Owner: Mr. Smart
+
+Primary AI: MARK
+
+Current Version: v0.4
+
+Objective
+
+Build a production-quality Tool Engine that allows MARK to safely execute actions on the local system and future external services.
+
+IMPORTANT
+
+The Tool Engine is NOT the same as Skills.
+
+Brain
+↓
+
+Skills decide WHAT needs to happen.
+
+↓
+
+Tool Engine decides WHICH tool performs the work.
+
+↓
+
+Tools execute the work.
+
+Skills may call multiple tools.
+
+The Brain must never directly call tools.
+
+=========================================================
+PART 1 – Tool Engine
+=========================================================
+
+Create a ToolEngine responsible for:
+
+• Registering tools
+• Loading tools dynamically
+• Executing tools
+• Returning ActionResult
+• Permission checking
+• Logging
+• Error handling
+• Tool discovery
+
+=========================================================
+PART 2 – Base Tool
+=========================================================
+
+Create an abstract BaseTool class.
+
+Every tool must expose:
+
+id
+
+name
+
+description
+
+version
+
+author
+
+category
+
+permissions
+
+enabled
+
+required_os
+
+required_dependencies
+
+Methods:
+
+initialize()
+
+validate()
+
+execute()
+
+shutdown()
+
+health()
+
+status()
+
+=========================================================
+PART 3 – Tool Registry
+=========================================================
+
+Implement a ToolRegistry supporting:
+
+register()
+
+unregister()
+
+find()
+
+list()
+
+reload()
+
+enable()
+
+disable()
+
+health_check()
+
+statistics()
+
+Support dynamic registration.
+
+=========================================================
+PART 4 – Dynamic Tool Loader
+=========================================================
+
+Automatically discover tools from:
+
+smartagent/tools/
+
+No hardcoded imports.
+
+Support future third-party plugins.
+
+=========================================================
+PART 5 – Built-in Tools
+=========================================================
+
+Implement these tools:
+
+FileReadTool
+
+FileWriteTool
+
+DirectoryCreateTool
+
+DirectoryListTool
+
+CopyFileTool
+
+MoveFileTool
+
+DeleteFileTool
+
+SearchFilesTool
+
+OpenTextFileTool
+
+ReadMarkdownTool
+
+SystemInfoTool
+
+DateTimeTool
+
+EnvironmentTool
+
+UUIDTool
+
+HashTool
+
+These should use Python standard libraries only.
+
+DO NOT execute shell commands yet.
+
+=========================================================
+PART 6 – Tool Categories
+=========================================================
+
+Organize tools by category.
+
+filesystem/
+
+system/
+
+utilities/
+
+text/
+
+future/
+
+=========================================================
+PART 7 – Permission System
+=========================================================
+
+Integrate with the existing PermissionManager.
+
+Each tool declares permissions such as:
+
+Read Files
+
+Write Files
+
+Delete Files
+
+Create Directories
+
+Read System Information
+
+No tool executes without permission.
+
+=========================================================
+PART 8 – Brain & Skills Integration
+=========================================================
+
+Update the execution pipeline.
+
+Current
+
+Brain
+
+↓
+
+Skill
+
+↓
+
+Action
+
+New
+
+Brain
+
+↓
+
+Skill
+
+↓
+
+Tool Engine
+
+↓
+
+Tool
+
+↓
+
+ActionResult
+
+Skills must never directly manipulate the filesystem.
+
+=========================================================
+PART 9 – Safety
+=========================================================
+
+Implement safety restrictions.
+
+• Prevent deleting project source files.
+• Prevent writing outside configured workspace.
+• Validate file paths.
+• Gracefully handle errors.
+• Reject invalid requests.
+
+No dangerous operations.
+
+=========================================================
+PART 10 – Logging
+=========================================================
+
+Log:
+
+Tool Loaded
+
+Tool Executed
+
+Permission Granted
+
+Permission Denied
+
+Execution Time
+
+Failures
+
+Warnings
+
+=========================================================
+PART 11 – Testing
+=========================================================
+
+Create extensive unit tests covering:
+
+Tool registration
+
+Discovery
+
+Permissions
+
+Execution
+
+Failure cases
+
+Health monitoring
+
+Logging
+
+Maintain all existing tests.
+
+No regressions.
+
+=========================================================
+PART 12 – Documentation
+=========================================================
+
+Update:
+
+README.md
+
+ROADMAP.md
+
+CHANGELOG.md
+
+SMARTAGENT.md
+
+Architecture diagrams
+
+Document:
+
+Tool lifecycle
+
+Tool Engine
+
+Execution flow
+
+Permission model
+
+=========================================================
+PART 13 – Code Quality
+=========================================================
+
+Requirements:
+
+• SOLID principles
+• Type hints
+• Dataclasses where appropriate
+• Dependency Injection
+• Google-style docstrings
+• Avoid circular imports
+• Keep modules small and maintainable
+
+=========================================================
+PART 14 – Future Compatibility
+=========================================================
+
+Design the Tool Engine to support future tools without modification.
+
+Future tools include:
+
+BrowserTool
+
+GitHubTool
+
+GitTool
+
+DockerTool
+
+TerminalTool
+
+ClipboardTool
+
+MouseTool
+
+KeyboardTool
+
+ScreenshotTool
+
+CameraTool
+
+MicrophoneTool
+
+EmailTool
+
+CalendarTool
+
+YouTubeTool
+
+ObsidianTool
+
+SQLiteTool
+
+NetworkTool
+
+APIClientTool
+
+ThreatScannerTool
+
+LogAnalyzerTool
+
+OCRTool
+
+PDFTool
+
+These should NOT be implemented yet.
+
+Only ensure the architecture supports them.
+
+=========================================================
+IMPORTANT RULES
+=========================================================
+
+DO NOT integrate AI providers.
+
+DO NOT browse the internet.
+
+DO NOT execute shell commands.
+
+DO NOT automate browsers.
+
+DO NOT implement YouTube automation.
+
+DO NOT implement cybersecurity scanning.
+
+DO NOT break Memory, Brain, or Skills.
+
+Maintain backward compatibility.
+
+Keep every existing test passing.
+
+Focus ONLY on building a scalable, secure Tool Engine that becomes the execution layer for MARK.

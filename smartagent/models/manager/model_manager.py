@@ -283,6 +283,82 @@ class ModelManager:
         """Ids of every registered model, enabled or not."""
         return self.registry.list_available()
 
+    # ------------------------------------------------------------------
+    # Milestone 9 — Ollama integration helpers
+    # ------------------------------------------------------------------
+
+    def list_models(self) -> list[BaseModel]:
+        """All registered model provider instances (enabled or not)."""
+        return self.registry.list(enabled_only=False)
+
+    def load_model(self, model_id: str) -> BaseModel:
+        """Alias for ``load()`` — provided for spec-mandated API surface."""
+        return self.load(model_id)
+
+    def unload_model(self, model_id: str) -> bool:
+        """Alias for ``unload()`` — provided for spec-mandated API surface."""
+        return self.unload(model_id)
+
+    def switch_model(self, model_id: str) -> BaseModel:
+        """Alias for ``switch()`` — provided for spec-mandated API surface."""
+        return self.switch(model_id)
+
+    def active_model(self) -> BaseModel | None:
+        """
+        Return the currently active ``BaseModel`` instance, or ``None``.
+
+        Complements ``active_model_id`` (the id string) with the live object.
+        """
+        if self._active_model_id is None:
+            return None
+        return self.registry.find(self._active_model_id)
+
+    def load_ollama_models(
+        self,
+        base_url: str = "http://127.0.0.1:11434",
+        default_model: str = "llama3.1:8b",
+        coding_model: str = "qwen2.5-coder:7b",
+    ) -> list[str]:
+        """
+        Create and register ``OllamaProvider`` instances for the configured models.
+
+        Always registers the default and coding models (so ``model use <name>``
+        works even if Ollama is currently offline).  Also discovers and registers
+        any additional models installed on the running Ollama server.
+
+        Returns the list of newly registered model ids.
+        """
+        # Lazy import to keep ModelManager free of a hard dependency on a
+        # concrete provider — mirrors the pattern used by _publish() for EventBus.
+        from smartagent.models.providers.ollama_provider import (
+            OllamaModelDiscovery,
+            OllamaProvider,
+        )
+
+        registered: list[str] = []
+
+        # Always register the two configured models.
+        for model_name in dict.fromkeys([default_model, coding_model]):  # preserve order, deduplicate
+            if self.registry.find(model_name) is None:
+                provider = OllamaProvider(model_name=model_name, base_url=base_url)
+                self.registry.register(provider)
+                registered.append(model_name)
+                logger.info("Registered Ollama model: %s", model_name)
+
+        # Discover additional installed models from the running server.
+        try:
+            discovery = OllamaModelDiscovery(base_url=base_url)
+            for info in discovery.list_models(timeout=3.0):
+                if self.registry.find(info.name) is None:
+                    provider = OllamaProvider(model_name=info.name, base_url=base_url)
+                    self.registry.register(provider)
+                    registered.append(info.name)
+                    logger.info("Registered discovered Ollama model: %s", info.name)
+        except Exception:  # noqa: BLE001
+            pass  # Ollama offline at startup — providers still registered as UNLOADED
+
+        return registered
+
     def describe(self) -> str:
         """One-line human-readable summary, mirroring `ToolEngine.describe()`."""
         available = self.list_available()

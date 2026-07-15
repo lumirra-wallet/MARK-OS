@@ -1,0 +1,226 @@
+Milestone 3 – Skills Engine v1
+
+Objective
+
+Transform MARK from a decision-making framework into a skill-based AI Operating System.
+
+Skills are high-level capabilities that the Brain can invoke.
+
+A Skill may internally use Memory, Tools, Planning, Models, or Research.
+
+The Brain should never know how a Skill works.
+
+It only asks the Skill Engine to execute it.
+
+=========================================================
+PART 1 – Skill Engine
+=========================================================
+
+Create a SkillEngine responsible for:
+
+- Registering skills
+- Loading skills
+- Executing skills
+- Returning ActionResult
+- Reporting available skills
+
+=========================================================
+PART 2 – Base Skill
+=========================================================
+
+Create an abstract BaseSkill class.
+
+Every skill must implement:
+
+name
+
+description
+
+version
+
+author
+
+required_modules
+
+execute()
+
+validate()
+
+status()
+
+=========================================================
+PART 3 – Skill Registry
+=========================================================
+
+Upgrade the existing registry into a production-ready Skill Registry.
+
+Support:
+
+register()
+
+unregister()
+
+enable()
+
+disable()
+
+reload()
+
+list()
+
+find()
+
+=========================================================
+PART 4 – Built-in Skills
+=========================================================
+
+Implement these built-in skills:
+
+MemorySkill
+
+ResearchSkill
+
+PlanningSkill
+
+KnowledgeSkill
+
+ConversationSkill
+
+SystemInfoSkill
+
+Each skill should work using existing project modules.
+
+Do NOT use AI.
+
+=========================================================
+PART 5 – Skill Metadata
+=========================================================
+
+Each skill should expose:
+
+Name
+
+Description
+
+Version
+
+Category
+
+Dependencies
+
+Permissions
+
+Confidence
+
+Execution Time
+
+=========================================================
+PART 6 – Permission System
+=========================================================
+
+Introduce a permission model.
+
+Permissions include:
+
+Read Memory
+
+Write Memory
+
+Run Tools
+
+Access Files
+
+Network Access
+
+Automation
+
+System Commands
+
+Every skill declares the permissions it needs.
+
+Nothing is granted automatically.
+
+=========================================================
+PART 7 – Skill Loader
+=========================================================
+
+Automatically discover skills from:
+
+smartagent/skills/
+
+without hardcoding imports.
+
+=========================================================
+PART 8 – Brain Integration
+=========================================================
+
+Update BrainRouter.
+
+When IntentAnalyzer classifies a request as SKILL:
+
+Brain
+
+↓
+
+Skill Engine
+
+↓
+
+Specific Skill
+
+↓
+
+ActionResult
+
+=========================================================
+PART 9 – Logging
+=========================================================
+
+Log:
+
+Skill Loaded
+
+Skill Executed
+
+Skill Failed
+
+Execution Time
+
+Permission Requests
+
+=========================================================
+PART 10 – Testing
+=========================================================
+
+Add comprehensive unit tests.
+
+Maintain 100% passing existing tests.
+
+=========================================================
+PART 11 – Documentation
+=========================================================
+
+Update:
+
+README.md
+
+ROADMAP.md
+
+SMARTAGENT.md
+
+Architecture diagrams
+
+=========================================================
+Rules
+
+Do NOT implement AI providers.
+
+Do NOT browse the internet.
+
+Do NOT break Memory.
+
+Do NOT break Brain v2.
+
+Keep the architecture modular.
+
+Document every important class.

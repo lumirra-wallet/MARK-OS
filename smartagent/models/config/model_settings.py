@@ -62,6 +62,11 @@ class ModelSettings:
     api_keys: dict[str, str] = field(default_factory=dict)
     local_model_paths: dict[str, str] = field(default_factory=dict)
 
+    # Ollama integration (Milestone 9)
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_default_model: str = "llama3.1:8b"
+    ollama_coding_model: str = "qwen2.5-coder:7b"
+
     def generation_kwargs(self) -> dict[str, float | int | bool]:
         """
         Common generation parameters to forward to a provider's `generate()`/`stream()`.

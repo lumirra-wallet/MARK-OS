@@ -1,0 +1,620 @@
+Milestone 7 – Knowledge Engine v1
+
+PROJECT
+
+Project Name: SmartAgent
+
+Primary AI: MARK
+
+Owner: Mr. Smart
+
+Current Version: v0.7
+
+MISSION
+
+Transform MARK from a system that only remembers information into a system that understands knowledge.
+
+This milestone introduces the Knowledge Engine, a structured knowledge graph that represents concepts, relationships, evidence, confidence, contradictions, dependencies, and understanding.
+
+IMPORTANT
+
+This milestone DOES NOT implement AI reasoning.
+
+This milestone DOES NOT use vector databases.
+
+This milestone DOES NOT integrate Ollama.
+
+This milestone focuses entirely on building MARK's internal knowledge architecture.
+
+=========================================================
+ARCHITECTURE
+=========================================================
+
+Create a new package:
+
+smartagent/knowledge/
+
+Organize into:
+
+knowledge/
+
+concepts/
+graph/
+relationships/
+sources/
+evidence/
+confidence/
+validation/
+search/
+inbox/
+categories/
+ontology/
+queries/
+storage/
+statistics/
+
+=========================================================
+1. KNOWLEDGE GRAPH
+=========================================================
+
+Implement a directed graph architecture.
+
+Every concept is a node.
+
+Every relationship is an edge.
+
+Support:
+
+create node
+
+update node
+
+delete node
+
+connect nodes
+
+disconnect nodes
+
+merge nodes
+
+split nodes
+
+version history
+
+graph traversal
+
+shortest path
+
+dependency lookup
+
+relationship lookup
+
+future graph visualization
+
+=========================================================
+2. CONCEPT ENGINE
+=========================================================
+
+Each concept contains:
+
+Unique ID
+
+Title
+
+Description
+
+Summary
+
+Category
+
+Tags
+
+Aliases
+
+Examples
+
+Difficulty
+
+Status
+
+Confidence
+
+Importance
+
+Created
+
+Updated
+
+Author
+
+Owner
+
+Sources
+
+Evidence
+
+Relationships
+
+Dependencies
+
+Contradictions
+
+Verification Status
+
+Revision History
+
+Concepts must be editable and versioned.
+
+=========================================================
+3. RELATIONSHIP ENGINE
+=========================================================
+
+Support relationships such as:
+
+depends_on
+
+part_of
+
+related_to
+
+contradicts
+
+extends
+
+implements
+
+inherits
+
+causes
+
+uses
+
+creates
+
+requires
+
+improves
+
+replaces
+
+supports
+
+references
+
+Each relationship stores:
+
+direction
+
+strength
+
+confidence
+
+source
+
+timestamp
+
+=========================================================
+4. SOURCE ENGINE
+=========================================================
+
+Every piece of knowledge must remember where it came from.
+
+Sources may include:
+
+Manual Entry
+
+Memory
+
+Research
+
+Books
+
+Documentation
+
+Internet
+
+Videos
+
+Courses
+
+Personal Notes
+
+Future Obsidian
+
+Future Browser
+
+Each source stores:
+
+Author
+
+URL placeholder
+
+Publication
+
+Date
+
+Reliability Score
+
+Citation
+
+=========================================================
+5. EVIDENCE ENGINE
+=========================================================
+
+Knowledge is supported by evidence.
+
+Evidence stores:
+
+Description
+
+Supporting source
+
+Evidence type
+
+Strength
+
+Confidence
+
+Timestamp
+
+Verification status
+
+=========================================================
+6. CONFIDENCE ENGINE
+=========================================================
+
+Every concept receives a confidence score.
+
+Based on:
+
+Evidence quality
+
+Source reliability
+
+Contradictions
+
+Age
+
+Verification
+
+Number of supporting sources
+
+Manual adjustments
+
+Confidence should update automatically.
+
+=========================================================
+7. CONTRADICTION ENGINE
+=========================================================
+
+Before storing knowledge:
+
+Detect conflicts.
+
+Example:
+
+Concept A
+
+Python is interpreted.
+
+Concept B
+
+Python is compiled.
+
+Flag conflict.
+
+Do not overwrite automatically.
+
+Instead send to Knowledge Inbox.
+
+=========================================================
+8. KNOWLEDGE INBOX
+=========================================================
+
+All new knowledge enters the inbox.
+
+Workflow:
+
+New Knowledge
+
+↓
+
+Validation
+
+↓
+
+Conflict Detection
+
+↓
+
+Confidence
+
+↓
+
+Mr. Smart Approval
+
+↓
+
+Knowledge Graph
+
+Nothing enters permanent knowledge automatically.
+
+=========================================================
+9. ONTOLOGY ENGINE
+=========================================================
+
+Support hierarchical categories.
+
+Example:
+
+Technology
+
+↓
+
+Programming
+
+↓
+
+Python
+
+↓
+
+Async Programming
+
+↓
+
+Asyncio
+
+Categories must support inheritance.
+
+=========================================================
+10. QUERY ENGINE
+=========================================================
+
+Support querying such as:
+
+Find concept
+
+Find related concepts
+
+Find dependencies
+
+Find contradictions
+
+Find missing evidence
+
+Find low confidence
+
+Find orphan concepts
+
+Find duplicate concepts
+
+Find concepts by category
+
+Find concepts by tag
+
+=========================================================
+11. KNOWLEDGE SEARCH
+=========================================================
+
+Implement deterministic search.
+
+Support:
+
+Title
+
+Alias
+
+Tags
+
+Category
+
+Relationship
+
+Description
+
+Source
+
+Do NOT use embeddings.
+
+=========================================================
+12. KNOWLEDGE STORAGE
+=========================================================
+
+Store knowledge separately from Memory.
+
+Memory remains:
+
+vault/
+
+Knowledge becomes:
+
+knowledge/
+
+Store concepts in human-readable Markdown or JSON.
+
+The knowledge graph structure should also be exportable.
+
+=========================================================
+13. KNOWLEDGE STATISTICS
+=========================================================
+
+Track:
+
+Total Concepts
+
+Relationships
+
+Average Confidence
+
+Conflicts
+
+Pending Inbox Items
+
+Verified Concepts
+
+Unverified Concepts
+
+Categories
+
+Sources
+
+Evidence Count
+
+Growth Over Time
+
+=========================================================
+14. BRAIN INTEGRATION
+=========================================================
+
+Brain must not directly modify knowledge.
+
+Brain communicates only through:
+
+KnowledgeManager
+
+Mind should be able to observe knowledge updates.
+
+Reflection may recommend knowledge improvements.
+
+No direct coupling.
+
+=========================================================
+15. FUTURE COMPATIBILITY
+=========================================================
+
+Design for future integration with:
+
+Learning Engine
+
+Reasoning Engine
+
+Discovery Engine
+
+Wisdom Engine
+
+Curiosity Engine
+
+Research Engine
+
+Ollama
+
+Obsidian
+
+Cybersecurity Engine
+
+Voice
+
+Vision
+
+Automation
+
+No implementations yet.
+
+=========================================================
+16. TESTING
+=========================================================
+
+Create comprehensive tests for:
+
+Knowledge Graph
+
+Concept Engine
+
+Relationship Engine
+
+Evidence Engine
+
+Sources
+
+Confidence
+
+Validation
+
+Conflict Detection
+
+Inbox
+
+Query Engine
+
+Storage
+
+Statistics
+
+Maintain ALL existing tests.
+
+No regressions.
+
+=========================================================
+17. DOCUMENTATION
+=========================================================
+
+Update:
+
+README.md
+
+ROADMAP.md
+
+CHANGELOG.md
+
+SMARTAGENT.md
+
+ARCHITECTURE.md
+
+Add diagrams for:
+
+Knowledge Graph
+
+Concept Relationships
+
+Knowledge Flow
+
+Inbox Workflow
+
+Confidence Flow
+
+=========================================================
+18. ENGINEERING RULES
+=========================================================
+
+Follow SOLID principles.
+
+Use dataclasses where appropriate.
+
+Use dependency injection.
+
+Avoid circular imports.
+
+Document every public class.
+
+Add full type hints.
+
+Prefer composition over inheritance.
+
+Maintain modular architecture.
+
+=========================================================
+IMPORTANT
+=========================================================
+
+Do NOT implement AI reasoning.
+
+Do NOT implement Ollama.
+
+Do NOT implement vector databases.
+
+Do NOT implement embeddings.
+
+Do NOT implement browser access.
+
+Do NOT implement internet research.
+
+Do NOT implement voice.
+
+Do NOT implement vision.
+
+Do NOT implement cybersecurity.
+
+Do NOT modify existing behavior of Memory, Mind, Brain, Skills, Tools, or Models.
+
+The goal is to build a production-quality Knowledge Engine that allows MARK to understand structured knowledge rather than merely store information.

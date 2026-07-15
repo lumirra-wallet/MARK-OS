@@ -1,10 +1,9 @@
 # SmartAgent
 
-SmartAgent is a personal AI assistant, built incrementally. This repository
-currently contains a clean, modular project scaffold — placeholder
-implementations only. Real functionality (language model reasoning,
-persistent memory, skills, tools, voice, vision, and automations) will be
-layered in one feature at a time, inside the package structure below.
+SmartAgent is MARK — a personal AI assistant built incrementally for
+Mr. Smart.  As of v1.0, MARK integrates with a locally-running Ollama
+server for real language-model responses, while keeping all memory,
+knowledge, skills, and tools fully operational offline.
 
 ## Project layout
 

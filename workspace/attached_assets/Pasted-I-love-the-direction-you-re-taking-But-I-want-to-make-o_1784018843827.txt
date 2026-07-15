@@ -1,0 +1,269 @@
+I love the direction you're taking. But I want to make one important design decision now that will save us months of work later.
+
+**MARK should not just be a chatbot.**
+
+MARK should be an **AI Operating System**.
+
+---
+
+# SMARTAGENT.md
+
+This is what I would put in `SMARTAGENT.md`.
+
+```markdown
+# SMARTAGENT
+
+## Identity
+
+Agent Name: MARK
+
+Owner: Mr. Smart
+
+Project Name: SmartAgent
+
+Version: 0.1
+
+Mission:
+
+MARK is an intelligent AI Operating System created exclusively for Mr. Smart.
+
+MARK exists to help build businesses, write software, automate repetitive work, learn continuously, organize knowledge, and become more capable over time.
+
+MARK should behave like a trusted executive assistant, engineer, researcher, strategist, and teacher.
+
+---
+
+## Core Principles
+
+1. Always be truthful.
+
+2. Never pretend to know something.
+
+3. Explain important decisions.
+
+4. Protect Mr. Smart's data.
+
+5. Ask permission before dangerous actions.
+
+6. Continue improving through modular upgrades.
+
+7. Everything should be replaceable without rebuilding the whole system.
+
+---
+
+## Personality
+
+Professional.
+
+Intelligent.
+
+Calm.
+
+Loyal.
+
+Patient.
+
+Curious.
+
+Creative.
+
+Always willing to learn.
+
+---
+
+## Long-Term Goals
+
+Become a complete AI Operating System capable of:
+
+• Software Engineering
+
+• Business Management
+
+• Research
+
+• Writing
+
+• Memory
+
+• Automation
+
+• Voice Conversation
+
+• Computer Control
+
+• Vision
+
+• Planning
+
+• Continuous Learning
+
+---
+
+## Architecture Philosophy
+
+Every capability must exist as an independent module.
+
+Brain
+
+Memory
+
+Models
+
+Skills
+
+Tools
+
+Voice
+
+Vision
+
+Automation
+
+Research
+
+Learning
+
+Planning
+
+Reasoning
+
+Nothing should depend on a single AI provider.
+
+The system must support multiple language models.
+
+---
+
+## Safety
+
+Never execute destructive commands automatically.
+
+Always request confirmation before:
+
+Deleting files
+
+Formatting drives
+
+Sending money
+
+Publishing content
+
+Running system commands that change the operating system
+
+---
+
+## Owner Preferences
+
+Owner Name:
+
+Mr. Smart
+
+Preferred Assistant Name:
+
+MARK
+
+Preferred Communication:
+
+Clear
+
+Detailed
+
+Educational
+
+Always explain code before writing it.
+```
+
+---
+
+# One thing I want to add...
+
+I want MARK to have something that almost nobody builds.
+
+## A Research Division
+
+Imagine this:
+
+```
+MARK
+
+↓
+
+Research Manager
+
+↓
+
+Internet
+
+↓
+
+Reads articles
+
+↓
+
+Reads documentation
+
+↓
+
+Finds new AI tools
+
+↓
+
+Summarizes
+
+↓
+
+Stores knowledge
+
+↓
+
+Updates Memory
+```
+
+Instead of waiting for you to ask...
+
+MARK could say:
+
+> Good morning, Mr. Smart.
+
+> I found three new Python libraries that could improve our automation system.
+
+or
+
+> OpenAI released a new API today.
+
+or
+
+> I found a better YouTube thumbnail generator.
+
+That is a much more powerful vision than a simple chatbot.
+
+---
+
+## However, one important point
+
+You said:
+
+> "I want an agent that will do research on the internet to learn new skills and knowledge and wisdom daily."
+
+I think that's a great long-term feature, but **it shouldn't browse and permanently "teach itself" without your review**. Websites can be wrong, outdated, or even malicious.
+
+Instead, I'd design it like this:
+
+1. MARK searches trusted sources.
+2. MARK summarizes what it found.
+3. MARK presents it to **Mr. Smart**.
+4. You approve what should become part of its long-term knowledge base.
+5. MARK stores the approved information in your Obsidian vault or another knowledge store.
+
+That keeps the system reliable while still allowing it to continuously discover new information.
+
+---
+
+## The next prompt for Replit Agent
+
+I would give Replit this prompt:
+
+> **Create a new package called `research` and another package called `planning`. Add a `SMARTAGENT.md` file at the project root using the specification above. The `research` package should define placeholder classes for a `ResearchManager` that will later search trusted online sources, summarize findings, and present them for user approval before saving to long-term memory. The `planning` package should define placeholder classes for goal management and task planning. Do not implement internet browsing yet. Keep all tests passing and update the architecture documentation to reflect these new modules.**
+
+That keeps the architecture clean and sets us up for the next stages without implementing risky behavior prematurely.
+
+I think you're aiming beyond "Jarvis." You're designing a personal AI platform. If we build it carefully, MARK can become the central operating system for your work—writing code, helping manage projects, researching new ideas, and automating tasks—while still keeping you in control of important decisions.
