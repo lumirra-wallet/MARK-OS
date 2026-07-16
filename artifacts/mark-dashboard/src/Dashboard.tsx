@@ -5,7 +5,7 @@ import {
   LineChart, Settings, Clock, Plug, Unplug, Zap,
   Mic, AudioWaveform, Volume2, Square,
   GitBranch, Brain, Box, Workflow,
-  Bookmark, Terminal, Briefcase, Wrench, Code2, Award,
+  Bookmark, Terminal, Briefcase, Wrench, Code2, Award, Stethoscope,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChatView }          from './components/ChatView';
@@ -25,6 +25,7 @@ import { ToolsPanel }        from './components/ToolsPanel';
 import { TimelineView }      from './components/TimelineView';
 import { CheckpointsPanel }  from './components/CheckpointsPanel';
 import { EvaluationPanel }   from './components/EvaluationPanel';
+import { DiagnosticsView }   from './components/DiagnosticsView';
 import { LiveTerminal }      from './components/LiveTerminal';
 import { JobsPanel }         from './components/JobsPanel';
 import { TaskGraphView }     from './components/TaskGraphView';
@@ -261,9 +262,10 @@ export default function Dashboard() {
           <Divider />
 
           {/* Observability group */}
-          <NavIcon icon={Clock}       active={activeTab === 'timeline'}    onClick={() => setActiveTab('timeline')}    tooltip="Agent Timeline" />
-          <NavIcon icon={Award}       active={activeTab === 'evaluation'}  onClick={() => setActiveTab('evaluation')}  tooltip="Run Evaluations" />
-          <NavIcon icon={LineChart}   active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} tooltip="Performance" />
+          <NavIcon icon={Clock}        active={activeTab === 'timeline'}     onClick={() => setActiveTab('timeline')}     tooltip="Agent Timeline" />
+          <NavIcon icon={Award}        active={activeTab === 'evaluation'}   onClick={() => setActiveTab('evaluation')}   tooltip="Run Evaluations" />
+          <NavIcon icon={LineChart}    active={activeTab === 'performance'}  onClick={() => setActiveTab('performance')}  tooltip="Performance" />
+          <NavIcon icon={Stethoscope} active={activeTab === 'diagnostics'}  onClick={() => setActiveTab('diagnostics')}  tooltip="Diagnostics" />
 
           {/* Voice */}
           <NavIcon
@@ -310,9 +312,10 @@ export default function Dashboard() {
                   {activeTab === 'tools'       && <ToolsPanel />}
                   {activeTab === 'timeline'    && <TimelineView />}
                   {activeTab === 'evaluation'  && <EvaluationPanel />}
-                  {activeTab === 'performance' && <PerformanceView />}
-                  {activeTab === 'voice'       && <VoicePanel />}
-                  {activeTab === 'settings'    && <SettingsView />}
+                  {activeTab === 'performance'  && <PerformanceView />}
+                  {activeTab === 'diagnostics'  && <DiagnosticsView />}
+                  {activeTab === 'voice'        && <VoicePanel />}
+                  {activeTab === 'settings'     && <SettingsView />}
                 </motion.div>
               </AnimatePresence>
             </div>

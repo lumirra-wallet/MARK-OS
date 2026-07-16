@@ -34,7 +34,8 @@ from smartagent.server.api_task_graph   import router as task_graph_router
 from smartagent.server.api_code         import router as code_router
 from smartagent.server.api_terminal     import router as terminal_router
 from smartagent.server.api_git_enhanced import router as git_enhanced_router
-from smartagent.server.api_providers     import router as providers_router
+from smartagent.server.api_providers    import router as providers_router
+from smartagent.server.api_diagnostics  import router as diagnostics_router
 from smartagent.server.voice_manager    import voice_manager
 from smartagent.server.websocket        import connection_manager
 
@@ -98,3 +99,4 @@ app.include_router(code_router)
 app.include_router(terminal_router)
 app.include_router(git_enhanced_router)
 app.include_router(providers_router)
+app.include_router(diagnostics_router)

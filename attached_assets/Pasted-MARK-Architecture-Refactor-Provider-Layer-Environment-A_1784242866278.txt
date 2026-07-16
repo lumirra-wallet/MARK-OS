@@ -1,0 +1,244 @@
+MARK Architecture Refactor — Provider Layer & Environment-Aware API
+
+I want MARK to support both cloud and local LLMs without changing any application code. Refactor the project into a provider-based architecture.
+
+Goals
+GitHub Models is the default provider while developing in Replit.
+Ollama becomes the provider when running locally.
+The frontend must never hardcode localhost.
+Switching providers should only require changing configuration, not code.
+All existing features must continue working.
+1. Create a provider abstraction
+
+Create an abstract base interface:
+
+LLMProvider
+
+with methods:
+
+chat(...)
+stream_chat(...)
+embeddings(...)
+list_models(...)
+health(...)
+switch_model(...)
+
+Then implement:
+
+GithubProvider
+OllamaProvider
+
+using the exact same interface.
+
+Create a ProviderFactory that returns the active provider based on:
+
+ACTIVE_PROVIDER=github
+ACTIVE_PROVIDER=ollama
+
+No other code should know which provider is active.
+
+2. GitHub Models
+
+Use the OpenAI SDK against GitHub Models.
+
+Read:
+
+GITHUB_TOKEN
+
+from environment variables.
+
+Support:
+
+chat completions
+streaming
+embeddings
+tool/function calling
+model listing
+health checks
+
+Use GitHub Models as the default provider.
+
+3. Ollama
+
+Create an Ollama provider with the same API.
+
+Support:
+
+chat
+streaming
+embeddings
+list installed models
+health
+model switching
+
+No application code should change when switching providers.
+
+4. Environment-aware frontend
+
+Remove every hardcoded:
+
+http://localhost:8000
+
+Replace with:
+
+VITE_API_URL
+
+If empty:
+
+use same origin
+
+This should work:
+
+Local
+
+localhost:5173
+↓
+
+localhost:8000
+
+Replit
+
+replit.app
+↓
+
+same host
+
+No localhost references should exist inside frontend code.
+
+5. Backend configuration
+
+Create a configuration module.
+
+Environment variables:
+
+ACTIVE_PROVIDER
+GITHUB_TOKEN
+OLLAMA_BASE_URL
+VITE_API_URL
+SESSION_SECRET
+
+Do not scatter environment lookups throughout the codebase.
+
+6. Settings panel
+
+Expand the Settings panel.
+
+Show:
+
+Current provider
+
+GitHub Models
+Ollama
+
+Current model
+
+Connection status
+
+Latency
+
+Provider health
+
+Available models
+
+Allow switching providers from the UI.
+
+7. Diagnostics
+
+Add a Diagnostics page.
+
+Display:
+
+Backend
+
+✓ Running
+
+LLM Provider
+
+✓ Connected
+
+Embedding Provider
+
+✓ Connected
+
+Git
+
+✓ Connected
+
+Workspace
+
+✓ Loaded
+
+Vector DB
+
+✓ Loaded
+
+Memory
+
+✓ Loaded
+
+WebSocket
+
+✓ Connected
+
+Show green/red indicators.
+
+8. RAG
+
+Do not tie RAG to a provider.
+
+ChromaDB should always use:
+
+provider.embeddings()
+
+Whether embeddings come from GitHub or Ollama should be transparent.
+
+9. Agent Pipeline
+
+Ensure every agent:
+
+Research
+
+Planner
+
+Coder
+
+Reviewer
+
+Memory
+
+Testing
+
+uses the ProviderFactory instead of directly calling OpenAI or Ollama.
+
+No provider-specific code should exist inside agent logic.
+
+10. Preserve existing functionality
+
+Do not remove or break:
+
+chat
+voice
+pipeline
+git
+workspace
+memory
+models panel
+performance panel
+WebSockets
+markdown rendering
+RAG
+11. Verification
+
+Before finishing:
+
+Run all Python tests.
+Run TypeScript checks.
+Verify GitHub Models works.
+Verify Ollama works.
+Verify provider switching.
+Verify Replit deployment.
+Verify local deployment.
+Verify the frontend contains no hardcoded localhost URLs.
+Provide a summary of all modified files.
+
+This refactor is more valuable than adding more features right now. Once it's complete, MARK will be portable between Replit, your local machine, a VPS, or Docker, and you'll be able to switch LLM providers with a single configuration change instead of rewriting code.

@@ -19,3 +19,4 @@
 - [MARK Web Backend Phase 1](mark-web-backend.md) — subscribe_all uses == not is; path traversal needs resolve()+is_relative_to() not startswith(); module-level imports for patchability.
 - [MARK Web Dashboard Phase 2+](mark-web-dashboard.md) — All 20 spec features complete; 8 new backend api_*.py files; 12 new frontend panels; branches/token-budget/reflection in store; 2460 Python tests + 0 TS errors.
 - [GitHub Models provider](github-provider.md) — GitHubProvider+factory+8 REST endpoints+ModelsPanel rewrite; ACTIVE_PROVIDER=github activates; defaults to ollama; 70 new tests; 2530 total.
+- [Provider Layer Refactor](provider-layer-refactor.md) — VITE_API_URL replaces localhost hardcode; ServerConfig module; OllamaProvider embed()+list_models()+stream_chat(); DiagnosticsView+/diagnostics endpoint; 2535 total tests.

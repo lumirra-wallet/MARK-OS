@@ -275,7 +275,7 @@ export const useMarkStore = create<MarkState>((set, get) => {
 
   return {
     // State
-    serverUrl:        localStorage.getItem('mark_server_url') || 'http://localhost:8000',
+    serverUrl:        localStorage.getItem('mark_server_url') || (import.meta.env.VITE_API_URL as string | undefined) || window.location.origin,
     connectionStatus: 'disconnected',
     running:          false,
     goal:             '',

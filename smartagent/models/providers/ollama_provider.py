@@ -577,11 +577,93 @@ class OllamaProvider(BaseModel):
             logger.debug("OllamaProvider: warmup skipped for %s (%s)", self._model_name, exc)
 
     def embed(self, text: str) -> list[float]:
-        """Not implemented — embeddings are a future milestone."""
-        raise NotImplementedError(
-            "Embeddings are out of scope for Milestone 9 — "
-            "no provider implements embed() yet."
+        """
+        Return an embedding vector for *text* using the Ollama /api/embed endpoint.
+
+        Falls back to the legacy /api/embeddings endpoint if /api/embed is
+        unavailable (older Ollama versions).  Raises RuntimeError on failure.
+        """
+        # Try the modern endpoint first (Ollama ≥ 0.1.26)
+        for endpoint, payload_key in [
+            ("/api/embed",       "input"),
+            ("/api/embeddings",  "prompt"),
+        ]:
+            url = f"{self._base_url}{endpoint}"
+            payload = {"model": self._model_name, payload_key: text}
+            body = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                # /api/embed returns {"embeddings": [[...]]}
+                # /api/embeddings returns {"embedding": [...]}
+                vec = (
+                    data.get("embeddings", [None])[0]
+                    or data.get("embedding")
+                )
+                if vec:
+                    return vec
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    continue   # try the fallback endpoint
+                raise RuntimeError(f"Ollama embed error ({endpoint}): {exc}") from exc
+            except Exception as exc:
+                raise RuntimeError(f"Ollama embed error ({endpoint}): {exc}") from exc
+        raise RuntimeError(
+            f"Ollama embed failed for model {self._model_name!r}: "
+            "neither /api/embed nor /api/embeddings returned a vector."
         )
+
+    def embeddings(self, text: str, **_kwargs: Any) -> list[float]:
+        """Alias for embed() — satisfies the LLMProvider protocol."""
+        return self.embed(text)
+
+    def list_models(self) -> list[dict[str, Any]]:
+        """
+        Return metadata dicts for every model installed in Ollama.
+
+        Uses OllamaModelDiscovery internally.  Returns [] if the server
+        is unreachable instead of raising.
+        """
+        try:
+            disc = OllamaModelDiscovery(self._base_url)
+            return [
+                {
+                    "id":       m.name,
+                    "name":     m.name,
+                    "family":   m.family,
+                    "params":   m.parameter_size,
+                    "size_gb":  round(m.size_bytes / 1e9, 1) if m.size_bytes else 0,
+                    "modified": m.modified_at,
+                    "provider": "ollama",
+                }
+                for m in disc.list_models()
+            ]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def stream_chat(
+        self,
+        messages: list[dict[str, str]],
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """Alias for chat_stream() — satisfies the LLMProvider protocol."""
+        yield from self.chat_stream(messages, **kwargs)
+
+    def switch_model(self, model_name: str) -> None:
+        """
+        Point this provider at a different installed Ollama model.
+
+        Note: the preferred way to switch models is through ModelManager.switch().
+        This method exists to satisfy the LLMProvider protocol.
+        """
+        self._model_name = model_name
+        logger.info("OllamaProvider: switched to model %s", model_name)
 
     # ------------------------------------------------------------------
     # Internal helpers

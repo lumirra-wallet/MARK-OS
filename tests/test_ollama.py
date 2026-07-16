@@ -480,10 +480,96 @@ class TestOllamaProviderModelInfo:
 
 
 class TestOllamaProviderEmbed:
-    def test_embed_raises_not_implemented(self):
+    def test_embed_uses_api_embed_endpoint(self):
+        """embed() should call /api/embed and return the vector."""
+        import json as _json
+        vector = [0.1, 0.2, 0.3, 0.4]
+        response_body = _json.dumps({"embeddings": [vector]}).encode()
         p = OllamaProvider()
-        with pytest.raises(NotImplementedError):
-            p.embed("hello world")
+        p._status = ModelStatus.LOADED
+        with patch("urllib.request.urlopen") as mock_open:
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = response_body
+            mock_resp.__enter__ = lambda s: s
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            mock_open.return_value = mock_resp
+            result = p.embed("hello world")
+        assert result == vector
+
+    def test_embed_falls_back_to_embeddings_endpoint(self):
+        """embed() falls back to /api/embeddings on 404 from /api/embed."""
+        import json as _json
+        import urllib.error
+        vector = [0.5, 0.6]
+        fallback_body = _json.dumps({"embedding": vector}).encode()
+
+        p = OllamaProvider()
+        p._status = ModelStatus.LOADED
+
+        call_count = [0]
+
+        def side_effect(req, timeout=None):
+            call_count[0] += 1
+            url = req.full_url if hasattr(req, 'full_url') else str(req.get_full_url())
+            if "/api/embed" in url and "/api/embeddings" not in url:
+                raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = fallback_body
+            mock_resp.__enter__ = lambda s: s
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            return mock_resp
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            result = p.embed("hello world")
+        assert result == vector
+
+    def test_embeddings_alias(self):
+        """embeddings() is an alias for embed()."""
+        import json as _json
+        vector = [0.9, 0.8, 0.7]
+        response_body = _json.dumps({"embeddings": [vector]}).encode()
+        p = OllamaProvider()
+        p._status = ModelStatus.LOADED
+        with patch("urllib.request.urlopen") as mock_open:
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = response_body
+            mock_resp.__enter__ = lambda s: s
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            mock_open.return_value = mock_resp
+            result = p.embeddings("test text")
+        assert result == vector
+
+    def test_list_models_returns_list(self):
+        """list_models() returns a list of dicts (or empty list if offline)."""
+        p = OllamaProvider()
+        with patch("urllib.request.urlopen") as mock_open:
+            mock_open.side_effect = Exception("offline")
+            result = p.list_models()
+        assert isinstance(result, list)
+
+    def test_stream_chat_alias(self):
+        """stream_chat() is an alias for chat_stream()."""
+        import json as _json
+        chunks = [
+            _json.dumps({"message": {"content": "hi"}, "done": False}).encode(),
+            _json.dumps({"message": {"content": ""}, "done": True}).encode(),
+        ]
+        p = OllamaProvider()
+        p._status = ModelStatus.LOADED
+        with patch("urllib.request.urlopen") as mock_open:
+            mock_resp = MagicMock()
+            mock_resp.__iter__ = MagicMock(return_value=iter(chunks))
+            mock_resp.__enter__ = lambda s: s
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            mock_open.return_value = mock_resp
+            tokens = list(p.stream_chat([{"role": "user", "content": "hi"}]))
+        assert "hi" in tokens
+
+    def test_switch_model_updates_model_name(self):
+        """switch_model() updates the internal model name."""
+        p = OllamaProvider(model_name="llama3:8b")
+        p.switch_model("phi4:latest")
+        assert p._model_name == "phi4:latest"
 
 
 # ---------------------------------------------------------------------------
