@@ -124,13 +124,29 @@ class ModelManager:
         """
         Load `model_id` (if needed) and make it the active default for `generate()`/`stream()`.
 
+        When ``settings.lazy_model_loading`` is ``True``, the previously
+        active model is unloaded after the new one is ready — keeping only
+        one model resident at a time (Milestone 10).
+
         Raises:
             KeyError: If `model_id` is not registered.
         """
-        model = self.load(model_id)
         previous = self._active_model_id
+        model = self.load(model_id)
         self._active_model_id = model_id
         self._switch_count += 1
+
+        # Lazy loading: unload the previous model to free resources.
+        if (
+            getattr(self.settings, "lazy_model_loading", False)
+            and previous is not None
+            and previous != model_id
+        ):
+            prev_model = self.registry.find(previous)
+            if prev_model is not None and prev_model.status().value == "loaded":
+                prev_model.shutdown()
+                logger.info("Lazy loading: unloaded previous model %s", previous)
+
         self._publish("MODEL_SWITCHED", from_model=previous, to_model=model_id)
         logger.info("Model switched: %s -> %s", previous, model_id)
         return model
@@ -257,6 +273,63 @@ class ModelManager:
         kwargs = {**self.settings.generation_kwargs(), **overrides}
         yield from model.stream(rendered, **kwargs)
 
+    def generate_stream(
+        self,
+        prompt: "str | Prompt",
+        model_id: str | None = None,
+        **overrides: Any,
+    ) -> Iterator[str]:
+        """
+        Stream a response for *prompt*, yielding tokens as they arrive.
+
+        Delegates to the active (or explicitly given) model's
+        ``generate_stream()`` method.  Use this instead of ``stream()``
+        for new code — it is the preferred streaming entry point as of
+        Milestone 10.
+
+        Raises:
+            NoActiveModelError: Same condition as ``generate()``.
+        """
+        resolved_id = model_id or self.select_default()
+        if resolved_id is None:
+            raise NoActiveModelError(
+                "No model is currently loaded and no default_model_id is configured. "
+                "Call ModelManager.load()/switch() with a registered model id first."
+            )
+        model = self.load(resolved_id)
+        rendered = prompt.render() if isinstance(prompt, Prompt) else prompt
+        kwargs = {**self.settings.generation_kwargs(), **overrides}
+        yield from model.generate_stream(rendered, **kwargs)
+
+    def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        model_id: str | None = None,
+        **overrides: Any,
+    ) -> Iterator[str]:
+        """
+        Stream a response for a chat-style *messages* list, yielding tokens
+        as they arrive.
+
+        Delegates to the active (or explicitly given) model's
+        ``chat_stream()`` method.  Providers with native chat-streaming
+        (e.g. ``OllamaProvider``) will use the message list directly;
+        providers without it fall back to flattening via ``BaseModel``'s
+        default implementation.
+
+        Raises:
+            NoActiveModelError: Same condition as ``generate()``.
+        """
+        resolved_id = model_id or self.select_default()
+        if resolved_id is None:
+            raise NoActiveModelError(
+                "No model is currently loaded and no default_model_id is configured. "
+                "Call ModelManager.load()/switch() with a registered model id first."
+            )
+        model = self.load(resolved_id)
+        kwargs = {**self.settings.generation_kwargs(), **overrides}
+        yield from model.chat_stream(messages, **kwargs)
+
     # ------------------------------------------------------------------
     # Health / statistics
     # ------------------------------------------------------------------
@@ -336,11 +409,16 @@ class ModelManager:
         )
 
         registered: list[str] = []
+        warmup = getattr(self.settings, "warmup_enabled", False)
 
         # Always register the two configured models.
         for model_name in dict.fromkeys([default_model, coding_model]):  # preserve order, deduplicate
             if self.registry.find(model_name) is None:
-                provider = OllamaProvider(model_name=model_name, base_url=base_url)
+                provider = OllamaProvider(
+                    model_name=model_name,
+                    base_url=base_url,
+                    warmup_enabled=warmup,
+                )
                 self.registry.register(provider)
                 registered.append(model_name)
                 logger.info("Registered Ollama model: %s", model_name)
@@ -350,7 +428,11 @@ class ModelManager:
             discovery = OllamaModelDiscovery(base_url=base_url)
             for info in discovery.list_models(timeout=3.0):
                 if self.registry.find(info.name) is None:
-                    provider = OllamaProvider(model_name=info.name, base_url=base_url)
+                    provider = OllamaProvider(
+                        model_name=info.name,
+                        base_url=base_url,
+                        warmup_enabled=warmup,
+                    )
                     self.registry.register(provider)
                     registered.append(info.name)
                     logger.info("Registered discovered Ollama model: %s", info.name)

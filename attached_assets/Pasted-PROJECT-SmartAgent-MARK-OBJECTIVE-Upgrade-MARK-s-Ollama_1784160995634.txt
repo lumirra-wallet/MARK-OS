@@ -1,0 +1,300 @@
+PROJECT:
+SmartAgent (MARK)
+
+OBJECTIVE
+
+Upgrade MARK's Ollama integration to support real-time streaming responses and optimize end-to-end response latency without changing the existing architecture.
+
+IMPORTANT
+
+Do NOT rewrite the Model Framework.
+
+Do NOT bypass:
+
+Brain
+↓
+ModelManager
+↓
+Provider
+↓
+Ollama
+
+Only enhance the existing implementation.
+
+------------------------------------------------
+
+PART 1 — Streaming Responses
+
+Modify OllamaProvider.generate() and chat() to support Ollama's streaming API.
+
+Instead of:
+
+{
+    "stream": false
+}
+
+support:
+
+{
+    "stream": true
+}
+
+Read the HTTP response incrementally.
+
+Yield tokens as they arrive.
+
+Do NOT wait for the complete response.
+
+------------------------------------------------
+
+PART 2 — Streaming Interface
+
+Extend BaseModel.
+
+Add:
+
+generate_stream()
+
+chat_stream()
+
+These should return an iterator/generator of text chunks.
+
+Existing generate() and chat() must continue working unchanged.
+
+Backward compatibility is required.
+
+------------------------------------------------
+
+PART 3 — Model Manager
+
+ModelManager should expose:
+
+generate()
+
+generate_stream()
+
+chat()
+
+chat_stream()
+
+No duplicated logic.
+
+------------------------------------------------
+
+PART 4 — Console Streaming
+
+Update the MARK console.
+
+Current behavior:
+
+mark> hello
+
+(wait...)
+
+Entire response appears.
+
+New behavior:
+
+mark> hello
+
+MARK is thinking...
+
+Hello Mr. Smart,
+How can I help you today?
+
+Characters/tokens should appear continuously while Ollama is generating.
+
+When complete, print a newline and return to:
+
+mark>
+
+------------------------------------------------
+
+PART 5 — Spinner
+
+While waiting for the first token show:
+
+Thinking...
+
+or
+
+⠋
+⠙
+⠹
+⠸
+
+(simple ASCII spinner)
+
+Stop spinner immediately once first token arrives.
+
+------------------------------------------------
+
+PART 6 — Performance Metrics
+
+Measure:
+
+Prompt assembly time
+
+Model latency
+
+Generation duration
+
+Tokens generated
+
+Tokens/sec
+
+Total response time
+
+Display when debug mode is enabled.
+
+Example:
+
+Generation Stats
+
+Prompt build:
+22 ms
+
+First token:
+410 ms
+
+Generation:
+4.8 sec
+
+Tokens:
+386
+
+Speed:
+80 tokens/sec
+
+Total:
+5.2 sec
+
+------------------------------------------------
+
+PART 7 — Prompt Cache
+
+Avoid rebuilding identical prompts.
+
+Cache:
+
+System Prompt
+
+Identity
+
+Static Context
+
+Knowledge summaries
+
+Only rebuild dynamic parts.
+
+------------------------------------------------
+
+PART 8 — Model Warmup
+
+When a model loads:
+
+Perform one tiny generation automatically.
+
+Example:
+
+"Hello"
+
+This keeps the model resident in memory and reduces first-response latency.
+
+------------------------------------------------
+
+PART 9 — Lazy Loading
+
+Do NOT load every Ollama model.
+
+Only load:
+
+the active model
+
+Unload previous model when switching if configured.
+
+------------------------------------------------
+
+PART 10 — Settings
+
+Add:
+
+streaming_enabled
+
+warmup_enabled
+
+cache_prompts
+
+show_generation_stats
+
+lazy_model_loading
+
+All configurable.
+
+------------------------------------------------
+
+PART 11 — Tests
+
+Mock streaming responses.
+
+Verify:
+
+stream order
+
+partial output
+
+console rendering
+
+spinner
+
+fallback to non-streaming
+
+metrics
+
+100% backward compatibility.
+
+------------------------------------------------
+
+PART 12 — Documentation
+
+Update:
+
+README
+
+ROADMAP
+
+CHANGELOG
+
+ARCHITECTURE
+
+SMARTAGENT
+
+Explain:
+
+Streaming
+
+Performance metrics
+
+Warmup
+
+Caching
+
+Lazy loading
+
+------------------------------------------------
+
+Do NOT implement:
+
+Voice
+
+Vision
+
+Learning
+
+Research
+
+Automation
+
+Browser
+
+Only improve the Ollama experience and console responsiveness.

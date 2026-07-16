@@ -1,5 +1,5 @@
 """
-OllamaProvider — Milestone 9, Ollama Integration.
+OllamaProvider — Milestone 9 / Milestone 10 upgrade.
 
 A concrete ``BaseModel`` implementation that talks to a locally-running
 Ollama server (default ``http://127.0.0.1:11434``).
@@ -38,9 +38,14 @@ HTTP:
     Uses only ``urllib.request`` from the standard library — no third-party
     packages required.  All calls are synchronous with a configurable timeout.
 
-Streaming:
-    ``stream()`` reads Ollama's newline-delimited JSON chunks and yields
-    the content token by token.
+Streaming (Milestone 9 / 10):
+    ``generate_stream()`` and ``chat_stream()`` use ``stream: true`` on
+    ``/api/chat`` and yield tokens as they arrive.  ``stream()`` delegates
+    to ``generate_stream()`` for backward compatibility.
+
+Warmup (Milestone 10):
+    When ``warmup_enabled=True``, ``load()`` sends a tiny one-token
+    generation so the model is immediately resident in memory.
 
 Embeddings:
     ``embed()`` raises ``NotImplementedError`` per the architecture spec
@@ -150,9 +155,11 @@ class OllamaProvider(BaseModel):
     ``ModelManager``.  ``ModelManager.load_ollama_models()`` creates them.
 
     Args:
-        model_name: The Ollama model tag (e.g. ``"llama3.1:8b"``).
-        base_url:   Base URL of the local Ollama server.
-        timeout:    HTTP timeout in seconds for generate/stream calls.
+        model_name:      The Ollama model tag (e.g. ``"llama3.1:8b"``).
+        base_url:        Base URL of the local Ollama server.
+        timeout:         HTTP timeout in seconds for generate/stream calls.
+        warmup_enabled:  Send a tiny generation on ``load()`` to keep the
+                         model resident in memory (Milestone 10).
     """
 
     # Tells model_loader to skip auto-discovery of this class.
@@ -163,10 +170,12 @@ class OllamaProvider(BaseModel):
         model_name: str = "llama3.1:8b",
         base_url: str = "http://127.0.0.1:11434",
         timeout: float = 120.0,
+        warmup_enabled: bool = False,
     ) -> None:
         self._model_name = model_name
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self._warmup_enabled = warmup_enabled
         self._status = ModelStatus.UNLOADED
         self._call_count = 0
 
@@ -240,6 +249,10 @@ class OllamaProvider(BaseModel):
         available — but always sets ``_status = LOADED`` so console commands
         like ``model use <name>`` work regardless of whether Ollama is running
         right now.  The real availability signal is ``health()``.
+
+        When ``warmup_enabled`` is ``True``, sends a tiny one-token generation
+        immediately so the model is resident in GPU/CPU memory and the first
+        real response starts without the weight-loading delay (Milestone 10).
         """
         self._status = ModelStatus.LOADED
         try:
@@ -257,6 +270,9 @@ class OllamaProvider(BaseModel):
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("OllamaProvider: could not reach Ollama at %s — %s", self._base_url, exc)
+
+        if self._warmup_enabled:
+            self._warmup()
 
     def unload(self) -> None:
         """Alias for ``shutdown()`` (symmetry with ``load()``)."""
@@ -332,7 +348,7 @@ class OllamaProvider(BaseModel):
         return None
 
     # ------------------------------------------------------------------
-    # Generation
+    # Generation (non-streaming)
     # ------------------------------------------------------------------
 
     def generate(self, prompt: str, **kwargs: Any) -> dict[str, Any]:
@@ -437,20 +453,72 @@ class OllamaProvider(BaseModel):
                 "model": self._model_name,
             }
 
+    # ------------------------------------------------------------------
+    # Streaming (Milestone 9 / 10)
+    # ------------------------------------------------------------------
+
     def stream(self, prompt: str, **kwargs: Any) -> Iterator[str]:
         """
-        Stream tokens from Ollama via ``POST /api/chat`` with ``stream: true``.
+        Stream tokens from Ollama.
 
-        Yields text chunks as they arrive.  Falls back to yielding the full
-        unavailability message in a single chunk if the server is unreachable.
+        Delegates to ``generate_stream()`` — kept for backward compatibility
+        with any caller that already uses ``model.stream(prompt)``.
+        """
+        yield from self.generate_stream(prompt, **kwargs)
+
+    def generate_stream(self, prompt: str, **kwargs: Any) -> Iterator[str]:
+        """
+        Stream tokens for *prompt* via ``POST /api/chat`` with ``stream: true``.
+
+        Converts the flat prompt to a chat-style message list then delegates
+        to ``_stream_messages()``.
+
+        Raises:
+            RuntimeError: If called before ``load()``.
         """
         if self._status != ModelStatus.LOADED:
             raise RuntimeError(
-                f"OllamaProvider {self._model_name!r} must be load()ed before stream() is called."
+                f"OllamaProvider {self._model_name!r} must be load()ed before generate_stream() is called."
             )
         self._call_count += 1
-
         messages = self._prompt_to_messages(prompt)
+        yield from self._stream_messages(messages, **kwargs)
+
+    def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """
+        Stream tokens for a chat *messages* list via ``POST /api/chat`` with
+        ``stream: true``.
+
+        This is the native streaming path for providers that receive a
+        pre-built message list (e.g. from ``ModelManager.chat_stream()``).
+
+        Raises:
+            RuntimeError: If called before ``load()``.
+        """
+        if self._status != ModelStatus.LOADED:
+            raise RuntimeError(
+                f"OllamaProvider {self._model_name!r} must be load()ed before chat_stream() is called."
+            )
+        self._call_count += 1
+        yield from self._stream_messages(messages, **kwargs)
+
+    def _stream_messages(
+        self,
+        messages: list[dict[str, str]],
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """
+        Core streaming implementation shared by ``generate_stream()`` and
+        ``chat_stream()``.
+
+        Sends *messages* to ``POST /api/chat`` with ``stream: true`` and
+        yields each token as it arrives via newline-delimited JSON.
+        Falls back to a single "unavailable" chunk if the server is unreachable.
+        """
         options = self._build_options(kwargs)
         payload = {
             "model": self._model_name,
@@ -483,6 +551,30 @@ class OllamaProvider(BaseModel):
                         break
         except Exception:  # noqa: BLE001
             yield "Ollama server unavailable."
+
+    # ------------------------------------------------------------------
+    # Warmup (Milestone 10)
+    # ------------------------------------------------------------------
+
+    def _warmup(self) -> None:
+        """
+        Send a tiny one-token generation to keep the model resident in memory.
+
+        This prevents the weight-loading delay on the first real user request.
+        Called by ``load()`` when ``warmup_enabled=True``.  Silently skipped
+        if the server is unreachable.
+        """
+        try:
+            payload = {
+                "model": self._model_name,
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": False,
+                "options": {"num_predict": 1},
+            }
+            self._post("/api/chat", payload)
+            logger.info("OllamaProvider: warmup complete for %s", self._model_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("OllamaProvider: warmup skipped for %s (%s)", self._model_name, exc)
 
     def embed(self, text: str) -> list[float]:
         """Not implemented — embeddings are a future milestone."""

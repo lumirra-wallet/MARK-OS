@@ -470,6 +470,9 @@ Planned systems, once their prerequisite milestones land:
 | 4 — Tool Engine v1 | ✅ Done | 100% | ToolEngine, 15 built-in tools, PathValidator safety, 276 tests |
 | 5 — Model Framework v1 | ✅ Done | 100% | ModelManager, ModelRegistry, MockModelProvider, PromptBuilder, ConversationContext, ResponseParser, 369 tests |
 | 6 — MARK Mind OS v1 | ✅ Done | 100% | ExecutiveController, SelfModel, IdentityEngine, WorkingMemory, AttentionManager, ContextManager, ConfidenceEngine, StateMachine, ReflectionEngine, Homeostasis + Sensory + Loop, 455 tests |
+| 8 — Console OS v1 | ✅ Done | 100% | REPL, CommandRouter, console commands for all subsystems |
+| 9 — Ollama Integration | ✅ Done | 100% | OllamaProvider, ModelDiscovery, coding auto-routing, fallback chat, 763 tests |
+| 10 — Streaming Upgrade | ✅ Done | 100% | generate_stream/chat_stream, spinner, metrics, prompt cache, warmup, lazy loading, ~60 new tests |
 | Research Engine | ⏳ Planned | 0% | Blocked on a real Model Framework provider for summarization |
 | Voice | ⏳ Planned | 0% | — |
 | Vision | ⏳ Planned | 0% | — |

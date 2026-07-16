@@ -1,7 +1,7 @@
 # SmartAgent
 
 SmartAgent is MARK — a personal AI assistant built incrementally for
-Mr. Smart.  As of v1.0, MARK integrates with a locally-running Ollama
+Mr. Smart.  As of v1.1, MARK integrates with a locally-running Ollama
 server for real language-model responses, while keeping all memory,
 knowledge, skills, and tools fully operational offline.
 

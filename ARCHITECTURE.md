@@ -8,6 +8,62 @@ package-by-package dependency list.
 
 ---
 
+## 5. Streaming pipeline (Milestone 10)
+
+```
+mark> hello
+
+  ⠹ Thinking...            ← spinner thread (cleared on first token)
+
+Hello Mr. Smart,           ← tokens written to stdout as they arrive
+How can I help you today?
+
+  ─── Generation Stats ─────────────────   ← only when show_generation_stats=True
+  Prompt build :   22 ms
+  First token  :  410 ms
+  Generation   :    4.8 sec
+  Tokens       :  ~386
+  Speed        :   ~80 tokens/sec
+  Total        :    5.2 sec
+  ─────────────────────────────────────
+
+mark>
+```
+
+### Streaming call chain
+
+```
+Console (REPL)
+  └─ _send_to_model()
+       ├─ _gather_memory / _gather_knowledge
+       ├─ Prompt cache (hash of identity + mind_state + goals)
+       ├─ PromptBuilder.build()
+       └─ ModelManager.generate_stream(prompt, model_id)
+              └─ OllamaProvider.generate_stream(rendered_prompt)
+                     └─ _stream_messages()
+                            └─ POST /api/chat { "stream": true }
+                                   → NDJSON chunks → yield token by token
+```
+
+### Warmup (model warmup on load)
+
+```
+ModelManager.switch("llama3.1:8b")
+  └─ OllamaProvider.load()
+       ├─ GET /api/tags  (confirm installed)
+       └─ POST /api/chat { "stream": false, num_predict: 1 }  ← warmup ping
+```
+
+### Lazy loading
+
+```
+ModelManager.switch("qwen2.5-coder:7b")
+  ├─ OllamaProvider("qwen2.5-coder:7b").load()
+  └─ OllamaProvider("llama3.1:8b").shutdown()  ← unload previous (if lazy_model_loading=True)
+```
+
+---
+
 ## 1. System overview
 
 ```

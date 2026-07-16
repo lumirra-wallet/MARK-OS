@@ -207,6 +207,33 @@ class BaseModel(ABC):
         """
         raise NotImplementedError
 
+    def generate_stream(self, prompt: str, **kwargs: Any) -> Iterator[str]:
+        """
+        Stream a response for `prompt`, yielding text chunks incrementally.
+
+        Default implementation delegates to `stream()` for backward compatibility.
+        Providers that already implement `stream()` gain `generate_stream()` for
+        free; providers wanting richer control (e.g. metrics) should override.
+        """
+        yield from self.stream(prompt, **kwargs)
+
+    def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """
+        Stream a response for a chat-style `messages` list, yielding chunks.
+
+        Default implementation flattens the messages to a single string and
+        delegates to `stream()`.  Providers with native chat-streaming support
+        (e.g. `OllamaProvider`) should override this to avoid the flattening.
+        """
+        flat = "\n".join(
+            f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
+        )
+        yield from self.stream(flat, **kwargs)
+
     @abstractmethod
     def embed(self, text: str) -> list[float]:
         """

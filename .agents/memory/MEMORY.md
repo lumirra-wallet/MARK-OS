@@ -4,3 +4,4 @@
 - [Milestone 6 MARK Mind OS v1](milestone6-mind-os.md) — observe-not-drive constraint, MindProviders avoids circular import, homeostasis is sync tick() not a thread, IdentityEngine parses SMARTAGENT.md.
 - [Milestone 8 Console OS v1](milestone8-console-os.md) — command framework design, KnowledgeManager API quirks, logging race-condition fix, REPL test patterns.
 - [Milestone 9 Ollama Integration](milestone9-ollama.md) — OllamaProvider exclusion trick, health() direct-HTTP pattern, fallback_chat wiring, coding auto-routing, PromptBuilder extensions.
+- [Milestone 10 Streaming Upgrade](milestone10-streaming.md) — generate_stream/chat_stream, spinner, stats, prompt cache, warmup, lazy loading; tmp_agent fixture must set streaming_enabled=False for pre-M10 tests.

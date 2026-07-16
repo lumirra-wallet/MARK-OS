@@ -67,6 +67,16 @@ class ModelSettings:
     ollama_default_model: str = "llama3.1:8b"
     ollama_coding_model: str = "qwen2.5-coder:7b"
 
+    # Milestone 10 — Streaming, Performance & Optimisation
+    warmup_enabled: bool = True
+    """Perform a tiny warmup generation when a model loads to keep it resident."""
+    cache_prompts: bool = True
+    """Cache assembled static prompt context (system prompt, identity, goals)."""
+    show_generation_stats: bool = False
+    """Print timing / token-count metrics after each streamed response."""
+    lazy_model_loading: bool = False
+    """Unload the previous model when switching to a new one."""
+
     def generation_kwargs(self) -> dict[str, float | int | bool]:
         """
         Common generation parameters to forward to a provider's `generate()`/`stream()`.

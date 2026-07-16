@@ -7,6 +7,79 @@ the architecture is still settling.
 
 ## [Unreleased]
 
+## v1.1 — Streaming Upgrade
+
+### Overview
+Real-time token streaming, latency optimisation, and console UX improvements for
+the Ollama integration.  No architecture changes — the Brain → ModelManager →
+Provider chain is preserved.  All pre-v1.1 behavior is 100% backward-compatible.
+
+### New capabilities
+
+- **Real-time streaming** — `OllamaProvider.generate_stream()` and
+  `chat_stream()` send `POST /api/chat` with `stream: true` and yield tokens
+  as newline-delimited JSON chunks arrive.  `stream()` now delegates to
+  `generate_stream()` for backward compatibility.
+
+- **BaseModel streaming interface** — `BaseModel` gains two concrete (non-abstract)
+  default methods: `generate_stream(prompt)` and `chat_stream(messages)`.  Both
+  delegate to the existing `stream()` so all prior providers gain the new interface
+  for free without modification.
+
+- **ModelManager streaming** — `ModelManager` exposes `generate_stream()` and
+  `chat_stream()` mirroring the same interface as `generate()` / `stream()`.  No
+  logic is duplicated between the streaming and non-streaming paths.
+
+- **Console token streaming** — Free-text input and `chat` commands now write
+  tokens directly to `stdout` as they arrive instead of blocking for the full
+  response.  Returns `""` so the REPL does not double-print.
+
+- **Spinner** — While waiting for the first token, a Unicode braille spinner
+  (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) is displayed with "Thinking…".  The spinner is cleared
+  the instant the first token arrives.
+
+- **Performance metrics** — When `settings.show_generation_stats = True`, a
+  stats block is printed after each streamed response:
+  - Prompt build time (ms)
+  - First token latency (ms)
+  - Generation duration (sec)
+  - Approximate token count
+  - Tokens per second
+  - Total response time (sec)
+
+- **Prompt cache** — When `settings.cache_prompts = True`, the static context
+  (identity, mind-state, goals) is cached between calls.  Only the dynamic parts
+  (user message, memory snippets, knowledge hits) are rebuilt each turn.  Cache
+  is bounded to 16 entries (LRU-eviction on insert).
+
+- **Model warmup** — When `settings.warmup_enabled = True` (default `True`), a
+  single one-token `POST /api/chat` is sent immediately after `load()` so the
+  model is already resident in memory before the first user request.  Silently
+  skipped if the server is unreachable.
+
+- **Lazy model loading** — When `settings.lazy_model_loading = True` (default
+  `False`), `ModelManager.switch()` unloads the previous model after the new one
+  is ready, keeping only one provider in memory at a time.
+
+### New settings (all on `ModelSettings`)
+
+| Field | Type | Default | Purpose |
+| --- | --- | --- | --- |
+| `warmup_enabled` | bool | `True` | Warm-up generation on `load()` |
+| `cache_prompts` | bool | `True` | Cache static prompt context |
+| `show_generation_stats` | bool | `False` | Print metrics after each response |
+| `lazy_model_loading` | bool | `False` | Unload previous model on switch |
+
+(`streaming_enabled` already existed; all four above are new.)
+
+### Tests
+- **~60 new tests** in `tests/test_ollama.py` covering: stream token order,
+  partial output, spinner frames, fallback to non-streaming, metrics display,
+  prompt cache, warmup, lazy loading, and 100% backward compatibility.
+- All pre-v1.1 tests continue to pass.
+
+---
+
 ## v1.0 — Ollama Integration
 
 - **OllamaProvider** (`smartagent/models/providers/ollama_provider.py`) — full

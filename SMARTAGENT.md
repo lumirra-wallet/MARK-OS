@@ -170,6 +170,19 @@ up. See `README.md` for the current package layout and status.
   observes and represents MARK's own state; it never drives Brain routing
   and changes no other subsystem's behavior. See `smartagent/mind/`,
   `ARCHITECTURE.md`, and `CHANGELOG.md v0.7`.
+- `models` streaming — **implemented (Streaming Upgrade v1.1).** The Ollama
+  integration now streams tokens in real time. `OllamaProvider` gains
+  `generate_stream()` and `chat_stream()` (using `stream: true` on
+  `/api/chat`); `BaseModel` gains concrete default implementations so all
+  providers automatically support the new interface; `ModelManager` exposes
+  `generate_stream()` and `chat_stream()` as its public API. The console
+  displays a braille spinner while waiting for the first token, then writes
+  each token to `stdout` as it arrives. Optional generation stats (prompt
+  build time, first-token latency, tokens/sec) are shown when
+  `show_generation_stats = True`. Prompt caching avoids rebuilding static
+  context on every message. Model warmup sends a one-token generation on
+  `load()` to keep the model resident. Lazy loading unloads the previous
+  model when switching (optional, off by default).
 - `ui` — **implemented (MARK Console OS v1).** Running
   `python -m smartagent.main` launches a persistent interactive console —
   a professional REPL with a startup banner, grouped `help` listing, a

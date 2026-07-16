@@ -92,7 +92,14 @@ def _chat_response(content: str, model: str = "llama3.1:8b") -> dict:
 
 @pytest.fixture()
 def tmp_agent(tmp_path: Path) -> SmartAgent:
-    """Isolated SmartAgent with Ollama HTTP calls mocked at the urllib level."""
+    """
+    Isolated SmartAgent with Ollama HTTP calls mocked at the urllib level.
+
+    Streaming is explicitly disabled so all pre-M10 tests continue to
+    test the non-streaming return-value path unchanged.  The separate
+    ``streaming_agent`` fixture (in ``TestStreamingConsole``) enables
+    streaming to test the M10 path.
+    """
     settings = Settings(
         vault_path=str(tmp_path / "vault"),
         knowledge_path=str(tmp_path / "knowledge"),
@@ -102,6 +109,9 @@ def tmp_agent(tmp_path: Path) -> SmartAgent:
     tags_resp = _make_http_response(_tags_response(["llama3.1:8b", "qwen2.5-coder:7b"]))
     with patch("urllib.request.urlopen", return_value=tags_resp):
         agent = SmartAgent(settings=settings)
+    # Keep the non-streaming path active so pre-M10 assertions on return
+    # values continue to pass.  TestStreamingConsole tests the streaming path.
+    agent.model_manager.settings.streaming_enabled = False
     return agent
 
 
@@ -904,3 +914,556 @@ class TestAgentOllamaStartup:
 
     def test_agent_mock_provider_also_registered(self, tmp_agent):
         assert tmp_agent.model_manager.registry.find("mock") is not None
+
+
+# ---------------------------------------------------------------------------
+# Milestone 10 — Streaming upgrade
+# ---------------------------------------------------------------------------
+
+
+def _make_stream_response(tokens: list[str]) -> MagicMock:
+    """
+    Build a fake streaming ``urlopen`` context-manager that yields NDJSON lines
+    for each token, followed by a final ``done=True`` chunk.
+    """
+    lines: list[bytes] = []
+    for i, token in enumerate(tokens):
+        done = i == len(tokens) - 1
+        line = json.dumps({
+            "message": {"role": "assistant", "content": token},
+            "done": done,
+        }).encode("utf-8")
+        lines.append(line)
+
+    fake_resp = MagicMock()
+    fake_resp.__iter__ = MagicMock(return_value=iter(lines))
+    fake_resp.__enter__ = lambda s: s
+    fake_resp.__exit__ = MagicMock(return_value=False)
+    return fake_resp
+
+
+class TestOllamaProviderGenerateStream:
+    """Tests for OllamaProvider.generate_stream() — Part 1/2."""
+
+    def _loaded(self) -> OllamaProvider:
+        p = OllamaProvider(model_name="llama3.1:8b")
+        p.initialize()
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            p.load()
+        return p
+
+    def test_generate_stream_yields_tokens_in_order(self):
+        p = self._loaded()
+        tokens = ["Hello", " Mr.", " Smart", "."]
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(tokens)):
+            result = list(p.generate_stream("hello"))
+        assert result == tokens
+
+    def test_generate_stream_yields_partial_output(self):
+        p = self._loaded()
+        tokens = ["Alpha", " Beta"]
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(tokens)):
+            gen = p.generate_stream("test")
+            first = next(gen)
+        assert first == "Alpha"
+
+    def test_generate_stream_fallback_when_unavailable(self):
+        p = self._loaded()
+        with patch("urllib.request.urlopen", side_effect=OSError("down")):
+            chunks = list(p.generate_stream("hi"))
+        assert len(chunks) == 1
+        assert "unavailable" in chunks[0].lower()
+
+    def test_generate_stream_raises_before_load(self):
+        p = OllamaProvider()
+        with pytest.raises(RuntimeError, match="load"):
+            list(p.generate_stream("hi"))
+
+    def test_generate_stream_increments_call_count(self):
+        p = self._loaded()
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(["hi"])):
+            list(p.generate_stream("hello"))
+        assert p.call_count == 1
+
+    def test_stream_delegates_to_generate_stream(self):
+        """stream() must remain backward-compatible by delegating to generate_stream()."""
+        p = self._loaded()
+        tokens = ["token1", " token2"]
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(tokens)):
+            result = list(p.stream("hello"))
+        assert result == tokens
+
+
+class TestOllamaProviderChatStream:
+    """Tests for OllamaProvider.chat_stream() — Part 1/2."""
+
+    def _loaded(self) -> OllamaProvider:
+        p = OllamaProvider()
+        p.initialize()
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            p.load()
+        return p
+
+    def test_chat_stream_yields_tokens(self):
+        p = self._loaded()
+        tokens = ["Hello", " there"]
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(tokens)):
+            result = list(p.chat_stream([{"role": "user", "content": "hi"}]))
+        assert result == tokens
+
+    def test_chat_stream_fallback_when_unavailable(self):
+        p = self._loaded()
+        with patch("urllib.request.urlopen", side_effect=OSError("down")):
+            chunks = list(p.chat_stream([{"role": "user", "content": "hi"}]))
+        assert "unavailable" in chunks[0].lower()
+
+    def test_chat_stream_raises_before_load(self):
+        p = OllamaProvider()
+        with pytest.raises(RuntimeError, match="load"):
+            list(p.chat_stream([{"role": "user", "content": "hi"}]))
+
+    def test_chat_stream_increments_call_count(self):
+        p = self._loaded()
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(["ok"])):
+            list(p.chat_stream([{"role": "user", "content": "hi"}]))
+        assert p.call_count == 1
+
+
+class TestBaseModelStreamDefaults:
+    """Tests for new concrete default methods on BaseModel — Part 2."""
+
+    def test_generate_stream_default_delegates_to_stream(self):
+        """MockModelProvider inherits generate_stream() → stream() → generate()."""
+        from smartagent.models.providers.mock_provider import MockModelProvider
+        m = MockModelProvider()
+        m.initialize()
+        m.load()
+        chunks = list(m.generate_stream("hello world"))
+        assert len(chunks) > 0
+        # Must reconstruct the full content (ignoring spacing differences).
+        assert "mock" in " ".join(chunks).lower() or "hello" in " ".join(chunks).lower()
+
+    def test_chat_stream_default_yields_content(self):
+        """chat_stream() default flattens messages and delegates to stream()."""
+        from smartagent.models.providers.mock_provider import MockModelProvider
+        m = MockModelProvider()
+        m.initialize()
+        m.load()
+        messages = [{"role": "user", "content": "hello"}]
+        chunks = list(m.chat_stream(messages))
+        assert len(chunks) > 0
+
+
+class TestModelManagerStreaming:
+    """Tests for ModelManager.generate_stream() and chat_stream() — Part 3."""
+
+    def _manager_with_ollama(self) -> ModelManager:
+        mgr = ModelManager(settings=ModelSettings())
+        tags_resp = _make_http_response(_tags_response(["llama3.1:8b"]))
+        with patch("urllib.request.urlopen", return_value=tags_resp):
+            mgr.load_ollama_models(default_model="llama3.1:8b", coding_model="llama3.1:8b")
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            mgr.switch("llama3.1:8b")
+        return mgr
+
+    def test_generate_stream_yields_tokens(self):
+        mgr = self._manager_with_ollama()
+        tokens = ["Hi", " there"]
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(tokens)):
+            result = list(mgr.generate_stream("hello"))
+        assert result == tokens
+
+    def test_generate_stream_raises_no_active_model(self):
+        from smartagent.models.manager.model_manager import NoActiveModelError
+        mgr = ModelManager()
+        with pytest.raises(NoActiveModelError):
+            list(mgr.generate_stream("hello"))
+
+    def test_generate_stream_with_explicit_model_id(self):
+        mgr = self._manager_with_ollama()
+        tokens = ["token"]
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(tokens)):
+            result = list(mgr.generate_stream("hello", model_id="llama3.1:8b"))
+        assert result == tokens
+
+    def test_chat_stream_yields_tokens(self):
+        mgr = self._manager_with_ollama()
+        tokens = ["Hello", " world"]
+        messages = [{"role": "user", "content": "hi"}]
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(tokens)):
+            result = list(mgr.chat_stream(messages))
+        assert result == tokens
+
+    def test_chat_stream_raises_no_active_model(self):
+        from smartagent.models.manager.model_manager import NoActiveModelError
+        mgr = ModelManager()
+        with pytest.raises(NoActiveModelError):
+            list(mgr.chat_stream([{"role": "user", "content": "hi"}]))
+
+    def test_no_duplicate_logic_generate_vs_generate_stream(self):
+        """generate() and generate_stream() are separate code paths — both work."""
+        mgr = self._manager_with_ollama()
+        # Non-streaming
+        with patch("urllib.request.urlopen", return_value=_make_http_response(_chat_response("ok"))):
+            resp = mgr.generate("hello")
+        assert resp.text == "ok"
+        # Streaming
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(["ok"])):
+            chunks = list(mgr.generate_stream("hello"))
+        assert "ok" in chunks
+
+
+class TestWarmup:
+    """Tests for OllamaProvider model warmup on load() — Part 8."""
+
+    def test_warmup_called_on_load_when_enabled(self):
+        p = OllamaProvider(model_name="llama3.1:8b", warmup_enabled=True)
+        p.initialize()
+        call_args: list[tuple] = []
+
+        def fake_urlopen(req, timeout=None):
+            call_args.append((req,))
+            resp = MagicMock()
+            resp.read.return_value = json.dumps(_tags_response(["llama3.1:8b"])).encode()
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = MagicMock(return_value=False)
+            return resp
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            p.load()
+
+        # First call: /api/tags (health ping). Second call: /api/chat (warmup).
+        assert len(call_args) == 2
+
+    def test_warmup_not_called_when_disabled(self):
+        p = OllamaProvider(model_name="llama3.1:8b", warmup_enabled=False)
+        p.initialize()
+        call_args: list[tuple] = []
+
+        def fake_urlopen(req, timeout=None):
+            call_args.append((req,))
+            resp = MagicMock()
+            resp.read.return_value = json.dumps(_tags_response(["llama3.1:8b"])).encode()
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = MagicMock(return_value=False)
+            return resp
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            p.load()
+
+        # Only the /api/tags health ping, no warmup.
+        assert len(call_args) == 1
+
+    def test_warmup_survives_server_down(self):
+        """warmup() must not raise even if Ollama is unreachable."""
+        p = OllamaProvider(model_name="llama3.1:8b", warmup_enabled=True)
+        p.initialize()
+        with patch("urllib.request.urlopen", side_effect=OSError("down")):
+            p.load()  # must not raise
+        assert p.status() == ModelStatus.LOADED
+
+    def test_warmup_enabled_passed_by_model_manager(self):
+        """load_ollama_models() passes warmup_enabled from settings."""
+        from smartagent.models.config.model_settings import ModelSettings
+        settings = ModelSettings(warmup_enabled=True)
+        mgr = ModelManager(settings=settings)
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            mgr.load_ollama_models()
+        provider = mgr.registry.find("llama3.1:8b")
+        assert provider is not None
+        from smartagent.models.providers.ollama_provider import OllamaProvider
+        assert isinstance(provider, OllamaProvider)
+        assert provider._warmup_enabled is True
+
+
+class TestLazyLoading:
+    """Tests for lazy model loading on switch() — Part 9."""
+
+    def _mgr_with_lazy(self) -> ModelManager:
+        from smartagent.models.config.model_settings import ModelSettings
+        settings = ModelSettings(lazy_model_loading=True)
+        mgr = ModelManager(settings=settings)
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            mgr.load_ollama_models(
+                default_model="llama3.1:8b",
+                coding_model="qwen2.5-coder:7b",
+            )
+        return mgr
+
+    def test_lazy_switch_unloads_previous_model(self):
+        mgr = self._mgr_with_lazy()
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            mgr.switch("llama3.1:8b")
+        # llama3.1:8b is now loaded
+        assert mgr.registry.find("llama3.1:8b").status() == ModelStatus.LOADED
+
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            mgr.switch("qwen2.5-coder:7b")
+        # After switching away, previous model should be unloaded
+        assert mgr.registry.find("llama3.1:8b").status() == ModelStatus.UNLOADED
+        assert mgr.registry.find("qwen2.5-coder:7b").status() == ModelStatus.LOADED
+
+    def test_lazy_switch_does_not_unload_same_model(self):
+        mgr = self._mgr_with_lazy()
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            mgr.switch("llama3.1:8b")
+            mgr.switch("llama3.1:8b")  # switch to same model
+        assert mgr.registry.find("llama3.1:8b").status() == ModelStatus.LOADED
+
+    def test_no_lazy_unload_when_disabled(self):
+        """Without lazy_model_loading, switching keeps both models loaded."""
+        from smartagent.models.config.model_settings import ModelSettings
+        settings = ModelSettings(lazy_model_loading=False)
+        mgr = ModelManager(settings=settings)
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            mgr.load_ollama_models(
+                default_model="llama3.1:8b",
+                coding_model="qwen2.5-coder:7b",
+            )
+            mgr.switch("llama3.1:8b")
+            mgr.switch("qwen2.5-coder:7b")
+        # Both stay loaded when lazy loading is off.
+        assert mgr.registry.find("llama3.1:8b").status() == ModelStatus.LOADED
+        assert mgr.registry.find("qwen2.5-coder:7b").status() == ModelStatus.LOADED
+
+
+class TestModelSettings10:
+    """Tests for new Milestone 10 settings fields — Part 10."""
+
+    def test_warmup_enabled_default(self):
+        from smartagent.models.config.model_settings import ModelSettings
+        assert ModelSettings().warmup_enabled is True
+
+    def test_cache_prompts_default(self):
+        from smartagent.models.config.model_settings import ModelSettings
+        assert ModelSettings().cache_prompts is True
+
+    def test_show_generation_stats_default(self):
+        from smartagent.models.config.model_settings import ModelSettings
+        assert ModelSettings().show_generation_stats is False
+
+    def test_lazy_model_loading_default(self):
+        from smartagent.models.config.model_settings import ModelSettings
+        assert ModelSettings().lazy_model_loading is False
+
+    def test_streaming_enabled_default(self):
+        from smartagent.models.config.model_settings import ModelSettings
+        assert ModelSettings().streaming_enabled is True
+
+    def test_settings_configurable(self):
+        from smartagent.models.config.model_settings import ModelSettings
+        s = ModelSettings(
+            warmup_enabled=False,
+            cache_prompts=False,
+            show_generation_stats=True,
+            lazy_model_loading=True,
+            streaming_enabled=False,
+        )
+        assert s.warmup_enabled is False
+        assert s.cache_prompts is False
+        assert s.show_generation_stats is True
+        assert s.lazy_model_loading is True
+        assert s.streaming_enabled is False
+
+
+class TestPromptCache:
+    """Tests for the static prompt context cache in _send_to_model — Part 7."""
+
+    def test_cache_key_stable_for_same_context(self):
+        from smartagent.ui.commands.models import _static_cache_key
+        k1 = _static_cache_key("MARK v1", "idle", ["goal A"])
+        k2 = _static_cache_key("MARK v1", "idle", ["goal A"])
+        assert k1 == k2
+
+    def test_cache_key_differs_for_different_context(self):
+        from smartagent.ui.commands.models import _static_cache_key
+        k1 = _static_cache_key("MARK v1", "idle", ["goal A"])
+        k2 = _static_cache_key("MARK v1", "thinking", ["goal B"])
+        assert k1 != k2
+
+    def test_cache_put_and_retrieve(self):
+        from smartagent.ui.commands import models as m_mod
+        # Reset cache for isolation.
+        m_mod._STATIC_CTX_CACHE.clear()
+        key = m_mod._static_cache_key("MARK", "idle", ["g1"])
+        m_mod._put_cache(key, "MARK", "idle", ["g1"])
+        assert key in m_mod._STATIC_CTX_CACHE
+        identity, mind_state, goals = m_mod._STATIC_CTX_CACHE[key]
+        assert identity == "MARK"
+        assert mind_state == "idle"
+        assert goals == ["g1"]
+
+    def test_cache_max_size_respected(self):
+        from smartagent.ui.commands import models as m_mod
+        m_mod._STATIC_CTX_CACHE.clear()
+        # Fill beyond _CACHE_MAX
+        for i in range(m_mod._CACHE_MAX + 5):
+            key = m_mod._static_cache_key(f"id{i}", f"state{i}", [])
+            m_mod._put_cache(key, f"id{i}", f"state{i}", [])
+        assert len(m_mod._STATIC_CTX_CACHE) <= m_mod._CACHE_MAX
+
+
+class TestStreamingConsole:
+    """
+    Tests for the streaming console path — Parts 4, 5, 6.
+
+    Strategy: disable streaming via settings (streaming_enabled=False) to
+    test the non-streaming path, and use stdout capture for the streaming path.
+    """
+
+    @pytest.fixture()
+    def streaming_agent(self, tmp_path: Path) -> "SmartAgent":
+        from smartagent.config.settings import Settings
+        from smartagent.models.config.model_settings import ModelSettings
+        settings = Settings(
+            vault_path=str(tmp_path / "vault"),
+            knowledge_path=str(tmp_path / "knowledge"),
+            workspace_path=str(tmp_path),
+        )
+        tags_resp = _make_http_response(_tags_response(["llama3.1:8b", "qwen2.5-coder:7b"]))
+        with patch("urllib.request.urlopen", return_value=tags_resp):
+            agent = SmartAgent(settings=settings)
+        # Patch streaming settings on the model_manager.
+        agent.model_manager.settings.streaming_enabled = True
+        agent.model_manager.settings.show_generation_stats = False
+        return agent
+
+    def test_non_streaming_path_returns_text(self, tmp_agent):
+        """With streaming_enabled=False, _send_to_model returns the full response string."""
+        from smartagent.ui.commands.models import _send_to_model
+        tmp_agent.model_manager.settings.streaming_enabled = False
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            tmp_agent.model_manager.switch("llama3.1:8b")
+        with patch("urllib.request.urlopen", return_value=_make_http_response(_chat_response("Hello Mr. Smart"))):
+            result = _send_to_model(tmp_agent, "hello")
+        assert "Hello Mr. Smart" in result
+
+    def test_streaming_path_returns_empty_string(self, streaming_agent, capsys):
+        """Streaming path prints to stdout and returns '' so REPL doesn't double-print."""
+        from smartagent.ui.commands.models import _send_to_model
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            streaming_agent.model_manager.switch("llama3.1:8b")
+        tokens = ["Hello", " Mr.", " Smart"]
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(tokens)):
+            result = _send_to_model(streaming_agent, "hello")
+        captured = capsys.readouterr()
+        # Result is empty (REPL should not print anything extra).
+        assert result == ""
+        # Tokens were written to stdout.
+        combined = captured.out.replace("\r", "").replace(" " * 20, "").strip()
+        assert "Hello" in combined
+
+    def test_streaming_token_order_preserved(self, streaming_agent, capsys):
+        """Tokens appear in the correct order in stdout."""
+        from smartagent.ui.commands.models import _send_to_model
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            streaming_agent.model_manager.switch("llama3.1:8b")
+        tokens = ["Alpha", " Beta", " Gamma"]
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(tokens)):
+            _send_to_model(streaming_agent, "test")
+        out = capsys.readouterr().out
+        idx_a = out.find("Alpha")
+        idx_b = out.find("Beta")
+        idx_g = out.find("Gamma")
+        assert idx_a < idx_b < idx_g
+
+    def test_streaming_unavailable_returns_error_message(self, streaming_agent):
+        """Streaming path gracefully handles Ollama being down."""
+        from smartagent.ui.commands.models import _send_to_model
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            streaming_agent.model_manager.switch("llama3.1:8b")
+        with patch("urllib.request.urlopen", side_effect=OSError("down")):
+            result = _send_to_model(streaming_agent, "hello")
+        assert "unavailable" in result.lower()
+
+    def test_spinner_frames_are_defined(self):
+        from smartagent.ui.commands.models import _SPINNER_FRAMES
+        assert len(_SPINNER_FRAMES) > 0
+
+    def test_stats_displayed_when_enabled(self, streaming_agent, capsys):
+        """Generation stats are printed when show_generation_stats=True."""
+        from smartagent.ui.commands.models import _send_to_model
+        streaming_agent.model_manager.settings.show_generation_stats = True
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            streaming_agent.model_manager.switch("llama3.1:8b")
+        tokens = ["Hello"]
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(tokens)):
+            _send_to_model(streaming_agent, "hello")
+        out = capsys.readouterr().out
+        assert "Generation Stats" in out or "First token" in out
+
+    def test_stats_not_displayed_when_disabled(self, streaming_agent, capsys):
+        """Generation stats are not shown when show_generation_stats=False."""
+        from smartagent.ui.commands.models import _send_to_model
+        streaming_agent.model_manager.settings.show_generation_stats = False
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            streaming_agent.model_manager.switch("llama3.1:8b")
+        tokens = ["Hello"]
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(tokens)):
+            _send_to_model(streaming_agent, "hello")
+        out = capsys.readouterr().out
+        assert "Generation Stats" not in out and "First token" not in out
+
+    def test_fallback_to_non_streaming_when_disabled(self, tmp_agent):
+        """fallback_chat() works correctly when streaming is disabled."""
+        tmp_agent.model_manager.settings.streaming_enabled = False
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            tmp_agent.model_manager.switch("llama3.1:8b")
+        with patch("urllib.request.urlopen", return_value=_make_http_response(_chat_response("Hi!"))):
+            result = fallback_chat(tmp_agent, "hello")
+        assert "Hi!" in result
+
+
+class TestBackwardCompatibility:
+    """Ensure 100% backward compatibility — all pre-M10 behaviors preserved."""
+
+    def test_generate_still_works(self, tmp_agent):
+        """generate() non-streaming path unchanged."""
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            tmp_agent.model_manager.switch("llama3.1:8b")
+        with patch("urllib.request.urlopen", return_value=_make_http_response(_chat_response("OK"))):
+            resp = tmp_agent.model_manager.generate("hello")
+        assert resp.text == "OK"
+
+    def test_chat_still_works_on_provider(self, tmp_agent):
+        """OllamaProvider.chat() unchanged."""
+        provider = tmp_agent.model_manager.registry.find("llama3.1:8b")
+        assert provider is not None
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            provider.load()
+        with patch("urllib.request.urlopen", return_value=_make_http_response(_chat_response("Yep"))):
+            raw = provider.chat([{"role": "user", "content": "hello"}])
+        assert raw["content"] == "Yep"
+
+    def test_stream_backward_compatible(self, tmp_agent):
+        """stream() still works and delegates to generate_stream()."""
+        provider = tmp_agent.model_manager.registry.find("llama3.1:8b")
+        assert provider is not None
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            provider.load()
+        tokens = ["A", "B"]
+        with patch("urllib.request.urlopen", return_value=_make_stream_response(tokens)):
+            result = list(provider.stream("hello"))
+        assert result == tokens
+
+    def test_model_switch_still_works(self, tmp_agent):
+        """model switch command unchanged."""
+        from smartagent.ui.console import Console
+        console = Console(tmp_agent)
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            resp = console.router.dispatch(tmp_agent, "model use llama3.1:8b")
+        assert "llama3.1:8b" in resp
+
+    def test_fallback_still_returns_unknown_command_with_no_model(self, tmp_agent):
+        """No model active → Unknown command (identical to pre-M10)."""
+        response = fallback_chat(tmp_agent, "xyzzy")
+        assert "Unknown command" in response
+
+    def test_no_active_model_error_still_raised(self):
+        """NoActiveModelError raised when no model configured."""
+        from smartagent.models.manager.model_manager import NoActiveModelError
+        mgr = ModelManager()
+        with pytest.raises(NoActiveModelError):
+            list(mgr.generate_stream("hello"))
+        with pytest.raises(NoActiveModelError):
+            list(mgr.chat_stream([{"role": "user", "content": "hi"}]))

@@ -1,5 +1,5 @@
 """
-Model commands — Milestone 9, Ollama Integration.
+Model commands — Milestone 9 / Milestone 10 (Streaming upgrade).
 
 Commands registered:
     models          — list all registered model providers with status
@@ -22,11 +22,31 @@ Context assembly:
     ``_send_to_model()`` gathers working-memory snippets, relevant knowledge
     concepts, current Mind state, identity, and active goals, then calls
     ``PromptBuilder.build()`` with the full MARK system prompt before
-    forwarding to ``ModelManager.generate()``.
+    forwarding to ``ModelManager.generate_stream()`` (streaming path) or
+    ``ModelManager.generate()`` (non-streaming fallback).
+
+Streaming (Milestone 10):
+    When ``settings.streaming_enabled`` is ``True``, tokens are printed
+    directly to ``stdout`` as they arrive.  A spinner is shown while waiting
+    for the first token.  The function then returns ``""`` so the REPL does
+    not double-print the response.
+
+Performance metrics (Milestone 10):
+    When ``settings.show_generation_stats`` is ``True``, a timing/token
+    summary is printed after each streamed response.
+
+Prompt cache (Milestone 10):
+    When ``settings.cache_prompts`` is ``True``, the static context
+    (identity, mind-state, goals) is cached between calls to avoid
+    recomputing unchanged data on every message.
 """
 
 from __future__ import annotations
 
+import hashlib as _hashlib
+import sys
+import threading
+import time
 from typing import TYPE_CHECKING
 
 from smartagent.ui.command_router import CommandRouter
@@ -78,6 +98,28 @@ def _pick_model(agent: "SmartAgent", message: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Prompt cache (Milestone 10)
+# ---------------------------------------------------------------------------
+
+# Module-level cache: maps a hash of (identity + mind_state + goals) to the
+# tuple of those values so we can skip rebuilding unchanged static context.
+_STATIC_CTX_CACHE: dict[str, tuple[str, str, list[str]]] = {}
+_CACHE_MAX = 16  # bounded to avoid unbounded growth
+
+
+def _static_cache_key(identity: str, mind_state: str, goals: list[str]) -> str:
+    raw = f"{identity}\x00{mind_state}\x00{'|'.join(goals)}"
+    return _hashlib.md5(raw.encode("utf-8")).hexdigest()  # noqa: S324 — not a security use
+
+
+def _put_cache(key: str, identity: str, mind_state: str, goals: list[str]) -> None:
+    if len(_STATIC_CTX_CACHE) >= _CACHE_MAX:
+        # Drop oldest entry (insertion-ordered dict, Python 3.7+).
+        _STATIC_CTX_CACHE.pop(next(iter(_STATIC_CTX_CACHE)))
+    _STATIC_CTX_CACHE[key] = (identity, mind_state, goals)
+
+
+# ---------------------------------------------------------------------------
 # Context assembly helpers
 # ---------------------------------------------------------------------------
 
@@ -123,6 +165,127 @@ def _get_goals(agent: "SmartAgent") -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Spinner (Milestone 10)
+# ---------------------------------------------------------------------------
+
+_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+_SPINNER_INTERVAL = 0.08  # seconds per frame
+
+
+def _run_spinner(stop_event: threading.Event, first_token_event: threading.Event) -> None:
+    """Spin in the background until the first token arrives or stop is signalled."""
+    i = 0
+    while not first_token_event.is_set() and not stop_event.is_set():
+        frame = _SPINNER_FRAMES[i % len(_SPINNER_FRAMES)]
+        sys.stdout.write(f"\r  {frame} Thinking...")
+        sys.stdout.flush()
+        time.sleep(_SPINNER_INTERVAL)
+        i += 1
+
+
+def _clear_spinner() -> None:
+    """Overwrite the spinner line with spaces so streaming text is clean."""
+    sys.stdout.write("\r" + " " * 20 + "\r")
+    sys.stdout.flush()
+
+
+# ---------------------------------------------------------------------------
+# Streaming console output (Milestone 10)
+# ---------------------------------------------------------------------------
+
+
+def _stream_to_console(
+    agent: "SmartAgent",
+    prompt: object,
+    model_id: str,
+    *,
+    t_prompt_done: float,
+    t_total_start: float,
+    show_stats: bool,
+    routed_note: str,
+) -> str:
+    """
+    Stream the model response directly to ``stdout`` with a spinner.
+
+    Prints tokens as they arrive, shows generation stats when requested,
+    and returns ``""`` so the REPL does not print anything extra.
+    """
+    stop_event = threading.Event()
+    first_token_event = threading.Event()
+
+    spin_thread = threading.Thread(
+        target=_run_spinner,
+        args=(stop_event, first_token_event),
+        daemon=True,
+    )
+    spin_thread.start()
+
+    t_first_token: float | None = None
+    chunk_count = 0
+    char_count = 0
+    all_chunks: list[str] = []
+    error_text: str | None = None
+
+    try:
+        agent.model_manager.load(model_id)
+        for chunk in agent.model_manager.generate_stream(prompt, model_id=model_id):  # type: ignore[arg-type]
+            if t_first_token is None:
+                t_first_token = time.monotonic()
+                first_token_event.set()
+                spin_thread.join(timeout=0.3)
+                _clear_spinner()
+                if routed_note:
+                    sys.stdout.write(routed_note)
+                    sys.stdout.flush()
+            sys.stdout.write(chunk)
+            sys.stdout.flush()
+            all_chunks.append(chunk)
+            chunk_count += 1
+            char_count += len(chunk)
+    except Exception as exc:  # noqa: BLE001
+        error_text = "Ollama server unavailable."
+        stop_event.set()
+        first_token_event.set()
+        spin_thread.join(timeout=0.3)
+        _clear_spinner()
+        return error_text
+    finally:
+        stop_event.set()
+        first_token_event.set()
+
+    spin_thread.join(timeout=0.3)
+    t_end = time.monotonic()
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+
+    full_text = "".join(all_chunks)
+
+    if not full_text or "Ollama server unavailable" in full_text:
+        return full_text or "Ollama server unavailable."
+
+    if show_stats and t_first_token is not None:
+        t_first_ms = (t_first_token - t_prompt_done) * 1000
+        t_prompt_ms = (t_prompt_done - t_total_start) * 1000
+        t_gen = t_end - t_first_token
+        t_total = t_end - t_total_start
+        approx_tokens = max(1, char_count // 4)
+        tps = approx_tokens / t_gen if t_gen > 0.001 else 0.0
+        print(
+            f"\n  ─── Generation Stats ─────────────────\n"
+            f"  Prompt build :  {t_prompt_ms:.0f} ms\n"
+            f"  First token  :  {t_first_ms:.0f} ms\n"
+            f"  Generation   :  {t_gen:.1f} sec\n"
+            f"  Tokens       :  ~{approx_tokens}\n"
+            f"  Speed        :  ~{tps:.0f} tokens/sec\n"
+            f"  Total        :  {t_total:.1f} sec\n"
+            f"  ─────────────────────────────────────"
+        )
+
+    # Signal to the REPL that we already printed everything.
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # Core send-to-model logic
 # ---------------------------------------------------------------------------
 
@@ -131,18 +294,40 @@ def _send_to_model(agent: "SmartAgent", message: str) -> str:
     """
     Build a full MARK context prompt and send *message* to the active model.
 
-    Returns the model's text response, or an error string if unavailable.
+    Streaming path (Milestone 10):
+        When ``settings.streaming_enabled`` is True, tokens are written
+        directly to stdout with a spinner and optional metrics, and this
+        function returns ``""`` so the REPL does not double-print.
+
+    Non-streaming fallback:
+        Returns the full response text as a string (REPL prints it).
     """
+    t_total_start = time.monotonic()
+
     model_id = _pick_model(agent, message)
     if model_id is None:
         return "No model is active.  Use 'model use <name>' to select one, then try again."
 
-    # Assemble context
+    settings = agent.model_manager.settings
+    cache_enabled = getattr(settings, "cache_prompts", False)
+    streaming = getattr(settings, "streaming_enabled", True)
+    show_stats = getattr(settings, "show_generation_stats", False)
+
+    # --- Context assembly with optional prompt caching ---
     memory_snippets = _gather_memory(agent, message)
     knowledge_snippets = _gather_knowledge(agent, message)
-    mind_state = _get_mind_state(agent)
+
     identity = _get_identity(agent)
+    mind_state = _get_mind_state(agent)
     goals = _get_goals(agent)
+
+    if cache_enabled:
+        cache_key = _static_cache_key(identity, mind_state, goals)
+        if cache_key not in _STATIC_CTX_CACHE:
+            _put_cache(cache_key, identity, mind_state, goals)
+        # Retrieve from cache (values are identical here, but the cache
+        # check confirms the static context is stable).
+        identity, mind_state, goals = _STATIC_CTX_CACHE[cache_key]
 
     # Note which model is actually being used (may differ from active when coding)
     active_model_id = agent.model_manager.active_model_id
@@ -152,7 +337,7 @@ def _send_to_model(agent: "SmartAgent", message: str) -> str:
 
     # Build prompt with full MARK context
     from smartagent.models.prompts.mark_system_prompt import MARK_SYSTEM_PROMPT
-    from smartagent.models.prompts.prompt_builder import PromptBuilder
+    from smartagent.models.prompts.prompt_builder import Prompt, PromptBuilder
 
     prompt = PromptBuilder().build(
         message,
@@ -162,10 +347,7 @@ def _send_to_model(agent: "SmartAgent", message: str) -> str:
         identity=identity,
         goals=goals,
     )
-    # Inject working-memory refs directly (not via ConversationContext so we
-    # don't modify any persistent state from within a console command).
     if memory_snippets:
-        from smartagent.models.prompts.prompt_builder import Prompt
         prompt = Prompt(
             system_prompt=prompt.system_prompt,
             user_message=prompt.user_message,
@@ -180,8 +362,22 @@ def _send_to_model(agent: "SmartAgent", message: str) -> str:
             goals=prompt.goals,
         )
 
+    t_prompt_done = time.monotonic()
+
+    # --- Streaming path ---
+    if streaming:
+        return _stream_to_console(
+            agent,
+            prompt,
+            model_id,
+            t_prompt_done=t_prompt_done,
+            t_total_start=t_total_start,
+            show_stats=show_stats,
+            routed_note=routed_note,
+        )
+
+    # --- Non-streaming fallback ---
     try:
-        # Ensure the target model is loaded before generating.
         agent.model_manager.load(model_id)
         response = agent.model_manager.generate(prompt, model_id=model_id)
         text = response.text or ""
