@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/mark-dashboard/"
+title = "MARK AI Dashboard"
+version = "1.0.0"
+id = "artifacts/mark-dashboard"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/mark-dashboard/" ]
+localPort = 18947
+
+[services.development]
+run = "pnpm --filter @workspace/mark-dashboard run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/mark-dashboard", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/mark-dashboard/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18947"
+BASE_PATH = "/mark-dashboard/"

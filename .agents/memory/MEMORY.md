@@ -17,3 +17,4 @@
 - [Engineer file-write pipeline fix](engineer-file-write-fix.md) — 5-bug root cause, system prompt format, FileEditor CWD fix, test scoping; 2311 total tests.
 - [Progressive Execution Architecture](progressive-execution.md) — 3-tier routing (trivial→fast path, medium→lean, large→full); "system with" fires LARGE before MEDIUM; custom Planners need **kwargs; 2386 total tests.
 - [MARK Web Backend Phase 1](mark-web-backend.md) — subscribe_all uses == not is; path traversal needs resolve()+is_relative_to() not startswith(); module-level imports for patchability.
+- [MARK Web Dashboard Phase 2](mark-web-dashboard.md) — React+Vite at artifacts/mark-dashboard; zustand store + markApi.ts; WS to configurable serverUrl (localStorage key: mark_server_url, default http://localhost:8000).
