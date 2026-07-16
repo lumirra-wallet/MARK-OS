@@ -209,6 +209,11 @@ class Orchestrator:
             context.metadata["tool_engine"] = self._tool_engine
         if self._event_bus is not None:
             context.metadata["event_bus"] = self._event_bus
+        # Milestone 17: extra metadata injected by TeamRunner (team, prior_context…)
+        extra = getattr(self, "_extra_metadata", None)
+        if extra:
+            context.metadata.update(extra)
+
         # Milestone 15: workspace injection — overrides global memory/knowledge
         # with workspace-scoped instances when a workspace is active.
         if self._workspace_manager is not None:

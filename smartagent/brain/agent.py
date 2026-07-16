@@ -34,6 +34,7 @@ from smartagent.reflection.learning_store import LearningStore
 from smartagent.reflection.prompt_registry import PromptRegistry
 from smartagent.reflection.reflection_engine import ReflectionEngine
 from smartagent.workspace.workspace_manager import WorkspaceManager
+from smartagent.multi_agent.ceo_agent import CEOAgent
 from smartagent.research.research_manager import ResearchManager
 from smartagent.skills.permissions import Permission, PermissionManager
 from smartagent.skills.skill_engine import SkillEngine
@@ -219,6 +220,11 @@ class SmartAgent:
         # Use with_agent() so all services (model, memory, knowledge, tools,
         # reflection, and workspace) are threaded through automatically.
         self.executive = PlanningController.with_agent(self)
+
+        # Milestone 17 — Multi-Agent Collaboration.
+        # Sits above the executive: CEO decomposes goals into team assignments,
+        # each team runs its own Orchestrator with team-scoped workers.
+        self.ceo = CEOAgent.with_agent(self)
 
     def handle_message(self, message: str) -> str:
         """
