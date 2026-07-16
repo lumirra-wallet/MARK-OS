@@ -1,13 +1,12 @@
 import React, { useEffect } from 'react';
 import { useMarkStore } from '@/store/markStore';
 import {
-  PanelLeftClose, PanelLeftOpen, Play, Square, Activity,
-  FolderGit2, FileText, Cpu, LineChart, Settings, CheckCircle2,
-  XCircle, AlertCircle, Clock, Plug, Unplug, Zap,
-  Mic, MicOff, AudioWaveform, Volume2,
+  MessageSquare, Activity, FolderGit2, FileText, Cpu,
+  LineChart, Settings, Clock, Plug, Unplug, Zap,
+  Mic, AudioWaveform, Volume2, Square,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { TerminalPanel } from './components/TerminalPanel';
+import { ChatView } from './components/ChatView';
 import { ApprovalsSidebar } from './components/ApprovalsSidebar';
 import { MonacoEditorPanel } from './components/MonacoEditorPanel';
 import { ExecutionView } from './components/ExecutionView';
@@ -17,55 +16,39 @@ import { LogsView } from './components/LogsView';
 import { PerformanceView } from './components/PerformanceView';
 import { WorkersView } from './components/WorkersView';
 import { VoicePanel } from './components/VoicePanel';
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-// ── Voice state icon mapping ──────────────────────────────────────────────────
-
-const VOICE_STATE_COLORS: Record<string, string> = {
-  idle:         'text-muted-foreground',
-  listening:    'text-emerald-400',
-  transcribing: 'text-accent',
-  thinking:     'text-purple-400',
-  speaking:     'text-blue-400',
-  error:        'text-destructive',
-};
+// ── Voice TopNav indicator ────────────────────────────────────────────────────
 
 function VoiceMicIndicator() {
   const { voice } = useMarkStore();
   if (!voice.running) return null;
 
-  const colorClass = VOICE_STATE_COLORS[voice.state] ?? 'text-muted-foreground';
-  const isListening = voice.state === 'listening';
+  const stateColors: Record<string, string> = {
+    idle:         'text-muted-foreground',
+    listening:    'text-emerald-400',
+    transcribing: 'text-accent',
+    speaking:     'text-blue-400',
+    error:        'text-destructive',
+  };
+  const color = stateColors[voice.state] ?? 'text-muted-foreground';
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className={`flex items-center gap-1.5 text-sm font-medium ${colorClass} cursor-default select-none`}>
-          <div className="relative">
-            {isListening && (
-              <motion.div
-                className="absolute inset-0 rounded-full bg-emerald-400/30"
-                animate={{ scale: [1, 1.8, 1], opacity: [0.5, 0, 0.5] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
-              />
-            )}
-            {voice.muted
-              ? <MicOff className="w-4 h-4" />
-              : voice.state === 'speaking'
-                ? <Volume2 className={`w-4 h-4 ${voice.state === 'speaking' ? 'animate-pulse' : ''}`} />
-                : <Mic className={`w-4 h-4 relative z-10 ${isListening ? 'animate-pulse' : ''}`} />
-            }
-          </div>
-          <span className="text-xs capitalize hidden sm:inline">{voice.state}</span>
+        <div className={`flex items-center gap-1.5 text-xs font-medium ${color} select-none cursor-default`}>
+          {voice.state === 'speaking'
+            ? <Volume2 className="w-3.5 h-3.5 animate-pulse" />
+            : voice.muted
+              ? <Mic className="w-3.5 h-3.5 opacity-40" />
+              : <AudioWaveform className={`w-3.5 h-3.5 ${voice.state === 'listening' ? 'animate-pulse' : ''}`} />
+          }
+          <span className="hidden sm:inline capitalize">{voice.state}</span>
         </div>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="text-xs">
-        Voice: {voice.state} · Mode: {voice.mode.replace(/_/g, ' ')}
+        Voice · {voice.mode.replace(/_/g, ' ')} · {voice.state}
       </TooltipContent>
     </Tooltip>
   );
@@ -75,23 +58,12 @@ function VoiceMicIndicator() {
 
 export default function Dashboard() {
   const {
-    connectWebSocket,
-    connectionStatus,
-    running,
-    goal,
-    workspace,
-    elapsed,
-    startRun,
-    cancelRun,
-    cancelRequested,
-    voice,
+    connectWebSocket, connectionStatus,
+    running, goal, workspace, elapsed,
+    cancelRun, cancelRequested, voice,
   } = useMarkStore();
 
-  const [activeTab, setActiveTab] = React.useState('execution');
-  const [leftSidebarOpen, setLeftSidebarOpen] = React.useState(true);
-  const [runGoal, setRunGoal] = React.useState('');
-  const [runWorkspace, setRunWorkspace] = React.useState('');
-  const [runModalOpen, setRunModalOpen] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState<string>('chat');
   const [liveElapsed, setLiveElapsed] = React.useState(elapsed);
 
   useEffect(() => { connectWebSocket(); }, [connectWebSocket]);
@@ -99,159 +71,75 @@ export default function Dashboard() {
   useEffect(() => {
     setLiveElapsed(elapsed);
     if (!running) return;
-    const interval = setInterval(() => setLiveElapsed(prev => prev + 1), 1000);
-    return () => clearInterval(interval);
+    const t = setInterval(() => setLiveElapsed(p => p + 1), 1000);
+    return () => clearInterval(t);
   }, [running, elapsed]);
 
-  // Auto-populate workspace from transcription (voice auto-submit)
-  useEffect(() => {
-    if (voice.transcript && !running) {
-      setRunGoal(voice.transcript);
-    }
-  }, [voice.transcript, running]);
-
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  };
-
-  const handleStart = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (runGoal && runWorkspace) {
-      startRun(runGoal, runWorkspace);
-      setRunModalOpen(false);
-      setActiveTab('execution');
-    }
-  };
+  const formatTime = (s: number) =>
+    `${Math.floor(s / 60).toString().padStart(2, '0')}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
 
   return (
     <div className="h-screen w-full flex flex-col bg-background text-foreground overflow-hidden font-sans">
 
       {/* ── TOP NAV ────────────────────────────────────────────────────────── */}
-      <header className="h-14 border-b border-border/50 bg-card/50 backdrop-blur shrink-0 flex items-center justify-between px-4 z-10">
-        <div className="flex items-center gap-3">
-          {/* Logo */}
-          <div className="flex items-center gap-2">
-            <Zap className="w-5 h-5 text-accent" />
-            <span className="font-bold tracking-tight text-lg">MARK</span>
+      <header className="h-12 border-b border-border/50 bg-card/50 backdrop-blur shrink-0 flex items-center justify-between px-4 z-10 gap-3">
+
+        {/* Left: logo + workspace + goal */}
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Zap className="w-4 h-4 text-accent" />
+            <span className="font-bold tracking-tight">MARK</span>
           </div>
 
-          <div className="h-4 w-px bg-border mx-1" />
+          <div className="h-3.5 w-px bg-border shrink-0" />
 
-          {/* Workspace */}
-          {workspace ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground font-mono bg-muted/50 px-2.5 py-1 rounded-md border border-border/50">
-              <FolderGit2 className="w-4 h-4 shrink-0" />
-              <span className="max-w-[240px] truncate">{workspace}</span>
+          {workspace && (
+            <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground font-mono bg-muted/40 px-2 py-0.5 rounded border border-border/40 max-w-[220px]">
+              <FolderGit2 className="w-3 h-3 shrink-0" />
+              <span className="truncate">{workspace}</span>
             </div>
-          ) : (
-            <div className="text-sm text-muted-foreground italic">No active workspace</div>
           )}
 
-          {/* Goal pill */}
-          {goal && (
-            <div className="hidden lg:flex items-center max-w-[360px]">
-              <span className="text-sm truncate font-medium bg-accent/10 text-accent border border-accent/20 px-3 py-1 rounded-full">
+          {running && goal && (
+            <div className="hidden lg:block max-w-[300px]">
+              <span className="text-xs truncate font-medium bg-accent/10 text-accent border border-accent/20 px-2.5 py-0.5 rounded-full">
                 {goal}
               </span>
             </div>
           )}
         </div>
 
-        {/* Right cluster */}
-        <div className="flex items-center gap-3">
-          {/* Voice indicator */}
+        {/* Right: voice indicator + timer + status + stop */}
+        <div className="flex items-center gap-3 shrink-0">
           <VoiceMicIndicator />
 
-          {voice.running && <div className="h-4 w-px bg-border" />}
-
-          {/* Elapsed timer */}
-          <div className="flex items-center gap-2 text-sm font-mono bg-muted/50 px-3 py-1 rounded border border-border/50">
-            <Clock className={`w-4 h-4 ${running ? 'text-accent animate-pulse' : 'text-muted-foreground'}`} />
+          {/* Elapsed */}
+          <div className="flex items-center gap-1.5 text-xs font-mono bg-muted/40 px-2.5 py-1 rounded border border-border/40">
+            <Clock className={`w-3.5 h-3.5 ${running ? 'text-accent animate-pulse' : 'text-muted-foreground'}`} />
             {formatTime(liveElapsed)}
           </div>
 
-          {/* Connection status */}
-          <div className="flex items-center gap-2 text-sm font-medium">
+          {/* Connection */}
+          <div className="flex items-center gap-1.5 text-xs font-medium">
             {connectionStatus === 'connected' ? (
-              <span className="flex items-center gap-1.5 text-emerald-500">
-                <Plug className="w-4 h-4" />
-                <span className="hidden sm:inline">Connected</span>
-              </span>
+              <span className="flex items-center gap-1 text-emerald-500"><Plug className="w-3.5 h-3.5" /><span className="hidden sm:inline">Connected</span></span>
             ) : connectionStatus === 'connecting' ? (
-              <span className="flex items-center gap-1.5 text-amber-500">
-                <Activity className="w-4 h-4 animate-spin" />
-                <span className="hidden sm:inline">Reconnecting</span>
-              </span>
+              <span className="flex items-center gap-1 text-amber-500"><Activity className="w-3.5 h-3.5 animate-spin" /><span className="hidden sm:inline">Connecting</span></span>
             ) : (
-              <span className="flex items-center gap-1.5 text-destructive">
-                <Unplug className="w-4 h-4" />
-                <span className="hidden sm:inline">Disconnected</span>
-              </span>
+              <span className="flex items-center gap-1 text-muted-foreground"><Unplug className="w-3.5 h-3.5" /><span className="hidden sm:inline">Disconnected</span></span>
             )}
           </div>
 
-          <div className="h-4 w-px bg-border" />
-
-          {/* Start / Stop */}
-          {running ? (
-            <Button
-              variant="destructive"
-              size="sm"
+          {/* Stop button (only while running) */}
+          {running && (
+            <button
               onClick={cancelRun}
               disabled={cancelRequested}
-              className="font-mono text-xs gap-2 shadow-md shadow-destructive/20"
+              className="flex items-center gap-1.5 text-xs font-mono bg-destructive/20 hover:bg-destructive/30 text-destructive border border-destructive/30 px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50"
             >
-              <Square className="w-3.5 h-3.5 fill-current" />
-              {cancelRequested ? 'STOPPING…' : 'STOP RUN'}
-            </Button>
-          ) : (
-            <Dialog open={runModalOpen} onOpenChange={setRunModalOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" className="bg-accent hover:bg-accent/90 text-accent-foreground font-mono text-xs gap-2 shadow-md shadow-accent/20">
-                  <Play className="w-3.5 h-3.5 fill-current" />
-                  START RUN
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-[440px]">
-                <DialogHeader>
-                  <DialogTitle>New Execution Run</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleStart} className="grid gap-4 py-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="workspace">Workspace Path</Label>
-                    <Input
-                      id="workspace"
-                      value={runWorkspace}
-                      onChange={e => setRunWorkspace(e.target.value)}
-                      placeholder="/home/user/projects/myapp"
-                      className="font-mono text-sm"
-                      required
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="goal">Goal</Label>
-                    <Input
-                      id="goal"
-                      value={runGoal}
-                      onChange={e => setRunGoal(e.target.value)}
-                      placeholder='e.g. "Build a REST API in Python"'
-                      required
-                    />
-                    {voice.transcript && runGoal === voice.transcript && (
-                      <p className="text-[11px] text-accent flex items-center gap-1">
-                        <Mic className="w-3 h-3" /> Pre-filled from voice transcription
-                      </p>
-                    )}
-                  </div>
-                  <Button type="submit" className="w-full mt-2">
-                    <Zap className="w-4 h-4 mr-2" />
-                    Initialize MARK
-                  </Button>
-                </form>
-              </DialogContent>
-            </Dialog>
+              <Square className="w-3 h-3 fill-current" />
+              {cancelRequested ? 'Stopping…' : 'Stop'}
+            </button>
           )}
         </div>
       </header>
@@ -259,30 +147,41 @@ export default function Dashboard() {
       {/* ── MAIN LAYOUT ────────────────────────────────────────────────────── */}
       <div className="flex-1 flex overflow-hidden">
 
-        {/* Left sidebar (icon rail) */}
-        <aside className={`w-14 shrink-0 border-r border-border/50 bg-sidebar flex flex-col items-center py-4 gap-1 transition-all duration-200 ${leftSidebarOpen ? '' : '-ml-14'}`}>
-          <NavIcon icon={Activity}      active={activeTab === 'execution'}   onClick={() => setActiveTab('execution')}   tooltip="Execution" />
-          <NavIcon icon={FolderGit2}    active={activeTab === 'files'}       onClick={() => setActiveTab('files')}       tooltip="Files" />
-          <NavIcon icon={FileText}      active={activeTab === 'logs'}        onClick={() => setActiveTab('logs')}        tooltip="Logs" />
-          <NavIcon icon={Cpu}           active={activeTab === 'workers'}     onClick={() => setActiveTab('workers')}     tooltip="Workers" />
-          <NavIcon icon={LineChart}     active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} tooltip="Performance" />
+        {/* Left icon rail */}
+        <aside className="w-14 shrink-0 border-r border-border/50 bg-sidebar flex flex-col items-center py-3 gap-1">
+          {/* Primary: Chat */}
+          <NavIcon
+            icon={MessageSquare}
+            active={activeTab === 'chat'}
+            onClick={() => setActiveTab('chat')}
+            tooltip="Chat"
+            glow={running}
+          />
 
-          {/* Voice tab — highlight when running */}
+          <div className="w-6 h-px bg-border/40 my-1" />
+
+          <NavIcon icon={Activity}    active={activeTab === 'execution'}   onClick={() => setActiveTab('execution')}   tooltip="Execution" />
+          <NavIcon icon={FolderGit2}  active={activeTab === 'files'}       onClick={() => setActiveTab('files')}       tooltip="Files" />
+          <NavIcon icon={FileText}    active={activeTab === 'logs'}        onClick={() => setActiveTab('logs')}        tooltip="Logs" />
+          <NavIcon icon={Cpu}         active={activeTab === 'workers'}     onClick={() => setActiveTab('workers')}     tooltip="Workers" />
+          <NavIcon icon={LineChart}   active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} tooltip="Performance" />
+
+          {/* Voice settings */}
           <NavIcon
             icon={voice.running ? AudioWaveform : Mic}
             active={activeTab === 'voice'}
             onClick={() => setActiveTab('voice')}
-            tooltip="Voice"
+            tooltip="Voice Settings"
             pulse={voice.running && voice.state === 'listening'}
             accent={voice.running}
           />
 
-          <div className="mt-auto flex flex-col items-center gap-1">
+          <div className="mt-auto">
             <NavIcon icon={Settings} active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} tooltip="Settings" />
           </div>
         </aside>
 
-        {/* Workspace area */}
+        {/* Workspace panels */}
         <PanelGroup direction="horizontal" className="flex-1 bg-background">
           <Panel defaultSize={70} minSize={30} className="flex flex-col relative z-0">
             <div className="flex-1 overflow-hidden relative">
@@ -290,11 +189,12 @@ export default function Dashboard() {
                 <motion.div
                   key={activeTab}
                   className="absolute inset-0"
-                  initial={{ opacity: 0, x: 8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -8 }}
-                  transition={{ duration: 0.12 }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.1 }}
                 >
+                  {activeTab === 'chat'        && <ChatView />}
                   {activeTab === 'execution'   && <ExecutionView />}
                   {activeTab === 'files'       && <FilesView />}
                   {activeTab === 'logs'        && <LogsView />}
@@ -307,8 +207,10 @@ export default function Dashboard() {
             </div>
           </Panel>
 
-          <PanelResizeHandle className="w-1 bg-border/50 hover:bg-accent/50 transition-colors cursor-col-resize flex flex-col justify-center items-center group z-10">
-            <div className="h-8 w-1 rounded-full bg-border group-hover:bg-accent transition-colors" />
+          <PanelResizeHandle className="w-1 bg-border/50 hover:bg-accent/50 transition-colors cursor-col-resize z-10">
+            <div className="h-full w-full flex flex-col justify-center items-center">
+              <div className="h-8 w-1 rounded-full bg-border" />
+            </div>
           </PanelResizeHandle>
 
           <Panel defaultSize={30} minSize={20} className="flex flex-col border-l border-border/50 bg-card/30">
@@ -320,15 +222,10 @@ export default function Dashboard() {
   );
 }
 
-// ── NavIcon helper ────────────────────────────────────────────────────────────
+// ── NavIcon ───────────────────────────────────────────────────────────────────
 
 function NavIcon({
-  icon: Icon,
-  active,
-  onClick,
-  tooltip,
-  pulse = false,
-  accent = false,
+  icon: Icon, active, onClick, tooltip, pulse = false, accent = false, glow = false,
 }: {
   icon: React.ComponentType<any>;
   active: boolean;
@@ -336,6 +233,7 @@ function NavIcon({
   tooltip: string;
   pulse?: boolean;
   accent?: boolean;
+  glow?: boolean;
 }) {
   return (
     <Tooltip>
@@ -345,16 +243,18 @@ function NavIcon({
           className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition-all
             ${active
               ? 'bg-accent text-accent-foreground shadow-md shadow-accent/20'
-              : accent
-                ? 'text-emerald-400 hover:bg-emerald-400/10'
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              : glow
+                ? 'text-accent bg-accent/10 shadow-sm shadow-accent/10'
+                : accent
+                  ? 'text-emerald-400 hover:bg-emerald-400/10'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
             }`}
         >
-          <Icon className="w-5 h-5" />
+          <Icon className="w-4.5 h-4.5" style={{ width: 18, height: 18 }} />
           {pulse && (
             <motion.span
               className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400"
-              animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
+              animate={{ scale: [1, 1.5, 1], opacity: [1, 0.4, 1] }}
               transition={{ duration: 1.2, repeat: Infinity }}
             />
           )}

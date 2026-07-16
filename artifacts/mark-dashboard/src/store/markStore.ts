@@ -1,6 +1,29 @@
 import { create } from 'zustand';
 import { markApi, PermissionInfo, VoiceMode, VoiceSettings, VoiceStateValue } from '@/lib/markApi';
 
+// ── Chat message model ────────────────────────────────────────────────────────
+
+export type ContentBlock =
+  | { type: 'text';     text: string }
+  | { type: 'streaming'; text: string }               // live token accumulation
+  | { type: 'worker';   name: string; status: 'running' | 'success' | 'failed'; task?: string }
+  | { type: 'file';     op: 'created' | 'modified' | 'deleted'; path: string }
+  | { type: 'tests';    status: 'running' | 'passed' | 'failed'; output?: string }
+  | { type: 'approval'; requestId: string; operation: string; path: string; diff?: string }
+  | { type: 'error';    text: string }
+  | { type: 'summary';  text: string; success: boolean; filesCreated: string[]; filesModified: string[]; elapsed: number };
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'mark';
+  timestamp: string;
+  text?: string;           // user messages
+  blocks: ContentBlock[];  // MARK messages
+  isActive: boolean;
+}
+
+// ── Supporting types ──────────────────────────────────────────────────────────
+
 export interface TimelineEvent {
   id: string;
   timestamp: string;
@@ -27,7 +50,6 @@ export interface OpenFile {
   originalContent?: string;
 }
 
-// Voice state
 export interface VoiceState {
   state: VoiceStateValue;
   running: boolean;
@@ -38,9 +60,11 @@ export interface VoiceState {
   ttsVoice: string;
   ttsSpeed: number;
   wakePhraseEnabled: boolean;
-  transcript: string;           // latest transcribed text
-  isBrowserTTSFallback: boolean; // use browser SpeechSynthesis instead of Piper
+  transcript: string;
+  isBrowserTTSFallback: boolean;
 }
+
+// ── Store interface ───────────────────────────────────────────────────────────
 
 interface MarkState {
   serverUrl: string;
@@ -50,483 +74,677 @@ interface MarkState {
   workspace: string;
   elapsed: number;
   cancelRequested: boolean;
-  
+
   workers: WorkerState[];
   currentWorker: string | null;
-  
+
   pendingPermissions: PermissionInfo[];
   streamingTokens: string;
   timeline: TimelineEvent[];
   filesInRun: FileOperation[];
   openFiles: OpenFile[];
   activeFileTab: string | null;
-  
+
   lastError: string | null;
   logs: string[];
+
+  // Chat
+  messages: ChatMessage[];
+  currentMarkMsgId: string | null;
 
   // Voice
   voice: VoiceState;
 
   // Actions
-  setServerUrl: (url: string) => void;
-  connectWebSocket: () => void;
-  startRun: (goal: string, workspace: string, testCmd?: string) => Promise<void>;
-  cancelRun: () => Promise<void>;
-  approve: (requestId: string, always?: boolean) => Promise<void>;
-  deny: (requestId: string, reason?: string) => Promise<void>;
-  fetchFileContent: (path: string, isDiff?: boolean) => Promise<void>;
-  closeFile: (path: string) => void;
-  setActiveFileTab: (path: string | null) => void;
+  setServerUrl:      (url: string) => void;
+  connectWebSocket:  () => void;
+  startRun:          (goal: string, workspace: string, testCmd?: string) => Promise<void>;
+  sendUserMessage:   (text: string, workspace: string) => Promise<void>;
+  clearMessages:     () => void;
+  cancelRun:         () => Promise<void>;
+  approve:           (requestId: string, always?: boolean) => Promise<void>;
+  deny:              (requestId: string, reason?: string) => Promise<void>;
+  fetchFileContent:  (path: string, isDiff?: boolean) => Promise<void>;
+  closeFile:         (path: string) => void;
+  setActiveFileTab:  (path: string | null) => void;
+  setWorkspace:      (ws: string) => void;
 
-  // Voice actions
-  startVoice: (mode: VoiceMode) => Promise<void>;
-  stopVoice: () => Promise<void>;
-  toggleMute: () => Promise<void>;
-  updateVoiceSettings: (s: Partial<VoiceSettings>) => Promise<void>;
-  transcribeAudio: (blob: Blob) => Promise<string>;
-  speak: (text: string) => Promise<void>;
+  // Voice
+  startVoice:           (mode: VoiceMode) => Promise<void>;
+  stopVoice:            () => Promise<void>;
+  toggleMute:           () => Promise<void>;
+  updateVoiceSettings:  (s: Partial<VoiceSettings>) => Promise<void>;
+  transcribeAudio:      (blob: Blob) => Promise<string>;
+  speak:                (text: string) => Promise<void>;
 }
+
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_WORKERS: WorkerState[] = [
   { name: 'Research', status: 'idle' },
   { name: 'Planning', status: 'idle' },
-  { name: 'Coding', status: 'idle' },
-  { name: 'Testing', status: 'idle' },
-  { name: 'Quality', status: 'idle' },
-  { name: 'Review', status: 'idle' },
+  { name: 'Coding',   status: 'idle' },
+  { name: 'Testing',  status: 'idle' },
+  { name: 'Quality',  status: 'idle' },
+  { name: 'Review',   status: 'idle' },
 ];
 
-let ws: WebSocket | null = null;
-let reconnectTimer: any = null;
-
-const DEFAULT_VOICE_STATE: VoiceState = {
-  state: 'idle',
-  running: false,
-  mode: 'push_to_talk',
-  muted: false,
-  autoSubmit: true,
-  whisperModel: 'base',
-  ttsVoice: 'en_US-lessac-medium',
-  ttsSpeed: 1.0,
-  wakePhraseEnabled: false,
-  transcript: '',
-  isBrowserTTSFallback: false,
+const DEFAULT_VOICE: VoiceState = {
+  state: 'idle', running: false, mode: 'push_to_talk',
+  muted: false, autoSubmit: true, whisperModel: 'base',
+  ttsVoice: 'en_US-lessac-medium', ttsSpeed: 1.0,
+  wakePhraseEnabled: false, transcript: '', isBrowserTTSFallback: false,
 };
 
-// Browser SpeechSynthesis fallback (used when Piper is unavailable)
+// ── Browser TTS ───────────────────────────────────────────────────────────────
+
 function browserSpeak(text: string, speed = 1.0): void {
   if (!('speechSynthesis' in window)) return;
   window.speechSynthesis.cancel();
   const utt = new SpeechSynthesisUtterance(text);
-  utt.rate = speed;
+  utt.rate = Math.max(0.5, Math.min(2.0, speed));
   window.speechSynthesis.speak(utt);
 }
 
-export const useMarkStore = create<MarkState>((set, get) => ({
-  serverUrl: localStorage.getItem('mark_server_url') || 'http://localhost:8000',
-  connectionStatus: 'disconnected',
-  running: false,
-  goal: '',
-  workspace: '',
-  elapsed: 0,
-  cancelRequested: false,
-  
-  workers: [...DEFAULT_WORKERS],
-  currentWorker: null,
-  
-  pendingPermissions: [],
-  streamingTokens: '',
-  timeline: [],
-  filesInRun: [],
-  openFiles: [],
-  activeFileTab: null,
-  
-  lastError: null,
-  logs: [],
+// ── WebSocket singleton ───────────────────────────────────────────────────────
 
-  voice: { ...DEFAULT_VOICE_STATE },
+let ws: WebSocket | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  setServerUrl: (url) => {
-    localStorage.setItem('mark_server_url', url);
-    set({ serverUrl: url });
-    get().connectWebSocket();
-  },
+// ── Store ─────────────────────────────────────────────────────────────────────
 
-  connectWebSocket: () => {
-    if (ws) {
-      ws.close();
-      ws = null;
-    }
-    
-    const { serverUrl } = get();
-    const wsUrl = serverUrl.replace(/^http/, 'ws') + '/ws';
-    
-    set({ connectionStatus: 'connecting' });
-    
-    try {
-      ws = new WebSocket(wsUrl);
-      
-      ws.onopen = () => {
-        set({ connectionStatus: 'connected' });
-        if (reconnectTimer) clearTimeout(reconnectTimer);
-      };
-      
-      ws.onclose = () => {
-        set({ connectionStatus: 'disconnected' });
-        // Auto reconnect
-        reconnectTimer = setTimeout(() => {
-          get().connectWebSocket();
-        }, 3000);
-      };
-      
-      ws.onerror = () => {
-        // Handled by close
-      };
-      
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type !== 'event') return;
-          
-          const { name, payload, timestamp } = data;
-          
-          if (name === 'ping') return;
+export const useMarkStore = create<MarkState>((set, get) => {
 
-          // Add to raw logs
-          set((state) => ({ 
-            logs: [...state.logs.slice(-999), JSON.stringify(data)] 
-          }));
+  // ── Chat message helpers ───────────────────────────────────────────────────
 
-          const addTimeline = (msg: string) => {
-            set((state) => ({
-              timeline: [{ id: Math.random().toString(), timestamp, type: name, message: msg }, ...state.timeline].slice(0, 200)
-            }));
-          };
+  const _id = () => Math.random().toString(36).slice(2, 10);
 
-          switch (name) {
-            case 'RunStarted':
-              set({ 
-                running: true, 
-                goal: payload.goal, 
-                workspace: payload.workspace,
-                elapsed: 0,
-                cancelRequested: false,
-                streamingTokens: '',
-                timeline: [],
-                filesInRun: [],
-                lastError: null,
-                workers: [...DEFAULT_WORKERS]
-              });
-              addTimeline(`Run started: ${payload.goal}`);
-              break;
-              
-            case 'RunCompleted':
-              set({ running: false, elapsed: payload.elapsed });
-              addTimeline(`Run completed ${payload.success ? 'successfully' : 'with failures'}.`);
-              break;
-              
-            case 'RunCancelled':
-              set({ running: false, cancelRequested: false });
-              addTimeline('Run cancelled by user.');
-              break;
-              
-            case 'RunFailed':
-              set({ running: false, lastError: payload.error });
-              addTimeline(`Run failed: ${payload.error}`);
-              break;
-              
-            case 'StatusChanged':
-              set({ 
-                running: payload.running,
-                goal: payload.goal,
-                workspace: payload.workspace,
-                elapsed: payload.elapsed
-              });
-              break;
-              
-            case 'StreamingToken':
-              set((state) => ({
-                streamingTokens: state.streamingTokens + payload.text
-              }));
-              break;
-              
-            case 'WorkerStarted':
-              if (payload.worker) {
-                set((state) => ({
-                  currentWorker: payload.worker,
-                  workers: state.workers.map(w => w.name === payload.worker ? { ...w, status: 'running', task: payload.task } : w)
-                }));
-                addTimeline(`Worker started: ${payload.worker}`);
-              }
-              break;
-              
-            case 'WorkerFinished':
-              if (payload.worker) {
-                set((state) => ({
-                  currentWorker: null,
-                  workers: state.workers.map(w => w.name === payload.worker ? { ...w, status: payload.success ? 'success' : 'failed' } : w)
-                }));
-                addTimeline(`Worker finished: ${payload.worker}`);
-              }
-              break;
-              
-            case 'WorkerThinking':
-              if (payload.worker) {
-                set((state) => ({
-                  workers: state.workers.map(w => w.name === payload.worker ? { ...w, thought: payload.thought } : w)
-                }));
-              }
-              break;
-              
-            case 'PlanningStarted':
-              addTimeline('Planning started...');
-              break;
-            case 'PlanningFinished':
-              addTimeline('Planning finished.');
-              break;
-              
-            case 'FileCreated':
-            case 'FileModified':
-            case 'FileDeleted':
-              if (payload.path) {
-                const op = name === 'FileCreated' ? 'created' : name === 'FileModified' ? 'modified' : 'deleted';
-                set((state) => {
-                  const existing = state.filesInRun.filter(f => f.path !== payload.path);
-                  return { filesInRun: [...existing, { path: payload.path, operation: op }] };
-                });
-                addTimeline(`File ${op}: ${payload.path}`);
-              }
-              break;
-              
-            case 'TestsStarted':
-              addTimeline('Running tests...');
-              break;
-            case 'TestsPassed':
-              addTimeline('Tests passed successfully.');
-              break;
-            case 'TestsFailed':
-              addTimeline('Tests failed.');
-              break;
-              
-            case 'PermissionRequested':
-              set((state) => ({
-                pendingPermissions: [...state.pendingPermissions, payload]
-              }));
-              addTimeline(`Permission requested: ${payload.operation} on ${payload.path}`);
-              break;
-              
-            case 'PermissionGranted':
-            case 'PermissionDenied':
-              set((state) => ({
-                pendingPermissions: state.pendingPermissions.filter(p => p.request_id !== payload.request_id)
-              }));
-              addTimeline(`Permission ${name === 'PermissionGranted' ? 'granted' : 'denied'}.`);
-              break;
-              
-            case 'Error':
-              set({ lastError: payload.error || payload.message });
-              addTimeline(`Error: ${payload.error || payload.message}`);
-              break;
+  /** Start a new MARK message and return its ID. */
+  const _startMarkMsg = (timestamp: string): string => {
+    const id = _id();
+    set(state => ({
+      currentMarkMsgId: id,
+      messages: [...state.messages, {
+        id, role: 'mark' as const, timestamp, blocks: [], isActive: true,
+      }],
+    }));
+    return id;
+  };
 
-            // ── Voice events ─────────────────────────────────────────
-            case 'VoiceStateChanged':
-              set(state => ({ voice: { ...state.voice, state: payload.state as VoiceStateValue } }));
-              break;
-
-            case 'VoiceStarted':
-              set(state => ({ voice: { ...state.voice, running: true, mode: payload.mode as VoiceMode } }));
-              addTimeline(`Voice started (${payload.mode})`);
-              break;
-
-            case 'VoiceStopped':
-              set(state => ({ voice: { ...state.voice, running: false, state: 'idle' } }));
-              addTimeline('Voice stopped');
-              break;
-
-            case 'VoiceWakeWordDetected':
-              addTimeline('Wake word detected');
-              break;
-
-            case 'VoiceTranscribed':
-              set(state => ({ voice: { ...state.voice, transcript: payload.text } }));
-              addTimeline(`Transcribed: "${payload.text}"`);
-              break;
-
-            case 'VoiceSpeakingStarted':
-              set(state => ({ voice: { ...state.voice, state: 'speaking' } }));
-              break;
-
-            case 'VoiceSpeakingDone':
-              set(state => ({
-                voice: { ...state.voice, state: state.voice.running ? 'listening' : 'idle' }
-              }));
-              break;
-
-            case 'VoiceTTSFallback':
-              // Piper unavailable — use browser SpeechSynthesis
-              set(state => ({ voice: { ...state.voice, isBrowserTTSFallback: true } }));
-              browserSpeak(payload.text, get().voice.ttsSpeed);
-              break;
-
-            case 'VoiceError':
-              set(state => ({ voice: { ...state.voice, state: 'error' } }));
-              addTimeline(`Voice error: ${payload.error}`);
-              break;
-          }
-        } catch (err) {
-          console.error("Failed to parse WS message", err);
-        }
-      };
-    } catch (err) {
-      console.error("Failed to connect WS", err);
-    }
-  },
-
-  startRun: async (goal, workspace, testCmd) => {
-    try {
-      await markApi.startRun(get().serverUrl, goal, workspace, testCmd);
-    } catch (err) {
-      console.error(err);
-      set({ lastError: 'Failed to start run' });
-    }
-  },
-
-  cancelRun: async () => {
-    try {
-      set({ cancelRequested: true });
-      await markApi.cancelRun(get().serverUrl);
-    } catch (err) {
-      console.error(err);
-    }
-  },
-
-  approve: async (requestId, always) => {
-    try {
-      // Optimistically remove
-      set(state => ({
-        pendingPermissions: state.pendingPermissions.filter(p => p.request_id !== requestId)
-      }));
-      await markApi.approve(get().serverUrl, requestId, always);
-    } catch (err) {
-      console.error(err);
-    }
-  },
-
-  deny: async (requestId, reason) => {
-    try {
-      set(state => ({
-        pendingPermissions: state.pendingPermissions.filter(p => p.request_id !== requestId)
-      }));
-      await markApi.deny(get().serverUrl, requestId, reason);
-    } catch (err) {
-      console.error(err);
-    }
-  },
-
-  fetchFileContent: async (path, isDiff = false) => {
-    try {
-      const res = await markApi.getProject(get().serverUrl, path);
-      if (res.content) {
-        set(state => {
-          const existing = state.openFiles.filter(f => f.path !== path);
-          return {
-            openFiles: [...existing, { path, content: res.content!, isDiff }],
-            activeFileTab: path
-          };
-        });
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  },
-
-  closeFile: (path) => {
+  /** Append streaming tokens to the last block (or create a streaming block). */
+  const _appendText = (text: string) => {
     set(state => {
-      const remaining = state.openFiles.filter(f => f.path !== path);
+      const id = state.currentMarkMsgId;
+      if (!id) return {};
       return {
-        openFiles: remaining,
-        activeFileTab: state.activeFileTab === path ? (remaining[0]?.path || null) : state.activeFileTab
+        messages: state.messages.map(m => {
+          if (m.id !== id) return m;
+          const blocks = [...m.blocks];
+          const last = blocks[blocks.length - 1];
+          if (last?.type === 'streaming') {
+            blocks[blocks.length - 1] = { type: 'streaming', text: last.text + text };
+          } else {
+            blocks.push({ type: 'streaming', text });
+          }
+          return { ...m, blocks };
+        }),
       };
     });
-  },
-  
-  setActiveFileTab: (path) => {
-    set({ activeFileTab: path });
-  },
+  };
 
-  // ── Voice actions ─────────────────────────────────────────────────────────
+  /**
+   * Push a new block to the current MARK message.
+   * Automatically finalises any open streaming block first.
+   */
+  const _pushBlock = (block: ContentBlock) => {
+    set(state => {
+      const id = state.currentMarkMsgId;
+      if (!id) return {};
+      return {
+        messages: state.messages.map(m => {
+          if (m.id !== id) return m;
+          const blocks = m.blocks.map(b =>
+            b.type === 'streaming' ? { type: 'text' as const, text: b.text } : b
+          );
+          return { ...m, blocks: [...blocks, block] };
+        }),
+      };
+    });
+  };
 
-  startVoice: async (mode) => {
-    try {
-      await markApi.startVoice(get().serverUrl, mode);
-      set(state => ({ voice: { ...state.voice, running: true, mode } }));
-    } catch (err) {
-      console.error('startVoice failed', err);
-    }
-  },
+  /** Update a block inside the current MARK message using a predicate. */
+  const _updateBlock = (
+    match: (b: ContentBlock) => boolean,
+    update: (b: ContentBlock) => ContentBlock,
+  ) => {
+    set(state => {
+      const id = state.currentMarkMsgId;
+      if (!id) return {};
+      return {
+        messages: state.messages.map(m => m.id !== id ? m : {
+          ...m,
+          blocks: m.blocks.map(b => match(b) ? update(b) : b),
+        }),
+      };
+    });
+  };
 
-  stopVoice: async () => {
-    try {
-      await markApi.stopVoice(get().serverUrl);
-      set(state => ({ voice: { ...state.voice, running: false, state: 'idle' } }));
-    } catch (err) {
-      console.error('stopVoice failed', err);
-    }
-  },
+  /** Close out the current MARK message, optionally appending final blocks. */
+  const _finaliseMsg = (extra: ContentBlock[] = []) => {
+    set(state => {
+      const id = state.currentMarkMsgId;
+      if (!id) return {};
+      return {
+        currentMarkMsgId: null,
+        messages: state.messages.map(m => m.id !== id ? m : {
+          ...m,
+          isActive: false,
+          blocks: [
+            ...m.blocks.map(b => b.type === 'streaming' ? { type: 'text' as const, text: b.text } : b),
+            ...extra,
+          ],
+        }),
+      };
+    });
+  };
 
-  toggleMute: async () => {
-    const muted = !get().voice.muted;
-    try {
-      await markApi.updateVoiceSettings(get().serverUrl, { muted });
-      set(state => ({ voice: { ...state.voice, muted } }));
-    } catch (err) {
-      console.error('toggleMute failed', err);
-    }
-  },
-
-  updateVoiceSettings: async (settings) => {
-    try {
-      const res = await markApi.updateVoiceSettings(get().serverUrl, settings);
-      set(state => ({
-        voice: {
-          ...state.voice,
-          mode:         (res.settings.mode           as VoiceMode) ?? state.voice.mode,
-          muted:        res.settings.muted            ?? state.voice.muted,
-          autoSubmit:   res.settings.auto_submit      ?? state.voice.autoSubmit,
-          whisperModel: res.settings.whisper_model    ?? state.voice.whisperModel,
-          ttsVoice:     res.settings.tts_voice        ?? state.voice.ttsVoice,
-          ttsSpeed:     res.settings.tts_speed        ?? state.voice.ttsSpeed,
-        }
-      }));
-    } catch (err) {
-      console.error('updateVoiceSettings failed', err);
-    }
-  },
-
-  transcribeAudio: async (blob) => {
-    try {
-      const text = await markApi.transcribeAudio(get().serverUrl, blob);
-      if (text) {
-        set(state => ({ voice: { ...state.voice, transcript: text } }));
-      }
-      return text;
-    } catch (err) {
-      console.error('transcribeAudio failed', err);
-      return '';
-    }
-  },
-
-  speak: async (text) => {
+  /** Speak text via TTS if voice is active. */
+  const _narrate = (text: string) => {
     const { voice, serverUrl } = get();
+    if (!voice.running || voice.muted) return;
     if (voice.isBrowserTTSFallback) {
       browserSpeak(text, voice.ttsSpeed);
       return;
     }
-    try {
-      await markApi.speak(serverUrl, text);
-    } catch (err) {
-      // Fallback to browser TTS
-      browserSpeak(text, voice.ttsSpeed);
-    }
-  },
-}));
+    markApi.speak(serverUrl, text).catch(() => browserSpeak(text, voice.ttsSpeed));
+  };
+
+  // ── Return the store ───────────────────────────────────────────────────────
+
+  return {
+    // State
+    serverUrl:        localStorage.getItem('mark_server_url') || 'http://localhost:8000',
+    connectionStatus: 'disconnected',
+    running:          false,
+    goal:             '',
+    workspace:        localStorage.getItem('mark_workspace') || '',
+    elapsed:          0,
+    cancelRequested:  false,
+    workers:          [...DEFAULT_WORKERS],
+    currentWorker:    null,
+    pendingPermissions: [],
+    streamingTokens:  '',
+    timeline:         [],
+    filesInRun:       [],
+    openFiles:        [],
+    activeFileTab:    null,
+    lastError:        null,
+    logs:             [],
+    messages:         [],
+    currentMarkMsgId: null,
+    voice:            { ...DEFAULT_VOICE },
+
+    // ── Actions ───────────────────────────────────────────────────────────────
+
+    setServerUrl: (url) => {
+      localStorage.setItem('mark_server_url', url);
+      set({ serverUrl: url });
+      get().connectWebSocket();
+    },
+
+    setWorkspace: (ws) => {
+      localStorage.setItem('mark_workspace', ws);
+      set({ workspace: ws });
+    },
+
+    connectWebSocket: () => {
+      if (ws) { ws.close(); ws = null; }
+      const { serverUrl } = get();
+      const wsUrl = serverUrl.replace(/^http/, 'ws') + '/ws';
+      set({ connectionStatus: 'connecting' });
+
+      try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          set({ connectionStatus: 'connected' });
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          // Greeting on first connect
+          if (get().messages.length === 0) {
+            set(state => ({
+              messages: [...state.messages, {
+                id: _id(), role: 'mark' as const,
+                timestamp: new Date().toISOString(),
+                blocks: [{
+                  type: 'text',
+                  text: "Good morning. I'm MARK — your AI software engineer.\n\nType a goal or hold the microphone button to speak. I'll plan, write, test, and narrate everything as I build.",
+                }],
+                isActive: false,
+              }],
+            }));
+          }
+        };
+
+        ws.onclose = () => {
+          set({ connectionStatus: 'disconnected' });
+          reconnectTimer = setTimeout(() => get().connectWebSocket(), 3000);
+        };
+
+        ws.onerror = () => { /* handled by close */ };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type !== 'event') return;
+            const { name, payload, timestamp } = data;
+            if (name === 'ping') return;
+
+            // Raw logs
+            set(state => ({ logs: [...state.logs.slice(-999), JSON.stringify(data)] }));
+
+            const addTimeline = (msg: string) => set(state => ({
+              timeline: [
+                { id: Math.random().toString(), timestamp, type: name, message: msg },
+                ...state.timeline,
+              ].slice(0, 200),
+            }));
+
+            switch (name) {
+
+              // ── Run lifecycle ──────────────────────────────────────────────
+              case 'RunStarted': {
+                set({
+                  running: true, goal: payload.goal, workspace: payload.workspace,
+                  elapsed: 0, cancelRequested: false, streamingTokens: '',
+                  timeline: [], filesInRun: [], lastError: null,
+                  workers: [...DEFAULT_WORKERS],
+                });
+                addTimeline(`Run started: ${payload.goal}`);
+                _startMarkMsg(timestamp);
+                _pushBlock({ type: 'text', text: `I'll get started on that right away.\n` });
+                _narrate(`Starting: ${payload.goal.slice(0, 60)}`);
+                break;
+              }
+
+              case 'RunCompleted': {
+                set({ running: false, elapsed: payload.elapsed });
+                addTimeline(`Run completed ${payload.success ? 'successfully' : 'with failures'}.`);
+                const { filesInRun } = get();
+                const created  = filesInRun.filter(f => f.operation === 'created').map(f => f.path);
+                const modified = filesInRun.filter(f => f.operation === 'modified').map(f => f.path);
+                const summaryText = payload.success
+                  ? `Done! ${created.length + modified.length > 0 ? `Created ${created.length} file(s), modified ${modified.length} file(s).` : 'All tasks completed.'}`
+                  : 'Completed with some failures.';
+                _finaliseMsg([{
+                  type: 'summary', text: summaryText, success: payload.success,
+                  filesCreated: created, filesModified: modified, elapsed: payload.elapsed,
+                }]);
+                _narrate(summaryText);
+                break;
+              }
+
+              case 'RunCancelled': {
+                set({ running: false, cancelRequested: false });
+                addTimeline('Run cancelled by user.');
+                _finaliseMsg([{ type: 'text', text: 'Run cancelled.' }]);
+                break;
+              }
+
+              case 'RunFailed': {
+                set({ running: false, lastError: payload.error });
+                addTimeline(`Run failed: ${payload.error}`);
+                _finaliseMsg([{ type: 'error', text: payload.error || 'Run failed.' }]);
+                _narrate('The run encountered an error.');
+                break;
+              }
+
+              case 'StatusChanged': {
+                set({
+                  running: payload.running, goal: payload.goal,
+                  workspace: payload.workspace, elapsed: payload.elapsed,
+                });
+                break;
+              }
+
+              // ── Streaming tokens ───────────────────────────────────────────
+              case 'StreamingToken': {
+                set(state => ({ streamingTokens: state.streamingTokens + payload.text }));
+                _appendText(payload.text);
+                break;
+              }
+
+              // ── Workers ────────────────────────────────────────────────────
+              case 'WorkerStarted': {
+                if (payload.worker) {
+                  set(state => ({
+                    currentWorker: payload.worker,
+                    workers: state.workers.map(w =>
+                      w.name === payload.worker ? { ...w, status: 'running', task: payload.task } : w
+                    ),
+                  }));
+                  addTimeline(`Worker started: ${payload.worker}`);
+                  _pushBlock({ type: 'worker', name: payload.worker, status: 'running', task: payload.task });
+                  const phrases: Record<string, string> = {
+                    Planning:  'Planning the implementation…',
+                    Research:  'Researching the codebase…',
+                    Coding:    'Writing code…',
+                    Testing:   'Running tests…',
+                    Quality:   'Checking code quality…',
+                    Review:    'Reviewing the work…',
+                  };
+                  if (phrases[payload.worker]) _narrate(phrases[payload.worker]);
+                }
+                break;
+              }
+
+              case 'WorkerFinished': {
+                if (payload.worker) {
+                  set(state => ({
+                    currentWorker: null,
+                    workers: state.workers.map(w =>
+                      w.name === payload.worker
+                        ? { ...w, status: payload.success ? 'success' : 'failed' }
+                        : w
+                    ),
+                  }));
+                  addTimeline(`Worker finished: ${payload.worker}`);
+                  _updateBlock(
+                    b => b.type === 'worker' && (b as any).name === payload.worker && (b as any).status === 'running',
+                    b => ({ ...b, status: payload.success ? 'success' : 'failed' } as ContentBlock),
+                  );
+                }
+                break;
+              }
+
+              case 'WorkerThinking': {
+                if (payload.worker) {
+                  set(state => ({
+                    workers: state.workers.map(w =>
+                      w.name === payload.worker ? { ...w, thought: payload.thought } : w
+                    ),
+                  }));
+                }
+                break;
+              }
+
+              // ── Planning ───────────────────────────────────────────────────
+              case 'PlanningStarted':
+                addTimeline('Planning started…');
+                break;
+              case 'PlanningFinished':
+                addTimeline('Planning finished.');
+                break;
+
+              // ── File events ────────────────────────────────────────────────
+              case 'FileCreated':
+              case 'FileModified':
+              case 'FileDeleted': {
+                if (payload.path) {
+                  const op = name === 'FileCreated' ? 'created' : name === 'FileModified' ? 'modified' : 'deleted';
+                  set(state => ({
+                    filesInRun: [
+                      ...state.filesInRun.filter(f => f.path !== payload.path),
+                      { path: payload.path, operation: op as FileOperation['operation'] },
+                    ],
+                  }));
+                  addTimeline(`File ${op}: ${payload.path}`);
+                  _pushBlock({ type: 'file', op: op as any, path: payload.path });
+                }
+                break;
+              }
+
+              // ── Tests ──────────────────────────────────────────────────────
+              case 'TestsStarted': {
+                addTimeline('Running tests…');
+                _pushBlock({ type: 'tests', status: 'running' });
+                break;
+              }
+              case 'TestsPassed': {
+                addTimeline('Tests passed successfully.');
+                _updateBlock(
+                  b => b.type === 'tests' && (b as any).status === 'running',
+                  b => ({ ...b, status: 'passed' } as ContentBlock),
+                );
+                _narrate('Tests passed!');
+                break;
+              }
+              case 'TestsFailed': {
+                addTimeline('Tests failed.');
+                _updateBlock(
+                  b => b.type === 'tests' && (b as any).status === 'running',
+                  b => ({ ...b, status: 'failed', output: payload.output } as ContentBlock),
+                );
+                _narrate('Tests failed. Attempting to fix…');
+                break;
+              }
+
+              // ── Quality ────────────────────────────────────────────────────
+              case 'QualityStarted':
+                addTimeline('Quality checks started…');
+                break;
+              case 'QualityFinished':
+                addTimeline('Quality checks finished.');
+                break;
+
+              // ── Permissions ────────────────────────────────────────────────
+              case 'PermissionRequested': {
+                set(state => ({ pendingPermissions: [...state.pendingPermissions, payload] }));
+                addTimeline(`Permission requested: ${payload.operation} on ${payload.path}`);
+                _pushBlock({ type: 'approval', requestId: payload.request_id, operation: payload.operation, path: payload.path, diff: payload.diff });
+                _narrate(`I need your approval to ${payload.operation} ${payload.path.split('/').pop()}`);
+                break;
+              }
+
+              case 'PermissionGranted':
+              case 'PermissionDenied': {
+                set(state => ({
+                  pendingPermissions: state.pendingPermissions.filter(p => p.request_id !== payload.request_id),
+                }));
+                addTimeline(`Permission ${name === 'PermissionGranted' ? 'granted' : 'denied'}.`);
+                break;
+              }
+
+              // ── Error ──────────────────────────────────────────────────────
+              case 'Error': {
+                const msg = payload.error || payload.message || 'Unknown error';
+                set({ lastError: msg });
+                addTimeline(`Error: ${msg}`);
+                break;
+              }
+
+              // ── Voice events ───────────────────────────────────────────────
+              case 'VoiceStateChanged':
+                set(state => ({ voice: { ...state.voice, state: payload.state as VoiceStateValue } }));
+                break;
+              case 'VoiceStarted':
+                set(state => ({ voice: { ...state.voice, running: true, mode: payload.mode as VoiceMode } }));
+                break;
+              case 'VoiceStopped':
+                set(state => ({ voice: { ...state.voice, running: false, state: 'idle' } }));
+                break;
+              case 'VoiceWakeWordDetected':
+                addTimeline('Wake word detected');
+                break;
+              case 'VoiceTranscribed':
+                set(state => ({ voice: { ...state.voice, transcript: payload.text } }));
+                break;
+              case 'VoiceSpeakingStarted':
+                set(state => ({ voice: { ...state.voice, state: 'speaking' } }));
+                break;
+              case 'VoiceSpeakingDone':
+                set(state => ({ voice: { ...state.voice, state: state.voice.running ? 'listening' : 'idle' } }));
+                break;
+              case 'VoiceTTSFallback':
+                set(state => ({ voice: { ...state.voice, isBrowserTTSFallback: true } }));
+                browserSpeak(payload.text, get().voice.ttsSpeed);
+                break;
+              case 'VoiceError':
+                set(state => ({ voice: { ...state.voice, state: 'error' } }));
+                addTimeline(`Voice error: ${payload.error}`);
+                break;
+            }
+          } catch (err) {
+            console.error('WS message parse error', err);
+          }
+        };
+      } catch (err) {
+        console.error('WebSocket connect failed', err);
+      }
+    },
+
+    // ── Run actions ─────────────────────────────────────────────────────────
+
+    startRun: async (goal, workspace, testCmd) => {
+      try {
+        await markApi.startRun(get().serverUrl, goal, workspace, testCmd);
+      } catch (err) {
+        console.error(err);
+        set({ lastError: 'Failed to start run' });
+      }
+    },
+
+    sendUserMessage: async (text, workspace) => {
+      const ts = new Date().toISOString();
+      // Push the user's message to the chat thread
+      set(state => ({
+        messages: [...state.messages, {
+          id: _id(), role: 'user' as const, timestamp: ts, text, blocks: [], isActive: false,
+        }],
+        workspace,
+      }));
+      // Kick off the actual run
+      try {
+        await markApi.startRun(get().serverUrl, text, workspace);
+      } catch (err) {
+        console.error(err);
+        set(state => ({
+          messages: [...state.messages, {
+            id: _id(), role: 'mark' as const, timestamp: new Date().toISOString(),
+            blocks: [{ type: 'error', text: 'Could not connect to the MARK server. Make sure it is running on the configured URL.' }],
+            isActive: false,
+          }],
+          lastError: 'Failed to start run',
+        }));
+      }
+    },
+
+    clearMessages: () => {
+      set({ messages: [], currentMarkMsgId: null, streamingTokens: '', timeline: [] });
+    },
+
+    cancelRun: async () => {
+      try {
+        set({ cancelRequested: true });
+        await markApi.cancelRun(get().serverUrl);
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    approve: async (requestId, always) => {
+      set(state => ({ pendingPermissions: state.pendingPermissions.filter(p => p.request_id !== requestId) }));
+      try {
+        await markApi.approve(get().serverUrl, requestId, always);
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    deny: async (requestId, reason) => {
+      set(state => ({ pendingPermissions: state.pendingPermissions.filter(p => p.request_id !== requestId) }));
+      try {
+        await markApi.deny(get().serverUrl, requestId, reason);
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    fetchFileContent: async (path, isDiff = false) => {
+      try {
+        const res = await markApi.getProject(get().serverUrl, path);
+        if (res.content) {
+          set(state => ({
+            openFiles: [...state.openFiles.filter(f => f.path !== path), { path, content: res.content!, isDiff }],
+            activeFileTab: path,
+          }));
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    closeFile: (path) => {
+      set(state => {
+        const remaining = state.openFiles.filter(f => f.path !== path);
+        return {
+          openFiles: remaining,
+          activeFileTab: state.activeFileTab === path ? (remaining[0]?.path || null) : state.activeFileTab,
+        };
+      });
+    },
+
+    setActiveFileTab: (path) => set({ activeFileTab: path }),
+
+    // ── Voice actions ────────────────────────────────────────────────────────
+
+    startVoice: async (mode) => {
+      try {
+        await markApi.startVoice(get().serverUrl, mode);
+        set(state => ({ voice: { ...state.voice, running: true, mode } }));
+      } catch (err) { console.error('startVoice', err); }
+    },
+
+    stopVoice: async () => {
+      try {
+        await markApi.stopVoice(get().serverUrl);
+        set(state => ({ voice: { ...state.voice, running: false, state: 'idle' } }));
+      } catch (err) { console.error('stopVoice', err); }
+    },
+
+    toggleMute: async () => {
+      const muted = !get().voice.muted;
+      try {
+        await markApi.updateVoiceSettings(get().serverUrl, { muted });
+        set(state => ({ voice: { ...state.voice, muted } }));
+      } catch (err) { console.error('toggleMute', err); }
+    },
+
+    updateVoiceSettings: async (settings) => {
+      try {
+        const res = await markApi.updateVoiceSettings(get().serverUrl, settings);
+        set(state => ({
+          voice: {
+            ...state.voice,
+            mode:         (res.settings.mode          as VoiceMode) ?? state.voice.mode,
+            muted:        res.settings.muted           ?? state.voice.muted,
+            autoSubmit:   res.settings.auto_submit     ?? state.voice.autoSubmit,
+            whisperModel: res.settings.whisper_model   ?? state.voice.whisperModel,
+            ttsVoice:     res.settings.tts_voice       ?? state.voice.ttsVoice,
+            ttsSpeed:     res.settings.tts_speed       ?? state.voice.ttsSpeed,
+          },
+        }));
+      } catch (err) { console.error('updateVoiceSettings', err); }
+    },
+
+    transcribeAudio: async (blob) => {
+      try {
+        const text = await markApi.transcribeAudio(get().serverUrl, blob);
+        if (text) set(state => ({ voice: { ...state.voice, transcript: text } }));
+        return text;
+      } catch (err) {
+        console.error('transcribeAudio', err);
+        return '';
+      }
+    },
+
+    speak: async (text) => {
+      const { voice, serverUrl } = get();
+      if (voice.isBrowserTTSFallback) { browserSpeak(text, voice.ttsSpeed); return; }
+      try {
+        await markApi.speak(serverUrl, text);
+      } catch {
+        browserSpeak(text, voice.ttsSpeed);
+      }
+    },
+  };
+});
