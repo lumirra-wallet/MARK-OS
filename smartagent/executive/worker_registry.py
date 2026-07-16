@@ -152,6 +152,7 @@ def build_default_registry() -> WorkerRegistry:
     from smartagent.executive.workers.documentation_worker import DocumentationWorker
     from smartagent.executive.workers.report_worker import ReportWorker
     from smartagent.executive.workers.knowledge_worker import KnowledgeWorker
+    from smartagent.executive.workers.debug_worker import DebugWorker
 
     # GenericWorker — used as fallback for unrecognised task types.
     class _GenericWorker:
@@ -177,6 +178,7 @@ def build_default_registry() -> WorkerRegistry:
         (TaskType.DOCUMENTATION,  DocumentationWorker),
         (TaskType.REPORT,         ReportWorker),
         (TaskType.ANALYSIS,       KnowledgeWorker),
+        (TaskType.DEBUGGING,      DebugWorker),        # Milestone 20 — self debugging
         (TaskType.GENERIC,        _GenericWorker),
     ]
 

@@ -1,8 +1,13 @@
 """
-TestingWorker — Phase 11.4: real Ollama-powered QA specialist.
+TestingWorker — Phase 11.4 / Milestone 19.
 
 Writes comprehensive tests and validates implementation code against the
 design and requirements from prior steps.
+
+Milestone 19: inherits FileEditMixin so any fenced code block in the output
+that carries a filename annotation is automatically written as a real file
+into the workspace's output/ directory.  Test files are written to disk, not
+just returned as text.
 """
 
 from __future__ import annotations
@@ -11,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from smartagent.executive.task import TaskType
 from smartagent.executive.workers.base_worker import BaseWorker
+from smartagent.executive.workers.file_edit_mixin import FileEditMixin
 from smartagent.executive.workers.ollama_mixin import OllamaWorkerMixin
 from smartagent.executive.workers.tool_mixin import WorkerToolMixin
 
@@ -19,7 +25,7 @@ if TYPE_CHECKING:
     from smartagent.executive.task import Task
 
 
-class TestingWorker(WorkerToolMixin, OllamaWorkerMixin, BaseWorker):
+class TestingWorker(FileEditMixin, WorkerToolMixin, OllamaWorkerMixin, BaseWorker):
     """
     Specialist for testing and quality assurance.
 

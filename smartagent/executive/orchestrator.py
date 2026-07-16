@@ -123,6 +123,8 @@ class Orchestrator:
         context.task_queue = self.submit_to_queue(graph)
         context.transition_to(ExecutionState.READY)
 
+        # Milestone 19 — create a FileEditor scoped to the active workspace output dir
+        self._inject_file_editor(context)
         # Phase 11.4 — inject services so workers can use them
         self._inject_services(context)
 
@@ -186,6 +188,37 @@ class Orchestrator:
             len(tasks), goal,
         )
         return context
+
+    # ------------------------------------------------------------------
+    # Milestone 19 — FileEditor injection
+    # ------------------------------------------------------------------
+
+    def _inject_file_editor(self, context: ExecutionContext) -> None:
+        """
+        Milestone 19: create a :class:`~smartagent.workspace.file_editor.FileEditor`
+        scoped to the active workspace's ``output/`` directory and inject it
+        into ``context.metadata["file_editor"]``.
+
+        When no workspace is active, injects an editor rooted at a temporary
+        ``output/`` directory relative to the working directory so workers
+        can still write files.
+
+        Best-effort: any failure is logged and never surfaces to callers.
+        """
+        try:
+            from smartagent.workspace.file_editor import FileEditor
+            import os
+
+            if self._workspace_manager is not None and self._workspace_manager.active:
+                output_dir = self._workspace_manager.active.output_path
+            else:
+                output_dir = os.path.join(os.getcwd(), "output")
+
+            editor = FileEditor(output_dir)
+            context.metadata["file_editor"] = editor
+            logger.debug("Orchestrator: FileEditor injected at %s", output_dir)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Orchestrator: could not inject FileEditor: %s", exc)
 
     # ------------------------------------------------------------------
     # Phase 11.4 — service injection

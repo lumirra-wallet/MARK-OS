@@ -1,8 +1,13 @@
 """
-CodingWorker — Phase 11.4: real Ollama-powered code implementation specialist.
+CodingWorker — Phase 11.4 / Milestone 19.
 
 Writes clean, production-quality code guided by research and design context.
 Uses the coding-optimised model (qwen2.5-coder by default).
+
+Milestone 19: inherits FileEditMixin so any fenced code block in the output
+that carries a filename annotation is automatically written as a real file
+into the workspace's output/ directory (via the FileEditor injected by the
+Orchestrator).  Workers no longer just return text — they create files.
 """
 
 from __future__ import annotations
@@ -11,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from smartagent.executive.task import TaskType
 from smartagent.executive.workers.base_worker import BaseWorker
+from smartagent.executive.workers.file_edit_mixin import FileEditMixin
 from smartagent.executive.workers.ollama_mixin import OllamaWorkerMixin
 from smartagent.executive.workers.tool_mixin import WorkerToolMixin
 
@@ -19,7 +25,7 @@ if TYPE_CHECKING:
     from smartagent.executive.task import Task
 
 
-class CodingWorker(WorkerToolMixin, OllamaWorkerMixin, BaseWorker):
+class CodingWorker(FileEditMixin, WorkerToolMixin, OllamaWorkerMixin, BaseWorker):
     """
     Specialist for code implementation.
 

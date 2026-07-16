@@ -24,6 +24,7 @@ from smartagent.ui.command_router import CommandRouter
 from smartagent.ui.commands import (
     events,
     executive,
+    intelligence,
     knowledge,
     learning,
     memory,
@@ -35,6 +36,7 @@ from smartagent.ui.commands import (
     tools,
     workspace,
 )
+from smartagent.ui.commands import debug_cmd
 from smartagent.ui.repl import Repl
 
 _logger = get_logger(__name__)
@@ -84,10 +86,12 @@ class Console:
         tools.register(self._router)
         models.register(self._router)
         events.register(self._router)
-        executive.register(self._router)   # Milestone 11 — plan, tasks
-        learning.register(self._router)    # Milestone 14 — learning analytics
+        executive.register(self._router)    # Milestone 11 — plan, tasks
+        learning.register(self._router)     # Milestone 14 — learning analytics
         workspace.register(self._router)    # Milestone 15 — workspace manager
         multi_agent.register(self._router)  # Milestone 17 — multi-agent collaboration
+        intelligence.register(self._router) # Milestone 18 — workspace intelligence
+        debug_cmd.register(self._router)    # Milestone 20 — self debugging
 
         # Milestone 9: free-text fallback — when the user types something that
         # isn't a recognised command AND a model is active, route the raw input

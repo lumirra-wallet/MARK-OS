@@ -62,6 +62,7 @@ class TaskType(Enum):
     ANALYSIS = "analysis"
     REPORT = "report"
     GENERIC = "generic"
+    DEBUGGING = "debugging"  # Milestone 20 — Self Debugging
 
 
 def _now_iso() -> str:
