@@ -390,39 +390,58 @@ class TestSoftwareEngineer:
         report = eng.build("Build a login system")
         assert isinstance(report, SoftwareEngineerReport)
 
+    # ---------------------------------------------------------------------------
+    # Goals used across these tests must classify as MEDIUM or LARGE so that
+    # the progressive-execution router sends them through DevLoop (not the fast
+    # path, which is for TRIVIAL/SMALL tasks only).
+    # ---------------------------------------------------------------------------
+
+    # Triggers MEDIUM via "authentication system" pattern.
+    _MEDIUM_GOAL = "Build a user authentication system with roles and permissions"
+
+    # Triggers LARGE via "auth … and …" pattern.
+    _LARGE_GOAL = "Build a REST API with user authentication and CRUD database operations"
+
+    # Trello clone — must keep "Trello" in the goal for the goal-forwarding test,
+    # word count > 12 → medium.
+    _TRELLO_GOAL = (
+        "Build a Trello-style project management application with boards, "
+        "cards, user accounts and team collaboration"
+    )
+
     def test_build_populates_requirements(self):
         eng = self._make_eng()
-        report = eng.build("Build an API")
+        report = eng.build(self._LARGE_GOAL)
         assert report.requirements is not None
         assert isinstance(report.requirements, RequirementReport)
 
     def test_build_populates_clarifications(self):
         eng = self._make_eng()
-        report = eng.build("Build an API")
+        report = eng.build(self._LARGE_GOAL)
         assert report.clarifications is not None
 
     def test_build_success_true_when_loop_passes(self):
         eng = self._make_eng(loop_success=True)
-        report = eng.build("Build X")
+        report = eng.build(self._MEDIUM_GOAL)
         assert report.success is True
 
     def test_build_success_false_when_loop_fails(self):
         eng = self._make_eng(loop_success=False)
-        report = eng.build("Build X")
+        report = eng.build(self._MEDIUM_GOAL)
         assert report.success is False
 
     def test_build_calls_dev_loop_run(self):
         dev_loop = MagicMock()
         dev_loop.run.return_value = _make_loop_result(True)
         eng = SoftwareEngineer(dev_loop=dev_loop)
-        eng.build("Build X")
+        eng.build(self._MEDIUM_GOAL)
         dev_loop.run.assert_called_once()
 
     def test_build_passes_goal_to_loop(self):
         dev_loop = MagicMock()
         dev_loop.run.return_value = _make_loop_result(True)
         eng = SoftwareEngineer(dev_loop=dev_loop)
-        eng.build("Build a Trello clone")
+        eng.build(self._TRELLO_GOAL)
         call_kwargs = dev_loop.run.call_args
         goal_arg = call_kwargs[1].get("goal") or call_kwargs[0][0]
         assert "Trello" in goal_arg
@@ -432,7 +451,7 @@ class TestSoftwareEngineer:
         dev_loop = MagicMock()
         dev_loop.run.return_value = _make_loop_result(True)
         eng = SoftwareEngineer(dev_loop=dev_loop, memory_manager=memory)
-        eng.build("Build X")
+        eng.build(self._MEDIUM_GOAL)
         memory.remember.assert_called_once()
 
     def test_build_auto_commit_on_success(self):
@@ -442,7 +461,7 @@ class TestSoftwareEngineer:
         dev_loop = MagicMock()
         dev_loop.run.return_value = _make_loop_result(True)
         eng = SoftwareEngineer(dev_loop=dev_loop, git_client=git)
-        report = eng.build("Build X", auto_commit=True)
+        report = eng.build(self._MEDIUM_GOAL, auto_commit=True)
         git.add.assert_called_once()
         git.commit.assert_called_once()
 
@@ -451,13 +470,15 @@ class TestSoftwareEngineer:
         dev_loop = MagicMock()
         dev_loop.run.return_value = _make_loop_result(False)
         eng = SoftwareEngineer(dev_loop=dev_loop, git_client=git)
-        eng.build("Build X", auto_commit=True)
+        eng.build(self._MEDIUM_GOAL, auto_commit=True)
         git.add.assert_not_called()
         git.commit.assert_not_called()
 
     def test_build_no_dev_loop_still_succeeds(self):
         eng = SoftwareEngineer(dev_loop=None)
-        report = eng.build("Build X")
+        # Use a medium/large goal — fast path requires model_manager;
+        # medium/large with dev_loop=None returns the stub LoopResult (success=True).
+        report = eng.build(self._MEDIUM_GOAL)
         assert isinstance(report, SoftwareEngineerReport)
         assert report.success is True  # stub result
 
@@ -465,8 +486,12 @@ class TestSoftwareEngineer:
         dev_loop = MagicMock()
         dev_loop.run.return_value = _make_loop_result(True)
         eng = SoftwareEngineer(dev_loop=dev_loop, interactive=False)
-        # Goal triggers auth + db questions; defaults should be applied
-        report = eng.build("Add user login and save to a database")
+        # "authentication system" → MEDIUM → DevLoop called.
+        # Goal triggers auth + db questions; defaults should be applied.
+        report = eng.build(
+            "Build a user authentication system with login, registration "
+            "and database persistence"
+        )
         assert report.clarifications is not None
         # Defaults should be filled in (JWT and PostgreSQL)
         answered = report.clarifications.answered
@@ -474,7 +499,7 @@ class TestSoftwareEngineer:
 
     def test_total_elapsed_set(self):
         eng = self._make_eng()
-        report = eng.build("Build X")
+        report = eng.build(self._MEDIUM_GOAL)
         assert report.total_elapsed >= 0.0
 
     def test_summary_populated(self):

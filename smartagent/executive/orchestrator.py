@@ -96,12 +96,20 @@ class Orchestrator:
     # Main pipeline
     # ------------------------------------------------------------------
 
-    def execute_goal(self, goal: str) -> ExecutionContext:
+    def execute_goal(self, goal: str, complexity: str | None = None) -> ExecutionContext:
         """
         Run the full pipeline for *goal* and return the completed context.
 
         Phase 11.4: injects AI services into the context before execution.
         Phase 11.5: saves results to memory/knowledge after completion.
+
+        Args:
+            goal:       Free-form user goal.
+            complexity: Optional complexity tier — ``"trivial"``, ``"small"``,
+                        ``"medium"``, ``"large"``, or ``"enterprise"``.
+                        When supplied, passed to the Planner so it can select
+                        the appropriate task template.  When ``None``, the
+                        Planner falls back to keyword matching (legacy path).
 
         Steps:
             1. Create a plan (list of tasks) from the goal.
@@ -113,9 +121,12 @@ class Orchestrator:
         """
         context = ExecutionContext(goal=goal)
         context.transition_to(ExecutionState.PLANNING)
-        logger.info("Orchestrator: planning goal=%r", goal)
+        logger.info("Orchestrator: planning goal=%r complexity=%r", goal, complexity)
 
-        tasks = self._planner.create_plan(goal)
+        if complexity is not None:
+            tasks = self._planner.create_plan(goal, complexity=complexity)
+        else:
+            tasks = self._planner.create_plan(goal)
         logger.info("Orchestrator: plan has %d tasks", len(tasks))
 
         graph = self.build_task_graph(tasks)

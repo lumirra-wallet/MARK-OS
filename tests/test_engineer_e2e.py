@@ -615,7 +615,9 @@ def _make_single_coding_task_planner(title: str = "Implement hello.py"):
     from smartagent.executive.task import Task, TaskType
 
     class _SingleTaskPlanner(Planner):
-        def create_plan(self, goal: str) -> list:
+        # Accept complexity kwarg (and any future kwargs) so Orchestrator can
+        # pass complexity="medium"/"large" through without raising TypeError.
+        def create_plan(self, goal: str, **kwargs) -> list:
             return [Task(
                 title=title,
                 description=goal,
@@ -649,25 +651,33 @@ class TestFullPipelineE2E:
             model_manager=mock_mm,
         )
 
-    def _make_eng(self, ctrl):
+    def _make_eng(self, ctrl, mock_mm=None):
         from smartagent.engineer.software_engineer import SoftwareEngineer
         from smartagent.dev_loop.dev_loop import DevLoop
 
         dev_loop = DevLoop(executive=ctrl, max_iterations=1)
-        return SoftwareEngineer(dev_loop=dev_loop)
+        # Pass mock_mm so the fast path (trivial/small classification) also has
+        # a model_manager — and so any tier that needs the model manager works.
+        return SoftwareEngineer(dev_loop=dev_loop, model_manager=mock_mm)
 
     # ------------------------------------------------------------------
     # 9a. hello.py exists on disk
     # ------------------------------------------------------------------
 
+    # Large goal used for all pipeline E2E tests.  "Create hello.py" is
+    # intentionally NOT used here because classify_complexity() now routes it
+    # to the fast path — these tests specifically verify the full
+    # DevLoop → Orchestrator → CodingWorker → FileEditMixin → FileEditor chain.
+    _PIPELINE_GOAL = "Build a data service with user authentication and CRUD operations"
+
     def test_hello_py_exists_on_disk(self, tmp_path):
         """The fundamental test: a file actually appears on disk."""
         mock_mm = _MockModelManager(_HELLO_RESPONSE)
         ctrl = self._make_ctrl(mock_mm)
-        eng = self._make_eng(ctrl)
+        eng = self._make_eng(ctrl, mock_mm)
 
         eng.build(
-            goal="Create hello.py that prints Hello World",
+            goal=self._PIPELINE_GOAL,
             test_cmd="echo no-tests",
             run_quality=False,
             project_dir=str(tmp_path),
@@ -685,10 +695,10 @@ class TestFullPipelineE2E:
         """The written content must contain the code, not a wrapper."""
         mock_mm = _MockModelManager(_HELLO_RESPONSE)
         ctrl = self._make_ctrl(mock_mm)
-        eng = self._make_eng(ctrl)
+        eng = self._make_eng(ctrl, mock_mm)
 
         eng.build(
-            goal="Create hello.py that prints Hello World",
+            goal=self._PIPELINE_GOAL,
             test_cmd="echo no-tests",
             run_quality=False,
             project_dir=str(tmp_path),
@@ -705,10 +715,10 @@ class TestFullPipelineE2E:
         """list_edits() must record the create operation for hello.py."""
         mock_mm = _MockModelManager(_HELLO_RESPONSE)
         ctrl = self._make_ctrl(mock_mm)
-        eng = self._make_eng(ctrl)
+        eng = self._make_eng(ctrl, mock_mm)
 
         eng.build(
-            goal="Create hello.py",
+            goal=self._PIPELINE_GOAL,
             test_cmd="echo no-tests",
             run_quality=False,
             project_dir=str(tmp_path),
@@ -734,10 +744,10 @@ class TestFullPipelineE2E:
         """SoftwareEngineerReport.files_created must list hello.py."""
         mock_mm = _MockModelManager(_HELLO_RESPONSE)
         ctrl = self._make_ctrl(mock_mm)
-        eng = self._make_eng(ctrl)
+        eng = self._make_eng(ctrl, mock_mm)
 
         report = eng.build(
-            goal="Create hello.py",
+            goal=self._PIPELINE_GOAL,
             test_cmd="echo no-tests",
             run_quality=False,
             project_dir=str(tmp_path),
@@ -755,10 +765,10 @@ class TestFullPipelineE2E:
         """project_dir in the report must match the requested directory."""
         mock_mm = _MockModelManager(_HELLO_RESPONSE)
         ctrl = self._make_ctrl(mock_mm)
-        eng = self._make_eng(ctrl)
+        eng = self._make_eng(ctrl, mock_mm)
 
         report = eng.build(
-            goal="Create hello.py",
+            goal=self._PIPELINE_GOAL,
             test_cmd="echo no-tests",
             run_quality=False,
             project_dir=str(tmp_path),
@@ -791,10 +801,10 @@ class TestFullPipelineE2E:
 
         mock_mm = _MockModelManager(_HELLO_RESPONSE)
         ctrl = self._make_ctrl(mock_mm)
-        eng = self._make_eng(ctrl)
+        eng = self._make_eng(ctrl, mock_mm)
 
         report = eng.build(
-            goal="Create hello.py",
+            goal=self._PIPELINE_GOAL,
             test_cmd="echo no-tests",
             run_quality=False,
             project_dir=str(tmp_path),
@@ -820,10 +830,10 @@ class TestFullPipelineE2E:
 
         mock_mm = _MockModelManager(_HELLO_RESPONSE)
         ctrl = self._make_ctrl(mock_mm)
-        eng = self._make_eng(ctrl)
+        eng = self._make_eng(ctrl, mock_mm)
 
         report = eng.build(
-            goal="Create hello.py",
+            goal=self._PIPELINE_GOAL,
             test_cmd="echo no-tests",
             run_quality=False,
             project_dir=str(tmp_path),
@@ -850,10 +860,10 @@ class TestFullPipelineE2E:
 
         mock_mm = _MockModelManager(_HELLO_RESPONSE)
         ctrl = self._make_ctrl(mock_mm)
-        eng = self._make_eng(ctrl)
+        eng = self._make_eng(ctrl, mock_mm)
 
         report = eng.build(
-            goal="Create hello.py",
+            goal=self._PIPELINE_GOAL,
             test_cmd="echo no-tests",
             run_quality=False,
             project_dir=str(tmp_path),

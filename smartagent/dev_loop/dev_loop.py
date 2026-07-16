@@ -129,6 +129,7 @@ class DevLoop:
         commit_message: str = "",
         run_quality: bool = True,
         project_dir: str | None = None,
+        complexity: str | None = None,
     ) -> LoopResult:
         """
         Run the autonomous development loop for *goal*.
@@ -177,7 +178,8 @@ class DevLoop:
             # PHASE 1: Planning + Coding via Executive
             # ──────────────────────────────────────────────────────────
             self._dash_set("current_worker", "Planner")
-            plan_iter = self._run_planning_phase(cycle, goal)
+            print(f"  [plan] Planning implementation (cycle {cycle}/{self._max_iterations})...")
+            plan_iter = self._run_planning_phase(cycle, goal, complexity=complexity)
             iterations.append(plan_iter)
 
             if not plan_iter.success:
@@ -195,22 +197,26 @@ class DevLoop:
             # PHASE 2: Testing
             # ──────────────────────────────────────────────────────────
             self._dash_set("current_worker", "TestRunner")
+            print(f"  [test] Running tests...")
             test_iter = self._run_test_phase(cycle, test_cmd, file_editor, resolved_dir)
             iterations.append(test_iter)
             self._dash_set_tests(test_iter.tests_passed, test_iter.tests_failed)
 
             if test_iter.success:
                 logger.info("DevLoop: tests passed on cycle %d", cycle)
+                print(f"  [test] Tests passed ✓")
 
                 # ──────────────────────────────────────────────────────
                 # PHASE 2b: Quality (only after tests pass)
                 # ──────────────────────────────────────────────────────
                 if run_quality and self._quality_runner is not None:
                     self._dash_set("current_worker", "QualityRunner")
+                    print(f"  [qual] Running quality checks (ruff/black/mypy)...")
                     quality_iter = self._run_quality_phase(cycle)
                     iterations.append(quality_iter)
                     if quality_iter.success:
                         self._dash_add_completed("Quality checks")
+                        print(f"  [qual] Quality checks passed ✓")
 
                 result.success     = True
                 result.stop_reason = "success"
@@ -226,6 +232,7 @@ class DevLoop:
             # PHASE 3: Debugging (self-healing)
             # ──────────────────────────────────────────────────────────
             self._dash_set("current_worker", "DebugLoop")
+            print(f"  [fix]  Tests failed — attempting self-repair (cycle {cycle})...")
             # Build the same scoped test command the debug loop should use
             scoped_cmd = _build_scoped_test_cmd(test_cmd, file_editor, resolved_dir)
             debug_iter = self._run_debug_phase(cycle, scoped_cmd, test_iter.notes, resolved_dir)
@@ -237,6 +244,7 @@ class DevLoop:
             # PHASE 4: Reflection
             # ──────────────────────────────────────────────────────────
             self._dash_set("current_worker", "ReflectionEngine")
+            print(f"  [reflect] Learning from cycle {cycle}...")
             reflect_iter = self._run_reflection_phase(cycle, goal, test_iter, debug_iter)
             iterations.append(reflect_iter)
             self._dash_add_completed(f"Cycle {cycle}")
@@ -289,13 +297,18 @@ class DevLoop:
     # Phase runners
     # ------------------------------------------------------------------
 
-    def _run_planning_phase(self, cycle: int, goal: str) -> LoopIteration:
+    def _run_planning_phase(
+        self,
+        cycle: int,
+        goal: str,
+        complexity: str | None = None,
+    ) -> LoopIteration:
         t0 = time.monotonic()
         notes = ""
         success = False
         try:
             if self._executive is not None:
-                ctx   = self._executive.receive_goal(goal)
+                ctx   = self._executive.receive_goal(goal, complexity=complexity)
                 state = str(getattr(ctx, "state", "")).lower()
                 success = "completed" in state or "ready" in state
                 notes   = f"State: {state}"

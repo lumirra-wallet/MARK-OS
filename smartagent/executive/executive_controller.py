@@ -149,10 +149,18 @@ class ExecutiveController:
     # Primary API (unchanged from Phase 2/3)
     # ------------------------------------------------------------------
 
-    def receive_goal(self, goal: str) -> ExecutionContext:
-        """Full pipeline: plan + execute.  Returns the completed context."""
-        logger.info("ExecutiveController: received goal=%r", goal)
-        context = self._orchestrator.execute_goal(goal)
+    def receive_goal(self, goal: str, complexity: str | None = None) -> ExecutionContext:
+        """
+        Full pipeline: plan + execute.  Returns the completed context.
+
+        Args:
+            goal:       Free-form user goal.
+            complexity: Optional complexity tier forwarded to the Planner so
+                        it can select the right task template.  When ``None``,
+                        the Planner uses keyword matching (legacy path).
+        """
+        logger.info("ExecutiveController: received goal=%r complexity=%r", goal, complexity)
+        context = self._orchestrator.execute_goal(goal, complexity=complexity)
         self.current_context = context
         return context
 

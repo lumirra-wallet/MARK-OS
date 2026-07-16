@@ -36,6 +36,7 @@ from typing import Any, Optional
 from smartagent.engineer.clarification_engine import ClarificationEngine, ClarificationSet
 from smartagent.engineer.requirement_analyzer import RequirementAnalyzer, RequirementReport
 from smartagent.logs.logger import get_logger
+from smartagent.performance.complexity import TaskComplexity, classify_complexity
 
 logger = get_logger(__name__)
 
@@ -290,19 +291,42 @@ class SoftwareEngineer:
         t0 = time.monotonic()
         use_interactive = self._interactive if interactive is None else interactive
         resolved_project_dir = os.path.abspath(project_dir) if project_dir else os.getcwd()
+
+        # ----------------------------------------------------------
+        # Classify complexity and route to the right execution tier.
+        # ----------------------------------------------------------
+        complexity = classify_complexity(goal)
+
+        print(f"  [tier] Complexity : {complexity.value}")
+
+        # ── Tier 1: TRIVIAL / SMALL — fast path (one LLM call, no pipeline) ──
+        if complexity in (TaskComplexity.TRIVIAL, TaskComplexity.SMALL):
+            return self._fast_path_build(
+                goal, test_cmd, resolved_project_dir, complexity, t0,
+                auto_commit=auto_commit, commit_message=commit_message,
+            )
+
+        # ── Tier 2: MEDIUM — lean pipeline (no research/architecture/docs) ──
+        # ── Tier 3: LARGE / ENTERPRISE — full pipeline as before ─────────────
+        print(
+            f"  [tier] Tier: {'medium (lean pipeline)' if complexity == TaskComplexity.MEDIUM else 'full pipeline'}"
+        )
+
         report = SoftwareEngineerReport(goal=goal, project_dir=resolved_project_dir)
 
-        logger.info("SoftwareEngineer: starting  goal=%r", goal[:80])
+        logger.info("SoftwareEngineer: starting  goal=%r  tier=%s", goal[:80], complexity.value)
 
         # ----------------------------------------------------------
-        # Step 0: Workspace scan (new in v2.0)
+        # Step 0: Workspace scan — skip for medium (speed)
         # ----------------------------------------------------------
-        report.workspace_summary = self._scan_workspace(scan_path)
-        logger.info("SoftwareEngineer: workspace=%r", report.workspace_summary[:80])
+        if complexity not in (TaskComplexity.MEDIUM,):
+            report.workspace_summary = self._scan_workspace(scan_path)
+            logger.info("SoftwareEngineer: workspace=%r", report.workspace_summary[:80])
 
         # ----------------------------------------------------------
         # Step 1: Requirement analysis
         # ----------------------------------------------------------
+        print(f"  [req]  Analyzing requirements...")
         req = self._analyze(goal, project_name)
         report.requirements = req
         logger.info(
@@ -325,16 +349,21 @@ class SoftwareEngineer:
         # Step 3: Execute via DevLoop
         # ----------------------------------------------------------
         if self._dev_loop is not None:
-            # Override max_iterations if requested
-            if max_iterations != 5:
-                self._dev_loop._max_iterations = max(1, max_iterations)
+            # Tier 2 (medium): cap iterations at 2 and route faster
+            effective_max_iters = max_iterations
+            if complexity == TaskComplexity.MEDIUM:
+                effective_max_iters = min(max_iterations, 2)
+                logger.info("SoftwareEngineer: medium tier — capping iterations at %d", effective_max_iters)
+
+            self._dev_loop._max_iterations = max(1, effective_max_iters)
 
             loop_result = self._dev_loop.run(
                 goal=enriched_goal,
                 test_cmd=test_cmd,
                 auto_commit=False,  # we handle commits ourselves
-                run_quality=run_quality,
+                run_quality=run_quality and complexity != TaskComplexity.MEDIUM,
                 project_dir=resolved_project_dir,
+                complexity=complexity.value,
             )
         else:
             from smartagent.dev_loop.loop_result import LoopResult
@@ -379,6 +408,67 @@ class SoftwareEngineer:
             "SoftwareEngineer: done  success=%s  elapsed=%.1fs",
             report.success, report.total_elapsed,
         )
+        return report
+
+    # ------------------------------------------------------------------
+    # Tier 1 fast path — TRIVIAL / SMALL
+    # ------------------------------------------------------------------
+
+    def _fast_path_build(
+        self,
+        goal: str,
+        test_cmd: str,
+        project_dir: str,
+        complexity: TaskComplexity,
+        t0: float,
+        auto_commit: bool = False,
+        commit_message: str = "",
+    ) -> SoftwareEngineerReport:
+        """
+        Execution tier 1: one LLM call → parse fences → write files → done.
+
+        No DevLoop, no Planner, no Scheduler, no specialist workers.
+        Typical completion time: < 10 seconds.
+        """
+        print(
+            f"  [tier] Tier: fast path"
+            f" ({'trivial' if complexity == TaskComplexity.TRIVIAL else 'simple'} task)"
+        )
+
+        from smartagent.engineer.fast_path import FastPathBuilder
+
+        builder = FastPathBuilder(
+            model_manager=self._model_manager,
+            project_dir=project_dir,
+        )
+
+        # Run tests only when a custom test command was supplied — the default
+        # "pytest" with no args would accidentally run the entire SmartAgent suite.
+        run_tests = bool(test_cmd and test_cmd != "pytest")
+
+        fast_result = builder.build(
+            goal=goal,
+            test_cmd=test_cmd,
+            run_tests=run_tests,
+        )
+
+        report = SoftwareEngineerReport(
+            goal=goal,
+            project_dir=project_dir,
+            loop_result=fast_result,
+            success=fast_result.success,
+            files_created=fast_result.files_created,
+            files_modified=fast_result.files_modified,
+            total_elapsed=time.monotonic() - t0,
+            summary=fast_result.final_summary,
+        )
+
+        if auto_commit and fast_result.success and self._git is not None:
+            sha = self._commit(goal, commit_message)
+            report.committed  = bool(sha)
+            report.commit_sha = sha
+
+        self._persist(goal, report)
         return report
 
     # ------------------------------------------------------------------

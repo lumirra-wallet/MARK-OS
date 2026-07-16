@@ -50,6 +50,16 @@ _TEMPLATES: dict[str, list[_TaskSpec]] = {
         _TaskSpec("Implementation", TaskType.IMPLEMENTATION, "Implement: {goal}"),
         _TaskSpec("Testing",        TaskType.TESTING,        "Write tests for: {goal}"),
     ],
+    # --- medium_app: 3 tasks — planning + coding + testing, no research ---
+    # Used when complexity is explicitly "medium" (progressive execution tier 2).
+    # NOTE: this template is ONLY selected when complexity="medium" is explicitly
+    # passed to create_plan().  Calling create_plan(goal) without complexity still
+    # uses keyword matching (backward compatible).
+    "medium_app": [
+        _TaskSpec("Planning",       TaskType.PLANNING,       "Create a focused plan for: {goal}"),
+        _TaskSpec("Implementation", TaskType.IMPLEMENTATION, "Implement: {goal}"),
+        _TaskSpec("Testing",        TaskType.TESTING,        "Write and run tests for: {goal}"),
+    ],
     # --- api / backend: 5 tasks ---
     "api": [
         _TaskSpec("Research",       TaskType.RESEARCH,       "Research requirements and prior art for: {goal}"),
@@ -104,18 +114,12 @@ _KEYWORD_MAP: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\b(database|schema|migration|orm|model|sql|nosql|postgres|mongodb|redis|table)\b", re.I), "database"),
 ]
 
-# Complexity levels that force the trivial 2-task plan regardless of template
-_TRIVIAL_TASK_TYPES = {"trivial"}
-
-# Task type names to keep per complexity level (subset of full template)
-# Maps complexity → set of TaskType values to KEEP (others are dropped)
-_COMPLEXITY_TASK_FILTER: dict[str, set[TaskType]] = {
-    "trivial": {TaskType.IMPLEMENTATION, TaskType.TESTING},
-    "small":   {TaskType.IMPLEMENTATION, TaskType.TESTING},
-    "medium":  {TaskType.RESEARCH, TaskType.IMPLEMENTATION, TaskType.TESTING, TaskType.REVIEW},
-    "large":   None,      # type: ignore[assignment]  — keep all
-    "enterprise": None,   # keep all + documentation
-}
+# Sentinel — distinguishes "caller passed complexity explicitly" from "caller
+# omitted it and got the default".  This lets the Planner apply template
+# selection only when complexity is intentionally specified, preserving full
+# backward compatibility for all callers that use create_plan(goal) without
+# the complexity argument.
+_COMPLEXITY_UNSET = object()
 
 
 # ---------------------------------------------------------------------------
@@ -134,15 +138,27 @@ class Planner:
     dependencies are pre-wired so that each task depends on its predecessor.
     """
 
-    def create_plan(self, goal: str, complexity: str = "medium") -> list[Task]:
+    def create_plan(self, goal: str, complexity=_COMPLEXITY_UNSET) -> list[Task]:
         """
         Decompose *goal* into an ordered list of ``Task`` objects.
 
         Args:
             goal:       Free-form user goal string.
-            complexity: ``"trivial"``, ``"small"``, ``"medium"``,
-                        ``"large"``, or ``"enterprise"``.  Defaults to
-                        ``"medium"`` for backward compatibility.
+            complexity: Optional complexity hint — ``"trivial"``, ``"small"``,
+                        ``"medium"``, ``"large"``, or ``"enterprise"``.
+
+                        When omitted (the default), keyword matching selects
+                        the template — this is the backward-compatible path
+                        used by all pre-v2.0 callers.
+
+                        When explicitly passed:
+                          - ``"trivial"`` / ``"small"`` → 2-task plan
+                            (Implementation + Testing only).
+                          - ``"medium"`` → 3-task plan
+                            (Planning + Implementation + Testing).
+                            No Research, Architecture, or Documentation.
+                          - ``"large"`` / ``"enterprise"`` → full
+                            keyword-matched template (same as omitting).
 
         Returns:
             Ordered list of ``Task`` objects (first task has no deps).
@@ -150,22 +166,29 @@ class Planner:
         if not goal or not goal.strip():
             raise ValueError("Goal must be a non-empty string.")
 
-        # v2.0 — fast-path: explicit "trivial" complexity → 2-task plan.
-        # Auto-detection is the caller's responsibility (DevLoop, SoftwareEngineer).
-        # When complexity is "medium" (the default), keyword matching decides the
-        # template — this preserves full backward compatibility with all pre-v2.0 tests.
-        if complexity == "trivial":
-            specs = _TEMPLATES["trivial"]
+        explicitly_set = complexity is not _COMPLEXITY_UNSET
+
+        # ── Template selection ────────────────────────────────────────────
+        if explicitly_set and complexity in ("trivial", "small"):
+            # Fast-path: simple task — 2 workers (code + test only)
             template_name = "trivial"
+            specs = _TEMPLATES["trivial"]
+
+        elif explicitly_set and complexity == "medium":
+            # Progressive tier 2: no research / architecture / documentation
+            template_name = "medium_app"
+            specs = _TEMPLATES["medium_app"]
+
         else:
+            # Legacy / large / enterprise / omitted → keyword matching.
+            # This path is identical to all pre-v2.0 behaviour and must not
+            # be changed — many tests rely on specific template selection.
             template_name = self._infer_template(goal.strip())
             specs = _TEMPLATES[template_name]
-            # All other complexity values (small/medium/large/enterprise) use
-            # the full keyword-matched template unchanged — backward compatible.
 
         logger.info(
             "Planner: goal=%r complexity=%r template=%r (%d tasks)",
-            goal, complexity, template_name, len(specs),
+            goal, complexity if explicitly_set else "(auto)", template_name, len(specs),
         )
 
         tasks: list[Task] = []

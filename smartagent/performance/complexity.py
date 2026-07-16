@@ -73,28 +73,61 @@ class TaskComplexity(str, Enum):
 # ---------------------------------------------------------------------------
 
 # Trivial patterns: single-file, single-function goals
+#
+# Rule of thumb: if the task can be done in one file and one LLM call it
+# belongs here.  Examples from the spec:
+#   create hello.py · create README · fix one typo · add one function
+#   rename a file · update one test · create index.html · add a CSS file
 _TRIVIAL_PATTERNS: list[re.Pattern] = [
     re.compile(p, re.I) for p in [
+        # hello-world variants
         r"\bhello[\s._-]?(?:world|py)?\b",
         r"\bcreate\s+hello",
+        r"\bprint\s+hello\b",
+
+        # simple calculator
         r"\bwrite\s+(?:a\s+)?(?:simple\s+)?calculator\b",
         r"\bbuild\s+(?:a\s+)?(?:simple\s+)?calculator\b",
         r"\bcalculator\s+(?:cli|script|program|app)?\b",
-        r"\badd\s+(?:a\s+)?(?:single\s+)?function\b",
-        r"\brename\s+(?:a\s+)?(?:variable|function|class)\b",
+
+        # single function / method
+        r"\badd\s+(?:a\s+)?(?:one\s+|single\s+)?function\b",
+        r"\badd\s+(?:a\s+)?(?:one\s+|single\s+)?method\b",
+
+        # renames / typos / small fixes
+        r"\brename\s+(?:a\s+)?(?:variable|function|class|file)\b",
+        r"\bfix\s+(?:a\s+|one\s+|the\s+)?(?:single\s+)?(?:bug|typo|error|issue|warning)\b",
+        r"\bupdate\s+(?:one\s+|a\s+|single\s+)?test\b",
+
+        # single config / dotfile creation
         r"\bcreate\s+(?:a\s+)?requirements\.txt\b",
-        r"\bcreate\s+(?:a\s+)?\.(gitignore|env|editorconfig)\b",
+        r"\bcreate\s+(?:a\s+)?\.(gitignore|env|editorconfig|prettierrc|flake8)\b",
+
+        # README / doc files
         r"\badd\s+(?:a\s+)?readme\b",
-        r"\bcreate\s+(?:a\s+)?readme\b",
+        r"\bcreate\s+(?:a\s+)?readme(?:\.md|\.rst|\.txt)?\b",
+        r"\bwrite\s+(?:a\s+)?readme\b",
+
+        # single HTML / CSS / JS files — spec examples: index.html, CSS file
+        r"\bcreate\s+(?:a\s+)?index\.html\b",
+        r"\bcreate\s+(?:a\s+)?index\.\w{1,6}\b",
+        r"\bcreate\s+(?:a\s+)?(?:\w+\.html|\w+\.css|\w+\.js)\b",
+        r"\badd\s+(?:a\s+)?(?:css|html|js|stylesheet)\s+file\b",
+        r"\bcreate\s+(?:a\s+)?(?:css|html|js|stylesheet)\s+file\b",
+
+        # simple Python scripts
         r"\bwrite\s+(?:a\s+)?(?:simple\s+)?(?:python\s+)?script\s+(?:that|to)\s+\w+\s+\w+\s*$",
-        r"\bfix\s+(?:a\s+)?(?:single\s+)?(?:bug|typo|error|issue)\b",
-        r"\bprint\s+hello\b",
+
+        # math / algorithm one-liners
         r"\bfibonacci\b",
         r"\bfactorial\b",
         r"\breverse\s+(?:a\s+)?string\b",
         r"\bpalindrome\b",
         r"\bconvert\s+celsius\b",
         r"\bconvert\s+fahrenheit\b",
+        r"\bfizz[\s-]?buzz\b",
+        r"\bcount\s+words?\b",
+        r"\bsum\s+(?:a\s+)?list\b",
     ]
 ]
 

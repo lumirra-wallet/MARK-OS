@@ -1,0 +1,122 @@
+The current architecture is wasting enormous amounts of time because every engineer request executes the complete multi-agent pipeline regardless of complexity.
+
+Research current coding-agent architectures (Cursor, Cline, Roo Code, Aider, Claude Code, OpenAI Codex, OpenHands, etc.) and redesign MARK's execution engine around progressive execution.
+
+The goals are:
+
+1. SIMPLE TASKS MUST NEVER GO THROUGH THE FULL PIPELINE.
+
+Examples:
+
+- create hello.py
+- create README
+- fix one typo
+- add one function
+- rename a file
+- update one test
+- create index.html
+- add a CSS file
+
+These should complete in under 10 seconds.
+
+Execution should be:
+
+Intent Detection
+→ Generate Files
+→ Write Files
+→ Optional Tests
+→ Return
+
+No research.
+No architecture worker.
+No documentation worker.
+No planning worker.
+
+----------------------------------------------------
+
+2. MEDIUM TASKS
+
+Examples:
+
+- calculator CLI
+- REST API
+- Flask app
+- authentication
+- dashboard
+- CRUD application
+
+Execution:
+
+Requirements
+→ Planning
+→ Coding
+→ Testing
+→ Fix Loop
+→ Finish
+
+Skip research unless explicitly requested.
+
+----------------------------------------------------
+
+3. LARGE TASKS
+
+Examples:
+
+- SaaS
+- AI platform
+- IDE
+- Operating system
+- Enterprise application
+
+Only these should execute the complete pipeline:
+
+Research
+Architecture
+Planning
+Implementation
+Testing
+Documentation
+Quality
+Git
+
+----------------------------------------------------
+
+4. STREAM OUTPUT
+
+Never wait several minutes before showing progress.
+
+Instead stream continuously:
+
+Detected task...
+Creating files...
+Writing hello.py...
+Running tests...
+Done.
+
+Users should see activity every second.
+
+----------------------------------------------------
+
+5. REMOVE UNNECESSARY LLM CALLS
+
+Audit every worker.
+
+Measure:
+
+- prompt tokens
+- completion tokens
+- runtime
+- cache hits
+
+Produce a timing report.
+
+----------------------------------------------------
+
+6. FILE WRITING
+
+Writing files should NEVER require another AI call.
+
+When the model returns
+
+```python hello.py
+print("Hello")
