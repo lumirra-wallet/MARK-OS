@@ -213,6 +213,13 @@ async def execute(req: ExecuteRequest) -> dict:
     _state.goal             = req.goal
     _state.workspace        = os.path.abspath(req.workspace)
     _state.start_time       = time.monotonic()
+
+    # Track recent workspaces
+    try:
+        from smartagent.server.api_system import record_workspace
+        record_workspace(_state.workspace)
+    except Exception:
+        pass
     _state.cancel_requested = False
     _state.workers          = []
 

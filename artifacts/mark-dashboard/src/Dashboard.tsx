@@ -1,14 +1,15 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { useMarkStore } from '@/store/markStore';
 import {
   MessageSquare, Activity, FolderGit2, FileText, Cpu,
   LineChart, Settings, Clock, Plug, Unplug, Zap,
   Mic, AudioWaveform, Volume2, Square,
+  GitBranch, Brain, Box, Workflow,
+  MemoryStick,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChatView } from './components/ChatView';
 import { ApprovalsSidebar } from './components/ApprovalsSidebar';
-import { MonacoEditorPanel } from './components/MonacoEditorPanel';
 import { ExecutionView } from './components/ExecutionView';
 import { SettingsView } from './components/SettingsView';
 import { FilesView } from './components/FilesView';
@@ -16,8 +17,13 @@ import { LogsView } from './components/LogsView';
 import { PerformanceView } from './components/PerformanceView';
 import { WorkersView } from './components/WorkersView';
 import { VoicePanel } from './components/VoicePanel';
+import { PipelineView } from './components/PipelineView';
+import { GitPanel } from './components/GitPanel';
+import { MemoryPanel } from './components/MemoryPanel';
+import { ModelsPanel } from './components/ModelsPanel';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { markApi, SystemMetrics } from '@/lib/markApi';
 
 // ── Voice TopNav indicator ────────────────────────────────────────────────────
 
@@ -54,6 +60,36 @@ function VoiceMicIndicator() {
   );
 }
 
+// ── Metrics pill ──────────────────────────────────────────────────────────────
+
+function MetricsPill({ metrics }: { metrics: SystemMetrics | null }) {
+  if (!metrics || metrics.error) return null;
+  const cpuHot = metrics.cpu_pct > 70;
+  const memHot = metrics.mem_pct > 80;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="hidden lg:flex items-center gap-2 text-[10px] font-mono bg-muted/40 px-2 py-1 rounded border border-border/40 select-none cursor-default">
+          <span className={cpuHot ? 'text-amber-400' : 'text-muted-foreground'}>
+            CPU {metrics.cpu_pct}%
+          </span>
+          <span className="text-border">·</span>
+          <span className={memHot ? 'text-amber-400' : 'text-muted-foreground'}>
+            RAM {metrics.mem_pct}%
+          </span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="text-xs">
+        <div className="space-y-0.5">
+          <div>CPU: {metrics.cpu_pct}%</div>
+          <div>RAM: {metrics.mem_used_mb} MB / {metrics.mem_total_mb} MB ({metrics.mem_pct}%)</div>
+          <div>Disk free: {metrics.disk_free_gb} GB</div>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -61,19 +97,37 @@ export default function Dashboard() {
     connectWebSocket, connectionStatus,
     running, goal, workspace, elapsed,
     cancelRun, cancelRequested, voice,
+    serverUrl,
   } = useMarkStore();
 
-  const [activeTab, setActiveTab] = React.useState<string>('chat');
+  const [activeTab,   setActiveTab]   = React.useState<string>('chat');
   const [liveElapsed, setLiveElapsed] = React.useState(elapsed);
+  const [metrics,     setMetrics]     = React.useState<SystemMetrics | null>(null);
 
   useEffect(() => { connectWebSocket(); }, [connectWebSocket]);
 
+  // Elapsed timer
   useEffect(() => {
     setLiveElapsed(elapsed);
     if (!running) return;
     const t = setInterval(() => setLiveElapsed(p => p + 1), 1000);
     return () => clearInterval(t);
   }, [running, elapsed]);
+
+  // Metrics polling (every 5 s, only when connected)
+  const fetchMetrics = useCallback(async () => {
+    if (connectionStatus !== 'connected' && connectionStatus !== 'disconnected') return;
+    try {
+      const m = await markApi.getMetrics(serverUrl);
+      setMetrics(m);
+    } catch { /* server may not be up yet */ }
+  }, [serverUrl, connectionStatus]);
+
+  useEffect(() => {
+    fetchMetrics();
+    const id = setInterval(fetchMetrics, 5000);
+    return () => clearInterval(id);
+  }, [fetchMetrics]);
 
   const formatTime = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
@@ -101,7 +155,7 @@ export default function Dashboard() {
           )}
 
           {running && goal && (
-            <div className="hidden lg:block max-w-[300px]">
+            <div className="hidden lg:block max-w-[280px]">
               <span className="text-xs truncate font-medium bg-accent/10 text-accent border border-accent/20 px-2.5 py-0.5 rounded-full">
                 {goal}
               </span>
@@ -109,8 +163,10 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Right: voice indicator + timer + status + stop */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* Right: metrics + voice + timer + status + stop */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <MetricsPill metrics={metrics} />
+
           <VoiceMicIndicator />
 
           {/* Elapsed */}
@@ -149,7 +205,8 @@ export default function Dashboard() {
 
         {/* Left icon rail */}
         <aside className="w-14 shrink-0 border-r border-border/50 bg-sidebar flex flex-col items-center py-3 gap-1">
-          {/* Primary: Chat */}
+
+          {/* PRIMARY: Chat */}
           <NavIcon
             icon={MessageSquare}
             active={activeTab === 'chat'}
@@ -160,13 +217,26 @@ export default function Dashboard() {
 
           <div className="w-6 h-px bg-border/40 my-1" />
 
-          <NavIcon icon={Activity}    active={activeTab === 'execution'}   onClick={() => setActiveTab('execution')}   tooltip="Execution" />
-          <NavIcon icon={FolderGit2}  active={activeTab === 'files'}       onClick={() => setActiveTab('files')}       tooltip="Files" />
-          <NavIcon icon={FileText}    active={activeTab === 'logs'}        onClick={() => setActiveTab('logs')}        tooltip="Logs" />
-          <NavIcon icon={Cpu}         active={activeTab === 'workers'}     onClick={() => setActiveTab('workers')}     tooltip="Workers" />
-          <NavIcon icon={LineChart}   active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} tooltip="Performance" />
+          {/* Execution group */}
+          <NavIcon icon={Activity}  active={activeTab === 'execution'} onClick={() => setActiveTab('execution')} tooltip="Execution" />
+          <NavIcon icon={Workflow}  active={activeTab === 'pipeline'}  onClick={() => setActiveTab('pipeline')}  tooltip="Pipeline Graph" />
+          <NavIcon icon={Cpu}       active={activeTab === 'workers'}   onClick={() => setActiveTab('workers')}   tooltip="Workers" />
 
-          {/* Voice settings */}
+          <div className="w-6 h-px bg-border/40 my-1" />
+
+          {/* Project group */}
+          <NavIcon icon={FolderGit2} active={activeTab === 'files'} onClick={() => setActiveTab('files')} tooltip="Files" />
+          <NavIcon icon={GitBranch}  active={activeTab === 'git'}   onClick={() => setActiveTab('git')}   tooltip="Git" />
+          <NavIcon icon={FileText}   active={activeTab === 'logs'}  onClick={() => setActiveTab('logs')}  tooltip="Logs" />
+
+          <div className="w-6 h-px bg-border/40 my-1" />
+
+          {/* Intelligence group */}
+          <NavIcon icon={Brain}      active={activeTab === 'memory'}      onClick={() => setActiveTab('memory')}      tooltip="Memory" />
+          <NavIcon icon={Box}        active={activeTab === 'models'}      onClick={() => setActiveTab('models')}      tooltip="Models" />
+          <NavIcon icon={LineChart}  active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} tooltip="Performance" />
+
+          {/* Voice */}
           <NavIcon
             icon={voice.running ? AudioWaveform : Mic}
             active={activeTab === 'voice'}
@@ -196,9 +266,13 @@ export default function Dashboard() {
                 >
                   {activeTab === 'chat'        && <ChatView />}
                   {activeTab === 'execution'   && <ExecutionView />}
-                  {activeTab === 'files'       && <FilesView />}
-                  {activeTab === 'logs'        && <LogsView />}
+                  {activeTab === 'pipeline'    && <PipelineView />}
                   {activeTab === 'workers'     && <WorkersView />}
+                  {activeTab === 'files'       && <FilesView />}
+                  {activeTab === 'git'         && <GitPanel />}
+                  {activeTab === 'logs'        && <LogsView />}
+                  {activeTab === 'memory'      && <MemoryPanel />}
+                  {activeTab === 'models'      && <ModelsPanel />}
                   {activeTab === 'performance' && <PerformanceView />}
                   {activeTab === 'voice'       && <VoicePanel />}
                   {activeTab === 'settings'    && <SettingsView />}
@@ -250,7 +324,7 @@ function NavIcon({
                   : 'text-muted-foreground hover:bg-muted hover:text-foreground'
             }`}
         >
-          <Icon className="w-4.5 h-4.5" style={{ width: 18, height: 18 }} />
+          <Icon style={{ width: 18, height: 18 }} />
           {pulse && (
             <motion.span
               className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400"

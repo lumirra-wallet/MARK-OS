@@ -24,6 +24,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from smartagent.server.api import router
+from smartagent.server.api_system import router as system_router
 from smartagent.server.voice_manager import voice_manager
 from smartagent.server.websocket import connection_manager
 
@@ -76,3 +77,4 @@ app.add_middleware(
 # Routers
 # ---------------------------------------------------------------------------
 app.include_router(router)
+app.include_router(system_router)

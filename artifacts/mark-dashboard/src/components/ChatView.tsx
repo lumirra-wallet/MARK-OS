@@ -29,7 +29,10 @@ import {
   TestTube2, Zap, Trash2, Volume2, VolumeX,
   Sparkles, Code2, BadgeCheck, Eye, CircleDashed, AudioWaveform,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useMarkStore, ChatMessage, ContentBlock } from '@/store/markStore';
+import { markApi } from '@/lib/markApi';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
@@ -51,8 +54,46 @@ const WORKER_ICONS: Record<string, React.ComponentType<any>> = {
 
 function TextBlock({ text, streaming }: { text: string; streaming?: boolean }) {
   return (
-    <span className="whitespace-pre-wrap leading-relaxed text-sm text-foreground">
-      {text}
+    <div className="text-sm leading-relaxed">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          // Inline code
+          code: ({ children, className, ...props }: any) => {
+            const isBlock = className?.startsWith('language-');
+            if (!isBlock) {
+              return (
+                <code className="text-accent bg-muted/50 px-1 py-0.5 rounded text-[11px] font-mono" {...props}>
+                  {children}
+                </code>
+              );
+            }
+            return (
+              <pre className="bg-muted/30 border border-border/50 rounded-lg p-3 overflow-x-auto my-2 text-xs">
+                <code className="font-mono text-foreground" {...props}>{children}</code>
+              </pre>
+            );
+          },
+          p:      ({ children }) => <p className="mb-1.5 last:mb-0 text-foreground/90">{children}</p>,
+          ul:     ({ children }) => <ul className="list-disc list-inside space-y-0.5 my-1.5 pl-1">{children}</ul>,
+          ol:     ({ children }) => <ol className="list-decimal list-inside space-y-0.5 my-1.5 pl-1">{children}</ol>,
+          li:     ({ children }) => <li className="text-foreground/90">{children}</li>,
+          a:      ({ href, children }) => <a href={href} target="_blank" rel="noreferrer" className="text-accent hover:underline">{children}</a>,
+          strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+          em:     ({ children }) => <em className="italic text-foreground/80">{children}</em>,
+          h1:     ({ children }) => <h1 className="text-base font-bold mt-2 mb-1">{children}</h1>,
+          h2:     ({ children }) => <h2 className="text-sm font-bold mt-2 mb-1">{children}</h2>,
+          h3:     ({ children }) => <h3 className="text-sm font-semibold mt-1.5 mb-0.5">{children}</h3>,
+          hr:     () => <hr className="border-border/40 my-2" />,
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-2 border-accent/40 pl-3 my-1.5 text-muted-foreground italic">
+              {children}
+            </blockquote>
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
       {streaming && (
         <motion.span
           className="inline-block w-[2px] h-[1em] bg-accent ml-0.5 align-middle"
@@ -60,7 +101,7 @@ function TextBlock({ text, streaming }: { text: string; streaming?: boolean }) {
           transition={{ duration: 0.8, repeat: Infinity }}
         />
       )}
-    </span>
+    </div>
   );
 }
 
@@ -466,6 +507,14 @@ function Composer({ workspace }: { workspace: string }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const ptt = usePTT();
 
+  // Auto-resize textarea as content grows
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+  }, [input]);
+
   // When voice transcript fires in continuous/wake mode, fill input
   useEffect(() => {
     if (voice.transcript && !ptt.recording) {
@@ -571,7 +620,6 @@ function Composer({ workspace }: { workspace: string }) {
             'focus:outline-none min-h-[36px] max-h-[120px] py-2 leading-relaxed',
             ptt.recording && 'opacity-50',
           )}
-          style={{ fieldSizing: 'content' } as any}
         />
 
         {/* Send / Stop */}
@@ -644,6 +692,16 @@ export function ChatView() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Auto-detect workspace on connect if none set
+  const { serverUrl } = useMarkStore();
+  useEffect(() => {
+    if (workspace || connectionStatus !== 'connected') return;
+    markApi.detectWorkspace(serverUrl).then(data => {
+      const ws = data.git_root || data.workspace || data.cwd;
+      if (ws) { setWorkspace(ws); setWsInput(ws); }
+    }).catch(() => {});
+  }, [connectionStatus]); // eslint-disable-line
 
   const handleWsSave = () => {
     setWorkspace(wsInput.trim() || workspace);
