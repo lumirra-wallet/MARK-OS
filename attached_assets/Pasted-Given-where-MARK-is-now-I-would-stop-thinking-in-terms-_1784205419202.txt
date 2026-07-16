@@ -1,0 +1,337 @@
+Given where MARK is now, I would **stop thinking in terms of "more agents"** and start thinking in terms of **making the agents accomplish real work**.
+
+Your roadmap has evolved roughly like this:
+
+* Milestones 1–10 → Foundation (Brain, Mind, Memory, Knowledge, Models)
+* Milestones 11–17 → Intelligence (Planning, Workers, CEO, Teams)
+
+The next stage should be **Execution**.
+
+# Phase 2: Execution OS (Milestones 18–25)
+
+## Milestone 18 — Workspace Intelligence ⭐⭐⭐⭐⭐
+
+MARK should understand a codebase before doing anything.
+
+```
+workspace scan
+
+Project:
+FastAPI
+
+Languages:
+Python
+
+Files:
+284
+
+Tests:
+163
+
+Architecture:
+MVC
+
+Dependencies:
+...
+
+Suggested improvements:
+...
+```
+
+It should automatically build:
+
+* file graph
+* dependency graph
+* import graph
+* module map
+* git status
+* project summary
+
+This becomes MARK's "mental model" of a project.
+
+---
+
+# Milestone 19 — File Editing Engine ⭐⭐⭐⭐⭐
+
+Workers should edit files instead of returning text.
+
+Example:
+
+```
+ceo Build login system
+```
+
+Research Worker
+
+↓
+
+Design Worker
+
+↓
+
+Coding Worker
+
+↓
+
+Creates:
+
+auth.py
+
+login.py
+
+routes.py
+
+tests/
+
+README updates
+
+↓
+
+QA
+
+↓
+
+Done
+
+No copy-paste.
+
+---
+
+# Milestone 20 — Self Debugging ⭐⭐⭐⭐⭐
+
+This is where MARK becomes much more capable.
+
+```
+Run tests
+
+↓
+
+Test failed
+
+↓
+
+Read traceback
+
+↓
+
+Fix code
+
+↓
+
+Run again
+
+↓
+
+Repeat
+
+↓
+
+Green
+```
+
+Exactly like experienced developers.
+
+---
+
+# Milestone 21 — Git Engine
+
+MARK should know Git.
+
+```
+git status
+
+create branch
+
+commit
+
+push
+
+merge
+
+rollback
+```
+
+Eventually:
+
+```
+ceo Build login system
+
+↓
+
+new branch
+
+↓
+
+implement
+
+↓
+
+run tests
+
+↓
+
+commit
+
+↓
+
+open PR
+```
+
+---
+
+# Milestone 22 — Project Memory
+
+MARK remembers every project.
+
+```
+This project:
+
+uses FastAPI
+
+uses pytest
+
+uses black
+
+uses poetry
+
+prefers async
+
+uses PostgreSQL
+```
+
+Every future task benefits.
+
+---
+
+# Milestone 23 — Long Running Execution
+
+Instead of:
+
+```
+mark>
+```
+
+you can do:
+
+```
+ceo Build SaaS
+
+```
+
+MARK works for two hours.
+
+Returns:
+
+```
+✓ Backend
+
+✓ Database
+
+✓ Tests
+
+✓ Docs
+
+✓ Frontend
+
+Remaining:
+Authentication
+Payments
+Deployment
+```
+
+---
+
+# Milestone 24 — Autonomous Development Loop
+
+```
+Receive Goal
+
+↓
+
+Plan
+
+↓
+
+Workers
+
+↓
+
+Coding
+
+↓
+
+Testing
+
+↓
+
+Debugging
+
+↓
+
+Reflection
+
+↓
+
+Retry
+
+↓
+
+Success
+```
+
+No human intervention.
+
+---
+
+# Milestone 25 — Full Software Engineer
+
+This is the milestone where MARK begins to resemble professional coding agents.
+
+Example:
+
+```
+MARK,
+build me a Trello clone.
+```
+
+MARK should:
+
+* analyze requirements
+* ask only necessary clarification questions
+* plan the work
+* divide into teams
+* write code
+* run tests
+* fix bugs
+* document the project
+* commit changes
+* summarize the results
+
+---
+
+# After Milestone 25
+
+Only then would I consider adding advanced capabilities such as:
+
+* Vision (screenshots, Figma, diagrams)
+* Web browsing and research
+* Cloud deployment
+* Docker/Kubernetes support
+* Multi-machine execution
+* Voice interface
+* Mobile companion
+* Self-improving architecture recommendations
+
+## My recommendation
+
+Don't jump to Milestone 30 or 40. Instead, make MARK **excellent at software engineering**.
+
+If MARK can take a Git repository and reliably:
+
+* understand it,
+* modify it,
+* test it,
+* debug it,
+* and commit working changes,
+
+you'll have built something that approaches the practical usefulness of today's strongest coding agents. That's a far more valuable milestone than simply adding more layers of orchestration.
