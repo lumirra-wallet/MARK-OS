@@ -1,0 +1,553 @@
+This is the prompt I would give Replit Agent. It tells it to **stop making prototypes** and instead build a **production-grade local AI Operating System**, similar to Cursor, Claude Code, and OpenAI's desktop app.
+
+---
+
+# PROMPT FOR REPLIT AGENT
+
+```text
+You are the lead software architect for MARK AI Operating System.
+
+This is NOT a prototype.
+
+Treat this as a production desktop-quality application similar to:
+
+- Cursor
+- Claude Code
+- OpenAI Desktop
+- VS Code
+- Replit Agent
+
+The existing Python SmartAgent backend is the source of truth.
+
+DO NOT rewrite the backend.
+
+Instead build a modern application around it.
+
+==================================================
+GOALS
+==================================================
+
+Transform MARK from a terminal application into a complete AI Operating System.
+
+The terminal should become OPTIONAL.
+
+The web dashboard becomes the primary interface.
+
+Everything must communicate through FastAPI + WebSockets.
+
+==================================================
+ARCHITECTURE
+==================================================
+
+Backend
+--------
+
+Python
+
+FastAPI
+
+WebSocket Event Bus
+
+Ollama
+
+Worker Scheduler
+
+Memory
+
+Engineer
+
+Planner
+
+File Manager
+
+Git Manager
+
+Approval Manager
+
+Voice Manager
+
+Plugin Manager
+
+Frontend
+---------
+
+React
+
+Vite
+
+TypeScript
+
+TailwindCSS
+
+Framer Motion
+
+Zustand
+
+Monaco Editor
+
+xterm.js
+
+React Flow
+
+Radix UI
+
+Lucide Icons
+
+==================================================
+THE DASHBOARD MUST LOOK LIKE A PROFESSIONAL IDE
+==================================================
+
+Top Navigation
+
+- MARK logo
+- Current Workspace
+- Active Model
+- Memory usage
+- CPU usage
+- Task timer
+- Connection status
+- Start
+- Stop
+- Pause
+- Resume
+
+Left Sidebar
+
+- Chat
+- Engineer
+- Workspace
+- Files
+- Memory
+- Models
+- Git
+- Logs
+- Performance
+- Settings
+
+Center
+
+Chat interface
+
+This replaces the terminal.
+
+The user should type naturally:
+
+"Build me a calculator"
+
+"Create a React app"
+
+"Refactor authentication"
+
+"Explain this code"
+
+Messages stream in real time.
+
+Agent messages stream token-by-token.
+
+Support markdown.
+
+Support syntax highlighting.
+
+Support images later.
+
+Bottom
+
+Integrated xterm terminal.
+
+Read only by default.
+
+Can become interactive.
+
+Right Sidebar
+
+Live execution
+
+Research
+
+Planning
+
+Coding
+
+Testing
+
+Review
+
+Documentation
+
+Each worker animates while running.
+
+Show
+
+thinking
+
+running
+
+waiting
+
+completed
+
+failed
+
+==================================================
+WORKSPACE
+==================================================
+
+Detect workspace automatically.
+
+Never ask the user for
+
+/home/runner/workspace
+
+Instead
+
+Detect current project
+
+Remember recent projects
+
+Allow switching workspaces
+
+==================================================
+FILE ACCESS
+==================================================
+
+Never silently write files.
+
+When file access is needed:
+
+Display an approval dialog.
+
+Example
+
+MARK wants to create
+
+calculator.py
+
+Location
+
+/home/smart/projects/demo
+
+Buttons
+
+Approve Once
+
+Always Allow
+
+Reject
+
+Remember permissions.
+
+==================================================
+MONACO EDITOR
+==================================================
+
+Integrate Monaco Editor.
+
+When a file is created
+
+Automatically open it.
+
+Highlight changes.
+
+Support tabs.
+
+Support split editor.
+
+Show diff view.
+
+==================================================
+LIVE FILE EVENTS
+==================================================
+
+Every file operation emits WebSocket events.
+
+Example
+
+FileCreated
+
+FileModified
+
+FileDeleted
+
+DirectoryCreated
+
+GitCommit
+
+The UI updates instantly.
+
+==================================================
+VOICE MODE
+==================================================
+
+Everything should work locally.
+
+NO CLOUD REQUIRED.
+
+Speech To Text
+
+Faster Whisper
+
+Wake Word
+
+OpenWakeWord
+
+Voice Activity
+
+Silero VAD
+
+Text To Speech
+
+Piper
+
+(or Kokoro)
+
+Pipeline
+
+Microphone
+
+↓
+
+Wake Word
+
+↓
+
+Whisper
+
+↓
+
+MARK
+
+↓
+
+Piper
+
+↓
+
+Speakers
+
+Chat supports
+
+Push To Talk
+
+Continuous Listening
+
+Interrupt Speaking
+
+Mute
+
+Voice Selection
+
+Speech Speed
+
+==================================================
+STREAMING
+==================================================
+
+Nothing blocks.
+
+Everything streams.
+
+Worker logs stream.
+
+Terminal streams.
+
+LLM streams.
+
+Token streams.
+
+Progress streams.
+
+Progress bars animate.
+
+==================================================
+ANIMATIONS
+==================================================
+
+Use Framer Motion everywhere.
+
+Animated pipeline.
+
+Typing indicator.
+
+Worker transitions.
+
+File creation animation.
+
+Progress circles.
+
+Task graph.
+
+Memory graph.
+
+CPU graph.
+
+Token counter.
+
+Thinking animation.
+
+==================================================
+REACT FLOW
+==================================================
+
+Create a live graph showing
+
+Planner
+
+↓
+
+Research
+
+↓
+
+Engineer
+
+↓
+
+Tester
+
+↓
+
+Reviewer
+
+↓
+
+Documentation
+
+Each node glows while active.
+
+==================================================
+SETTINGS
+==================================================
+
+Model selector
+
+Ollama endpoint
+
+Workspace
+
+Voice
+
+Theme
+
+Permissions
+
+Memory
+
+Plugins
+
+Git
+
+Shortcuts
+
+==================================================
+CHAT
+==================================================
+
+The chat becomes the primary interface.
+
+User
+
+Create a Flask API
+
+↓
+
+MARK streams response
+
+↓
+
+Planning
+
+↓
+
+Research
+
+↓
+
+Approval
+
+↓
+
+Writes files
+
+↓
+
+Runs tests
+
+↓
+
+Shows results
+
+↓
+
+Opens created files
+
+↓
+
+Speaks completion
+
+==================================================
+PERFORMANCE
+==================================================
+
+Never freeze the UI.
+
+Everything async.
+
+Heavy tasks in background workers.
+
+WebSockets for events.
+
+React Query for API calls.
+
+Virtualized logs.
+
+Lazy loading.
+
+==================================================
+DELIVERABLES
+==================================================
+
+Build production-ready code.
+
+Use clean architecture.
+
+No placeholders.
+
+No fake data.
+
+No mock components.
+
+Integrate with the existing Python backend.
+
+Do NOT replace the backend.
+
+Connect to it.
+
+If backend endpoints are missing,
+
+add them properly.
+
+Everything must be modular.
+
+Everything must be typed.
+
+Everything must be documented.
+
+The finished application should feel comparable to Cursor, Claude Code, or the OpenAI desktop application, while remaining fully local and powered by Ollama.
+```
+
+---
+
+## One more thing I'd add
+
+I would tell Replit **not to generate everything in one pass**. Large monolithic prompts often produce inconsistent results. Instead, have it work in milestones:
+
+1. **Milestone 1:** FastAPI backend with WebSocket event bus.
+2. **Milestone 2:** React dashboard shell and routing.
+3. **Milestone 3:** Live chat with streaming responses.
+4. **Milestone 4:** Workspace detection and file approval system.
+5. **Milestone 5:** Monaco editor and xterm.js integration.
+6. **Milestone 6:** Voice (Whisper + Piper + wake word).
+7. **Milestone 7:** Animations, React Flow, performance tuning.
+8. **Milestone 8:** Polish, testing, packaging, and production readiness.
+
+That staged approach is much more likely to produce a maintainable, working system than asking it to build everything at once.
