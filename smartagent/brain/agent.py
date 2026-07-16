@@ -146,9 +146,10 @@ class SmartAgent:
             default_model=getattr(settings, "ollama_default_model", "llama3.1:8b"),
             coding_model=getattr(settings, "ollama_coding_model", "qwen2.5-coder:7b"),
         )
-        # Milestone LLM — GitHub Models provider.
-        # Only wires up when ACTIVE_PROVIDER=github is explicitly set so that
-        # all existing tests (which don't set that env var) continue to pass.
+        # LLM Provider wiring — activated by ACTIVE_PROVIDER=github.
+        # The factory's _auto_default_provider() auto-detects from GITHUB_TOKEN
+        # for the REST API layer; here we require an explicit env var so that
+        # unit tests (which never set ACTIVE_PROVIDER) are not affected.
         import os as _os
         if _os.environ.get("ACTIVE_PROVIDER", "").strip().lower() == "github":
             try:

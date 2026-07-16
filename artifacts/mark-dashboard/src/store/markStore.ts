@@ -275,7 +275,15 @@ export const useMarkStore = create<MarkState>((set, get) => {
 
   return {
     // State
-    serverUrl:        localStorage.getItem('mark_server_url') || (import.meta.env.VITE_API_URL as string | undefined) || window.location.origin,
+    serverUrl:        (() => {
+      if (localStorage.getItem('mark_server_url')) return localStorage.getItem('mark_server_url')!;
+      const viteUrl = import.meta.env.VITE_API_URL as string | undefined;
+      if (!viteUrl) return window.location.origin;
+      // Relative path like /mark-api → prepend origin so WebSocket URLs work
+      if (viteUrl.startsWith('/')) return window.location.origin + viteUrl;
+      // Full URL like http://localhost:8000 → use directly
+      return viteUrl;
+    })(),
     connectionStatus: 'disconnected',
     running:          false,
     goal:             '',

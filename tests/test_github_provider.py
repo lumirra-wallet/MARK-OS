@@ -479,9 +479,18 @@ class TestInferHelpers:
 
 
 class TestProviderFactory:
-    def test_get_active_provider_defaults_to_ollama(self, monkeypatch, tmp_path):
-        """Without ACTIVE_PROVIDER env var, default is 'ollama'."""
+    def test_get_active_provider_defaults_to_github_when_token_present(self, monkeypatch, tmp_path):
+        """Without ACTIVE_PROVIDER, auto-detects 'github' when GITHUB_TOKEN is set."""
         monkeypatch.delenv("ACTIVE_PROVIDER", raising=False)
+        monkeypatch.setenv("GITHUB_TOKEN", "fake-token-for-test")
+        import smartagent.llm.factory as _fac
+        monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / ".state.json")
+        assert _fac.get_active_provider() == "github"
+
+    def test_get_active_provider_defaults_to_ollama_without_token(self, monkeypatch, tmp_path):
+        """Without ACTIVE_PROVIDER or GITHUB_TOKEN, default falls back to 'ollama'."""
+        monkeypatch.delenv("ACTIVE_PROVIDER", raising=False)
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         import smartagent.llm.factory as _fac
         monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / ".state.json")
         assert _fac.get_active_provider() == "ollama"
@@ -494,7 +503,8 @@ class TestProviderFactory:
 
     def test_get_model_for_role_returns_none_for_ollama(self, monkeypatch, tmp_path):
         """When provider is Ollama, get_model_for_role() returns None (mixin uses settings)."""
-        monkeypatch.delenv("ACTIVE_PROVIDER", raising=False)
+        monkeypatch.setenv("ACTIVE_PROVIDER", "ollama")
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         import smartagent.llm.factory as _fac
         monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / ".state.json")
         assert _fac.get_model_for_role("default") is None

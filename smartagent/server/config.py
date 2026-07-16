@@ -56,7 +56,10 @@ class ServerConfig:
 
 def _load() -> ServerConfig:
     return ServerConfig(
-        active_provider      = os.environ.get("ACTIVE_PROVIDER", "ollama").strip().lower(),
+        active_provider      = (
+            os.environ.get("ACTIVE_PROVIDER", "").strip().lower()
+            or ("github" if os.environ.get("GITHUB_TOKEN") else "ollama")
+        ),
         github_token         = os.environ.get("GITHUB_TOKEN", ""),
         github_default_model = os.environ.get("GITHUB_DEFAULT_MODEL", "gpt-4.1-mini"),
         github_coding_model  = os.environ.get("GITHUB_CODING_MODEL", "gpt-4.1"),

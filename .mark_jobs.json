@@ -420,5 +420,61 @@
     "progress": 0,
     "current_step": "Starting\u2026",
     "result": null
+  },
+  "fa505deb-b9d2-4b0f-95bb-17c50d5a7382": {
+    "id": "fa505deb-b9d2-4b0f-95bb-17c50d5a7382",
+    "goal": "create hello.py",
+    "workspace": "/tmp/pytest-of-runner/pytest-37/test_starts_run0",
+    "status": "completed",
+    "created_at": "2026-07-16T23:14:59+00:00",
+    "updated_at": "2026-07-16T23:14:59+00:00",
+    "paused": false,
+    "progress": 100,
+    "current_step": "Starting\u2026",
+    "result": {
+      "summary": "Done."
+    }
+  },
+  "e1159305-62a2-4b0d-b4a5-21b0fb5e8221": {
+    "id": "e1159305-62a2-4b0d-b4a5-21b0fb5e8221",
+    "goal": "build a CLI",
+    "workspace": "/tmp/pytest-of-runner/pytest-37/test_goal_set_in_state0",
+    "status": "completed",
+    "created_at": "2026-07-16T23:14:59+00:00",
+    "updated_at": "2026-07-16T23:14:59+00:00",
+    "paused": false,
+    "progress": 100,
+    "current_step": "Starting\u2026",
+    "result": {
+      "summary": "Done."
+    }
+  },
+  "5cba2506-259c-4eeb-a5b9-08592fc13d8d": {
+    "id": "5cba2506-259c-4eeb-a5b9-08592fc13d8d",
+    "goal": "test",
+    "workspace": "/tmp/pytest-of-runner/pytest-37/test_workspace_absolute_path0",
+    "status": "completed",
+    "created_at": "2026-07-16T23:14:59+00:00",
+    "updated_at": "2026-07-16T23:14:59+00:00",
+    "paused": false,
+    "progress": 100,
+    "current_step": "Starting\u2026",
+    "result": {
+      "summary": "Done."
+    }
+  },
+  "dee250ac-a5f6-4e41-907d-69eb06a27461": {
+    "id": "dee250ac-a5f6-4e41-907d-69eb06a27461",
+    "goal": "write a script",
+    "workspace": "/tmp/pytest-of-runner/pytest-37/test_response_includes_goal0",
+    "status": "completed",
+    "created_at": "2026-07-16T23:14:59+00:00",
+    "updated_at": "2026-07-16T23:14:59+00:00",
+    "paused": false,
+    "progress": 100,
+    "current_step": "Starting\u2026",
+    "result": {
+      "summary": "Done."
+    }
   }
 }

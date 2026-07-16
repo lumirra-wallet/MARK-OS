@@ -4,7 +4,7 @@ ProviderFactory — creates and wires the active LLM provider into ModelManager.
 Provider selection order:
     1. ACTIVE_PROVIDER environment variable (``"github"`` or ``"ollama"``).
     2. Persisted state in ``.mark_provider_state.json`` (set by REST API).
-    3. Default: ``"ollama"`` (backward-compatible for tests / offline use).
+    3. Auto-detect: ``"github"`` when GITHUB_TOKEN is present, else ``"ollama"``.
 
 To switch providers at runtime call the REST API::
 
@@ -49,10 +49,26 @@ _STATE_FILE = Path(".mark_provider_state.json")
 # State helpers
 # ---------------------------------------------------------------------------
 
+def _auto_default_provider() -> str:
+    """Detect the best default provider without requiring explicit configuration.
+
+    Selection order:
+      1. ACTIVE_PROVIDER env var (explicit override)
+      2. GITHUB_TOKEN present → "github" (works on Replit out of the box)
+      3. Fallback → "ollama" (local dev without credentials)
+    """
+    explicit = os.environ.get("ACTIVE_PROVIDER", "").strip().lower()
+    if explicit in ("github", "ollama"):
+        return explicit
+    if os.environ.get("GITHUB_TOKEN"):
+        return "github"
+    return "ollama"
+
+
 def _load_state() -> dict[str, Any]:
     """Load persisted provider state (falls back to env-var / defaults)."""
     state: dict[str, Any] = {
-        "provider": os.environ.get("ACTIVE_PROVIDER", "ollama"),
+        "provider": _auto_default_provider(),
         "github_model": GITHUB_DEFAULT_MODEL,
         "github_coding_model": GITHUB_CODING_MODEL,
         "ollama_model": OLLAMA_DEFAULT_MODEL,
