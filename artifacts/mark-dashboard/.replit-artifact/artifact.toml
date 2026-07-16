@@ -25,3 +25,4 @@ to = "/index.html"
 [services.env]
 PORT = "18947"
 BASE_PATH = "/mark-dashboard/"
+VITE_API_URL = "/mark-api"

@@ -34,5 +34,26 @@ Added to `smartagent/models/providers/ollama_provider.py`:
 - Checks: backend, llm_provider, embeddings, git, workspace, vector_db, memory, websocket
 - Polls every 30s; manual refresh button
 
+## GitHub as default provider
+`factory._auto_default_provider()` — explicit `ACTIVE_PROVIDER` env var wins, then GITHUB_TOKEN presence → "github", else → "ollama".
+`agent.py` intentionally stays conservative — only wires GitHub when ACTIVE_PROVIDER=github is explicit (not auto-detect) so unit tests are unaffected.
+`ACTIVE_PROVIDER=github` is set as a Replit shared env var so the running server uses GitHub.
+
+## Test isolation
+`tests/conftest.py` has an `autouse=True` fixture that clears ACTIVE_PROVIDER and GITHUB_TOKEN before every test. Tests that need a specific provider set them explicitly inside the test body. This is required because ACTIVE_PROVIDER=github is set in the Replit environment.
+
+## MARK Python server — Replit routing
+`artifacts/mark-api/` — Python MARK server artifact, registered at path `/mark-api`, port 18949.
+Run command: `cd ../.. && python -m uvicorn smartagent.server.app:app --host 0.0.0.0 --port ${PORT:-18949} --reload`
+Dashboard `VITE_API_URL=/mark-api` (set in mark-dashboard artifact.toml `[services.env]`).
+markStore.ts serverUrl: relative VITE_API_URL gets `window.location.origin` prepended; full URLs used directly.
+
+## Path-prefix stripping middleware
+`_StripPrefixMiddleware` in `app.py` — appended AFTER all `add_middleware`/`include_router` calls (placing it before breaks `add_middleware`). Gated by `ROOT_PATH_PREFIX` env var. Handles both HTTP and WebSocket scope types.
+`mark-api` artifact.toml `[services.env]` sets `ROOT_PATH_PREFIX=/mark-api`.
+
+## Cached provider state
+`.mark_provider_state.json` caches the provider selection and overrides auto-detection. Delete it when switching defaults. The `_load_state()` `state.update(saved)` makes saved state win over auto-detect.
+
 ## Test counts
-2535 passed (5 new OllamaProvider embed/alias tests replace the old NotImplementedError test).
+2536 passed (conftest autouse isolation fixture added).

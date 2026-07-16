@@ -1,0 +1,386 @@
+Here's a prompt I'd give Replit Agent. It's designed to make MARK production-ready while keeping local development simple.
+
+---
+
+# Prompt
+
+We are transitioning MARK from a localhost prototype into a production-ready application with interchangeable providers and storage backends.
+
+**Do not break existing functionality.** Everything should remain backwards compatible.
+
+## Goal
+
+Refactor the project so that:
+
+* MARK can run entirely locally.
+* MARK can run entirely in the cloud.
+* The frontend never depends directly on localhost.
+* All providers are pluggable.
+* All storage backends are pluggable.
+* One command starts the entire application.
+
+---
+
+# 1. Unified application launcher
+
+Create a single development launcher.
+
+Running
+
+```bash
+pnpm dev
+```
+
+must automatically start:
+
+* FastAPI backend
+* React/Vite frontend
+* WebSocket server
+* Workspace watcher
+* Chroma (if local)
+* Background worker(s)
+
+Do not require opening multiple terminals.
+
+Use concurrently (or an equivalent solution).
+
+---
+
+# 2. Remove localhost assumptions
+
+Search the entire project for:
+
+* localhost
+* 127.0.0.1
+* hardcoded ports
+* hardcoded API URLs
+
+Replace all of them with configuration.
+
+Frontend should use:
+
+```
+VITE_API_BASE_URL
+```
+
+Backend should expose:
+
+```
+API_BASE_URL
+```
+
+When deployed on Replit or production, automatically use the correct origin.
+
+The dashboard should work without editing any URLs.
+
+---
+
+# 3. Provider architecture
+
+Create a provider abstraction.
+
+```
+BaseLLMProvider
+
+GitHubProvider
+OllamaProvider
+OpenAIProvider
+AnthropicProvider
+```
+
+Every provider must implement:
+
+```
+chat()
+
+stream()
+
+embeddings()
+
+health()
+
+list_models()
+```
+
+No provider-specific logic should exist outside these classes.
+
+Provider selection must be configuration only.
+
+---
+
+# 4. Storage abstraction
+
+Create a storage layer.
+
+```
+StorageProvider
+
+LocalStorageProvider
+PostgresStorageProvider
+```
+
+Storage should manage:
+
+* chat history
+* memory
+* settings
+* agent state
+* project metadata
+
+Nothing else in the codebase should access SQLite/files directly.
+
+---
+
+# 5. Vector abstraction
+
+Create:
+
+```
+VectorProvider
+
+ChromaProvider
+PGVectorProvider
+```
+
+The agent should call:
+
+```
+vector.search()
+
+vector.add()
+
+vector.delete()
+```
+
+It should never know which backend is being used.
+
+---
+
+# 6. Database support
+
+Add PostgreSQL support.
+
+Use SQLAlchemy.
+
+Keep SQLite available for local development.
+
+Configuration:
+
+```
+DATABASE_PROVIDER=sqlite
+
+DATABASE_PROVIDER=postgres
+```
+
+When Postgres is selected:
+
+Automatically create all tables.
+
+Support migrations.
+
+---
+
+# 7. pgvector support
+
+Add pgvector support.
+
+When PostgreSQL is active:
+
+Store embeddings in pgvector.
+
+When SQLite is active:
+
+Continue using Chroma.
+
+No agent code should change.
+
+---
+
+# 8. Environment configuration
+
+Support:
+
+```
+ACTIVE_PROVIDER
+
+DATABASE_PROVIDER
+
+VECTOR_PROVIDER
+
+VITE_API_BASE_URL
+
+DATABASE_URL
+
+GITHUB_TOKEN
+
+OPENAI_API_KEY
+
+ANTHROPIC_API_KEY
+
+OLLAMA_HOST
+```
+
+Everything must work from .env.
+
+---
+
+# 9. Deployment readiness
+
+Support:
+
+Local
+
+```
+pnpm dev
+```
+
+Replit
+
+```
+Run button
+```
+
+Production
+
+```
+Docker
+```
+
+No code changes required between environments.
+
+Only environment variables.
+
+---
+
+# 10. Health dashboard
+
+Expand the existing Health panel.
+
+Show:
+
+* Backend
+* Database
+* LLM Provider
+* Vector DB
+* WebSocket
+* Workspace
+* Git
+* CPU
+* RAM
+* Active model
+* Active provider
+
+Each should report:
+
+Healthy
+
+Warning
+
+Offline
+
+Latency
+
+---
+
+# 11. Automatic workspace detection
+
+Never prompt for a workspace.
+
+Automatically:
+
+* detect git repo
+* detect current project
+* restore previous workspace
+* watch for workspace changes
+
+---
+
+# 12. Startup sequence
+
+On startup:
+
+1. Load configuration
+2. Detect workspace
+3. Initialize storage
+4. Initialize vector store
+5. Initialize provider
+6. Verify provider health
+7. Start websocket
+8. Start backend
+9. Launch frontend
+10. Connect dashboard automatically
+
+---
+
+# 13. Future-proof architecture
+
+Refactor so adding a new provider requires only:
+
+```
+class GeminiProvider(BaseLLMProvider):
+    ...
+```
+
+No modifications elsewhere.
+
+Likewise:
+
+```
+QdrantProvider
+
+PineconeProvider
+
+AzureOpenAIProvider
+
+ClaudeCodeProvider
+```
+
+should plug in without changing the rest of the system.
+
+---
+
+# 14. Preserve compatibility
+
+Do not remove existing features.
+
+Maintain compatibility with:
+
+* GitHub Models
+* Ollama
+* Existing React dashboard
+* Existing WebSocket events
+* Existing APIs
+
+Only refactor where necessary.
+
+---
+
+# 15. Documentation
+
+Create:
+
+```
+docs/architecture.md
+docs/providers.md
+docs/storage.md
+docs/deployment.md
+```
+
+Include architecture diagrams and setup instructions.
+
+---
+
+## Success Criteria
+
+When complete:
+
+* `pnpm dev` starts the full stack.
+* MARK works locally with SQLite + Chroma + Ollama.
+* MARK works in the cloud with PostgreSQL + pgvector + GitHub Models/OpenAI.
+* No hardcoded localhost URLs remain.
+* Swapping providers or databases requires only changing environment variables.
+* The architecture is modular, testable, and ready for future providers and deployments.
+
+---
+
+This prompt guides Replit Agent toward a clean, maintainable architecture rather than just adding features, making future expansion (Gemini, Claude, Azure, Qdrant, Pinecone, etc.) much easier.

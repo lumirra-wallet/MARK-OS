@@ -1,0 +1,15 @@
+id = "artifacts/mark-api"
+previewPath = "/mark-api"
+title = "MARK Python Server"
+
+[[services]]
+name = "MARK Server"
+paths = ["/mark-api"]
+localPort = 18949
+
+[services.development]
+run = "pnpm --filter @workspace/mark-api run dev"
+
+[services.env]
+PORT = "18949"
+ROOT_PATH_PREFIX = "/mark-api"

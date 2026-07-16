@@ -100,3 +100,35 @@ app.include_router(terminal_router)
 app.include_router(git_enhanced_router)
 app.include_router(providers_router)
 app.include_router(diagnostics_router)
+
+# ---------------------------------------------------------------------------
+# Path-prefix stripping — applied LAST so all add_middleware / include_router
+# calls above finish on the real FastAPI instance first.
+#
+# Set ROOT_PATH_PREFIX=/mark-api when the reverse proxy does NOT strip the
+# path prefix before forwarding (Replit's default behaviour).
+# ---------------------------------------------------------------------------
+_root_prefix: str = os.environ.get("ROOT_PATH_PREFIX", "").rstrip("/")
+
+if _root_prefix:
+    _fastapi_app = app  # keep a reference for tests that import `app`
+
+    class _StripPrefixMiddleware:
+        """Minimal ASGI wrapper: strips ROOT_PATH_PREFIX from every request."""
+        __slots__ = ("_app", "_prefix")
+
+        def __init__(self) -> None:
+            self._app = _fastapi_app
+            self._prefix = _root_prefix
+
+        async def __call__(self, scope: dict, receive, send) -> None:  # type: ignore[type-arg]
+            if scope.get("type") in ("http", "websocket"):
+                path: str = scope.get("path", "")
+                if path.startswith(self._prefix):
+                    scope = dict(scope)
+                    stripped = path[len(self._prefix):] or "/"
+                    scope["path"] = stripped
+                    scope["raw_path"] = stripped.encode()
+            await self._app(scope, receive, send)
+
+    app = _StripPrefixMiddleware()  # type: ignore[assignment]
