@@ -32,6 +32,7 @@ from smartagent.ui.commands import (
     skills,
     system,
     tools,
+    workspace,
 )
 from smartagent.ui.repl import Repl
 
@@ -84,6 +85,7 @@ class Console:
         events.register(self._router)
         executive.register(self._router)   # Milestone 11 — plan, tasks
         learning.register(self._router)    # Milestone 14 — learning analytics
+        workspace.register(self._router)   # Milestone 15 — workspace manager
 
         # Milestone 9: free-text fallback — when the user types something that
         # isn't a recognised command AND a model is active, route the raw input

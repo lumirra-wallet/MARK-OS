@@ -33,6 +33,7 @@ from smartagent.planning.task_planner import TaskPlanner
 from smartagent.reflection.learning_store import LearningStore
 from smartagent.reflection.prompt_registry import PromptRegistry
 from smartagent.reflection.reflection_engine import ReflectionEngine
+from smartagent.workspace.workspace_manager import WorkspaceManager
 from smartagent.research.research_manager import ResearchManager
 from smartagent.skills.permissions import Permission, PermissionManager
 from smartagent.skills.skill_engine import SkillEngine
@@ -204,11 +205,19 @@ class SmartAgent:
             learning_store=self.learning_store,
         )
 
+        # Milestone 15 — Project Workspace Manager.
+        # Provides per-project isolation for memory, knowledge, execution
+        # history, output files, and lessons. The base path is configurable
+        # so tests and deployments can redirect it without code changes.
+        self.workspace_manager = WorkspaceManager(
+            base_path=getattr(settings, "workspaces_path", "workspaces")
+        )
+
         # Milestone 11 — Executive Framework (planning & task orchestration).
         # Distinct from `self.mind` (which is the Mind OS executive controller).
         # `agent.executive` is the goal-decomposition and task-scheduling layer.
         # Use with_agent() so all services (model, memory, knowledge, tools,
-        # reflection) are threaded through to workers automatically.
+        # reflection, and workspace) are threaded through automatically.
         self.executive = PlanningController.with_agent(self)
 
     def handle_message(self, message: str) -> str:

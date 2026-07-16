@@ -75,6 +75,7 @@ class Settings:
     enabled_tools: list[str] = field(default_factory=list)
     workspace_path: str = "."
     knowledge_path: str = "knowledge"
+    workspaces_path: str = "workspaces"   # Milestone 15 — workspace root directory
     # Ollama integration (Milestone 9)
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_default_model: str = "llama3.1:8b"

@@ -232,6 +232,16 @@ up. See `README.md` for the current package layout and status.
   history. Brain integration via `KnowledgeManager` — the Brain's
   `knowledge_handler` calls `agent.knowledge` only. See
   `smartagent/knowledge/` and `CHANGELOG.md v0.8`.
+- `workspace` — **implemented (Milestone 15: Project Workspace Manager).**
+  MARK can now manage multiple independent software projects simultaneously.
+  `WorkspaceManager` provides full CRUD for named workspaces stored under
+  `workspaces/<name>/`.  When a workspace is active, memory and knowledge are
+  automatically scoped to that project — nothing leaks between projects or
+  into the global vault.  Execution history is recorded as JSON per run;
+  reflection lessons accumulate in `LESSONS.md`.  Console commands:
+  `workspace create/open/list/status/close/delete/export`, `goal`.  Exposed
+  as `agent.workspace_manager`.  See `smartagent/workspace/` and
+  `CHANGELOG.md Milestone 15`.
 - `reflection` — **implemented (Milestone 14: Autonomous Learning & Self-Improvement).**
   After every completed execution MARK reviews its own performance and
   continuously improves. `ReflectionEngine` orchestrates a full post-execution

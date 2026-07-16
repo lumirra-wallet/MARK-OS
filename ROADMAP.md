@@ -330,6 +330,19 @@ features" beyond what a milestone explicitly asks for.
    - Orchestrator and ExecutiveController accept `reflection_engine` parameter.
    - 58 new tests; full suite 1163 passing, 0 regressions.
 
+✅ Milestone 15 — Project Workspace Manager
+   - `smartagent/workspace/` package: Workspace, WorkspaceStore,
+     WorkspaceManager, file_output (5 modules + __init__.py).
+   - Per-workspace isolation: memory, knowledge, execution history, output
+     files, and LESSONS.md — all fully separate per project.
+   - Orchestrator injects workspace-scoped MemoryManager/KnowledgeManager into
+     context.metadata when a workspace is active.
+   - `_save_to_workspace` records history JSON + lessons after every run.
+   - New console commands: `workspace create/open/list/status/close/delete/export`,
+     `goal` (sets workspace goal + pre-loads plan).
+   - `Settings.workspaces_path` added; `agent.workspace_manager` exposed.
+   - 103 new tests; full suite passing, 0 regressions.
+
 Future milestones (order indicative — see Build Order below):
    - Research Engine (real trusted-source search + summarization)
    - Plugin System (third-party module registration)

@@ -33,6 +33,8 @@ smartagent/
 ├── config/             # Centralized settings
 ├── ui/                 # User-facing front-ends (CLI today)
 ├── logs/               # Centralized logging setup
+├── workspace/          # Project Workspace Manager (M15): WorkspaceManager, WorkspaceStore,
+│                       # Workspace dataclass, file_output — named per-project isolation
 ├── research/           # Trusted-source research, summarized + owner-approved before storage
 └── planning/           # Goal tracking and task decomposition
 vault/                  # Persistent memories, one human-readable .md file per memory

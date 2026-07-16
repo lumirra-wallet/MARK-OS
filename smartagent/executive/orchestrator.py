@@ -60,6 +60,7 @@ class Orchestrator:
         use_parallel: bool = False,
         max_workers: int = 4,
         reflection_engine: Any | None = None,
+        workspace_manager: Any | None = None,
     ) -> None:
         self._planner = planner or Planner()
         self._worker_registry = worker_registry or build_default_registry()
@@ -88,6 +89,8 @@ class Orchestrator:
         self._event_bus = event_bus
         # Milestone 14 — reflection engine (optional)
         self._reflection_engine = reflection_engine
+        # Milestone 15 — workspace manager (optional)
+        self._workspace_manager = workspace_manager
 
     # ------------------------------------------------------------------
     # Main pipeline
@@ -131,6 +134,8 @@ class Orchestrator:
             self._propose_to_knowledge(result)
             # Milestone 14 — reflection and autonomous learning
             self._run_reflection(result)
+            # Milestone 15 — record execution in the active workspace
+            self._save_to_workspace(result)
 
         return result
 
@@ -204,10 +209,22 @@ class Orchestrator:
             context.metadata["tool_engine"] = self._tool_engine
         if self._event_bus is not None:
             context.metadata["event_bus"] = self._event_bus
+        # Milestone 15: workspace injection — overrides global memory/knowledge
+        # with workspace-scoped instances when a workspace is active.
+        if self._workspace_manager is not None:
+            ws = self._workspace_manager.active
+            if ws is not None:
+                context.metadata["workspace"] = ws
+                scoped_mem = self._workspace_manager.active_memory()
+                if scoped_mem is not None:
+                    context.metadata["memory_manager"] = scoped_mem
+                scoped_km = self._workspace_manager.active_knowledge()
+                if scoped_km is not None:
+                    context.metadata["knowledge_manager"] = scoped_km
 
         injected = [
             k for k in ("model_manager", "memory_manager", "knowledge_manager",
-                        "settings", "tool_engine", "event_bus")
+                        "settings", "tool_engine", "event_bus", "workspace")
             if context.metadata.get(k) is not None
         ]
         logger.info("Orchestrator: injected services: %s", injected)
@@ -284,6 +301,36 @@ class Orchestrator:
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Orchestrator: reflection failed: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Milestone 15 — workspace persistence
+    # ------------------------------------------------------------------
+
+    def _save_to_workspace(self, context: ExecutionContext) -> None:
+        """
+        Record execution history in the active workspace.
+
+        Writes a JSON history record, updates run_count and last_run_at,
+        and appends reflection lessons to LESSONS.md.  Best-effort: any
+        failure is logged and never surfaces to callers.
+        """
+        if self._workspace_manager is None:
+            return
+        ws = self._workspace_manager.active
+        if ws is None:
+            return
+        try:
+            reflection_result = context.metadata.get("last_reflection")
+            self._workspace_manager.record_execution(
+                context=context,
+                reflection_result=reflection_result,
+            )
+            logger.info(
+                "Orchestrator: execution recorded in workspace %r (run #%d)",
+                ws.name, ws.run_count,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Orchestrator: could not save to workspace: %s", exc)
 
     # ------------------------------------------------------------------
     # Summary helpers

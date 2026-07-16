@@ -62,6 +62,7 @@ class ExecutiveController:
         max_workers: int = 4,
         show_progress: bool = True,
         reflection_engine: Any | None = None,
+        workspace_manager: Any | None = None,
     ) -> None:
         self._worker_registry = worker_registry or build_default_registry()
         self._planner = planner or Planner()
@@ -75,6 +76,7 @@ class ExecutiveController:
         self._max_workers = max_workers
         self._show_progress = show_progress
         self._reflection_engine = reflection_engine
+        self._workspace_manager = workspace_manager
 
         if scheduler is not None:
             self._scheduler = scheduler
@@ -103,6 +105,7 @@ class ExecutiveController:
             tool_engine=tool_engine,
             event_bus=event_bus,
             reflection_engine=reflection_engine,
+            workspace_manager=workspace_manager,
         )
         self.current_context: Optional[ExecutionContext] = None
 
@@ -129,7 +132,8 @@ class ExecutiveController:
         cfg  = getattr(agent, "settings",          None)
         te   = getattr(agent, "tool_engine",       None)
         eb   = getattr(agent, "events",            None)
-        re_  = getattr(agent, "reflection_engine", None)
+        re_  = getattr(agent, "reflection_engine",  None)
+        wm   = getattr(agent, "workspace_manager",  None)
         return cls(
             model_manager=mm,
             memory_manager=mem,
@@ -138,6 +142,7 @@ class ExecutiveController:
             tool_engine=te,
             event_bus=eb,
             reflection_engine=re_,
+            workspace_manager=wm,
         )
 
     # ------------------------------------------------------------------

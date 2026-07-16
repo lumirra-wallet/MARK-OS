@@ -7,6 +7,95 @@ the architecture is still settling.
 
 ## [Unreleased]
 
+## Milestone 15 — Project Workspace Manager
+
+### Overview
+MARK can now manage multiple independent software projects simultaneously.
+Each workspace is a named, persistent context that isolates memory, knowledge,
+execution history, output files, and lessons — fully separate from every other
+workspace and from the global agent state.
+
+### New package: `smartagent/workspace/`
+
+| Module | Role |
+| --- | --- |
+| `workspace.py` | `Workspace` dataclass — name, status, goal, counters, computed paths |
+| `workspace_store.py` | Atomic JSON persistence per workspace directory |
+| `workspace_manager.py` | CRUD + active-workspace lifecycle; lazy scoped service cache |
+| `file_output.py` | Route generated files into `workspaces/<name>/output/` |
+| `__init__.py` | Public re-exports |
+
+### Disk layout (per workspace)
+
+```
+workspaces/
+  <name>/
+    workspace.json    ← metadata (name, status, created, run_count, …)
+    goals.md          ← append-only goal log with timestamps
+    memory/           ← scoped MemoryManager vault
+    knowledge/        ← scoped KnowledgeManager store
+    output/           ← files written by workers
+    history/          ← one JSON per execution run
+    LESSONS.md        ← distilled lessons from every reflection cycle
+```
+
+### Session workflow
+
+```
+mark> workspace create weather-api
+  ✓ Workspace "weather-api" created and activated.
+
+mark> goal Build a FastAPI weather service with OpenWeatherMap
+  ✓ Goal set on workspace 'weather-api'.
+  ✓ Plan ready — 6 tasks.
+  [task list shown]
+  Use 'run' to execute.
+
+mark> run
+  [1/6] Research task …
+  [3/6] Coding task   → output/main.py written
+  ✓ Run complete. Reflecting…  2 lessons stored.
+
+mark> workspace status
+  Workspace: weather-api
+  Runs: 1  Lessons: 2  Output files: 3
+```
+
+### Workspace isolation
+
+When a workspace is active the Orchestrator replaces the global
+`memory_manager` and `knowledge_manager` in `context.metadata` with
+workspace-scoped instances pointing at `workspaces/<name>/memory/` and
+`workspaces/<name>/knowledge/`.  Workers see — and write to — only the
+workspace, never the global vault.  Scoped managers are lazily created and
+cached in `WorkspaceManager` for the lifetime of the session.
+
+### New console commands
+
+| Command | Description |
+| --- | --- |
+| `workspace create <name>` | Create and activate a new workspace |
+| `workspace open <name>` | Switch to an existing workspace |
+| `workspace list` | List all workspaces with status |
+| `workspace status` | Dashboard (goals, runs, files, lessons, last run) |
+| `workspace close` | Deactivate — return to global context |
+| `workspace delete <name>` | Delete a workspace permanently |
+| `workspace export [name]` | Zip-archive a workspace |
+| `goal <text>` | Set goal on active workspace + pre-load a plan |
+
+### Changes to existing code
+
+| File | Change |
+| --- | --- |
+| `smartagent/config/settings.py` | `workspaces_path: str = "workspaces"` added |
+| `smartagent/executive/orchestrator.py` | `workspace_manager` param; `_inject_services` injects workspace + scoped managers; `_save_to_workspace` records history post-run |
+| `smartagent/executive/executive_controller.py` | `workspace_manager` param; passed to Orchestrator; extracted in `with_agent()` |
+| `smartagent/brain/agent.py` | Creates `WorkspaceManager`; exposed as `agent.workspace_manager`; included in `with_agent()` wiring |
+| `smartagent/ui/console.py` | Imports and registers `workspace` commands module |
+| `tests/test_workspace.py` | 103 new tests covering all M15 modules |
+
+---
+
 ## Milestone 14 — Autonomous Learning & Self-Improvement
 
 ### Overview

@@ -550,6 +550,46 @@ agent.executive          # ExecutiveController.with_agent(self) — all services
 
 ---
 
+## 12. Project Workspace Manager (Milestone 15)
+
+```
+SmartAgent
+  └─ workspace_manager: WorkspaceManager
+       ├─ active: Workspace | None
+       ├─ _scoped_memory[name]:    MemoryManager  (lazy, cached)
+       └─ _scoped_knowledge[name]: KnowledgeManager (lazy, cached)
+
+Orchestrator._inject_services(context)
+  └─ if workspace_manager.active:
+       context.metadata["workspace"]        = active workspace
+       context.metadata["memory_manager"]   = workspace_manager.active_memory()
+       context.metadata["knowledge_manager"] = workspace_manager.active_knowledge()
+                                              (override global managers)
+
+Orchestrator.execute_goal()
+  └─ _save_to_workspace(result)
+       └─ workspace_manager.record_execution(context, reflection_result)
+            ├─ writes  history/<plan_id>.json
+            ├─ updates run_count / last_run_at
+            └─ appends plan.memory_entries → LESSONS.md
+```
+
+### Workspace disk layout
+
+```
+workspaces/
+  <name>/
+    workspace.json   ← serialised metadata (atomic write: .tmp → replace)
+    goals.md         ← append-only timestamped goal log
+    memory/          ← scoped MemoryManager vault
+    knowledge/       ← scoped KnowledgeManager store
+    output/          ← files written by workers (write_output_file)
+    history/         ← one JSON per execution run
+    LESSONS.md       ← distilled lessons from reflection cycles
+```
+
+---
+
 ## 11. What's still design-only
 
 Per milestone specs, these are intentionally **not** implemented:
