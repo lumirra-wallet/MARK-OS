@@ -71,6 +71,7 @@ class DevLoop:
         memory_manager: Any | None = None,
         git_client: Any | None = None,
         max_iterations: int = _DEFAULT_MAX_ITERATIONS,
+        event_bus: Any | None = None,
     ) -> None:
         self._executive         = executive
         self._debug_loop        = debug_loop
@@ -80,6 +81,7 @@ class DevLoop:
         self._memory            = memory_manager
         self._git               = git_client
         self._max_iterations    = max(1, max_iterations)
+        self._event_bus         = event_bus
 
     # ------------------------------------------------------------------
     # Factory
@@ -91,6 +93,7 @@ class DevLoop:
         agent: Any,
         max_iterations: int = _DEFAULT_MAX_ITERATIONS,
         cwd: str = ".",
+        event_bus: Any | None = None,
     ) -> "DevLoop":
         """Build a fully-wired DevLoop from a live ``SmartAgent``."""
         debug_loop = None
@@ -115,7 +118,54 @@ class DevLoop:
             memory_manager=getattr(agent, "memory", None),
             git_client=None,
             max_iterations=max_iterations,
+            event_bus=event_bus,
         )
+
+    # ------------------------------------------------------------------
+    # Event helpers
+    # ------------------------------------------------------------------
+
+    def _emit(self, name: str, **payload: Any) -> None:
+        """Publish an event on the wired EventBus, silently ignoring failures."""
+        if self._event_bus is not None:
+            try:
+                self._event_bus.publish(name, **payload)
+            except Exception:
+                pass
+
+    def _wire_file_events(self, file_editor: Any) -> None:
+        """
+        Monkey-patch ``file_editor._record`` so that every successful write
+        emits a FileCreated / FileModified / FileDeleted event on the bus.
+
+        Safe to call multiple times — re-patching is a no-op once the sentinel
+        attribute ``_events_wired`` is present.
+        """
+        if self._event_bus is None or file_editor is None:
+            return
+        if getattr(file_editor, "_events_wired", False):
+            return
+        emit = self._emit
+        orig_record = file_editor._record
+
+        def _patched_record(result: Any) -> Any:
+            r = orig_record(result)
+            try:
+                if getattr(r, "success", False):
+                    op   = getattr(r, "operation", "")
+                    path = getattr(r, "path", "")
+                    if op == "create":
+                        emit("FileCreated", path=path)
+                    elif op in ("edit", "patch"):
+                        emit("FileModified", path=path)
+                    elif op == "delete":
+                        emit("FileDeleted", path=path)
+            except Exception:
+                pass
+            return r
+
+        file_editor._record       = _patched_record
+        file_editor._events_wired = True
 
     # ------------------------------------------------------------------
     # Primary API
@@ -178,25 +228,38 @@ class DevLoop:
             # PHASE 1: Planning + Coding via Executive
             # ──────────────────────────────────────────────────────────
             self._dash_set("current_worker", "Planner")
+            self._emit("PlanningStarted")
+            self._emit("WorkerStarted", worker="Planning", task=f"Cycle {cycle}/{self._max_iterations}")
             print(f"  [plan] Planning implementation (cycle {cycle}/{self._max_iterations})...")
             plan_iter = self._run_planning_phase(cycle, goal, complexity=complexity)
             iterations.append(plan_iter)
+            self._emit("WorkerFinished", worker="Planning", success=plan_iter.success)
 
             if not plan_iter.success:
                 logger.warning("DevLoop: planning failed on cycle %d", cycle)
+                self._emit("Error", message=f"Planning failed on cycle {cycle}: {plan_iter.notes}")
                 result.stop_reason = "planning_failed"
                 break
 
             # v2.0 fix — retrieve the file_editor from the execution context
             # so we can scope pytest to only the generated test files.
             file_editor = _get_file_editor(self._executive)
+            # Wire file events so FileCreated/FileModified/FileDeleted stream live.
+            self._wire_file_events(file_editor)
 
             self._dash_add_completed("Planning")
+            self._emit("PlanningFinished")
+
+            # Emit WorkerStarted for Coding — workers ran inside planning phase
+            self._emit("WorkerStarted", worker="Coding", task=goal[:80])
+            self._emit("WorkerFinished", worker="Coding", success=True)
 
             # ──────────────────────────────────────────────────────────
             # PHASE 2: Testing
             # ──────────────────────────────────────────────────────────
             self._dash_set("current_worker", "TestRunner")
+            self._emit("TestsStarted")
+            self._emit("WorkerStarted", worker="Testing", task=test_cmd)
             print(f"  [test] Running tests...")
             test_iter = self._run_test_phase(cycle, test_cmd, file_editor, resolved_dir)
             iterations.append(test_iter)
@@ -205,15 +268,21 @@ class DevLoop:
             if test_iter.success:
                 logger.info("DevLoop: tests passed on cycle %d", cycle)
                 print(f"  [test] Tests passed ✓")
+                self._emit("TestsPassed", output=test_iter.notes[:1000])
+                self._emit("WorkerFinished", worker="Testing", success=True)
 
                 # ──────────────────────────────────────────────────────
                 # PHASE 2b: Quality (only after tests pass)
                 # ──────────────────────────────────────────────────────
                 if run_quality and self._quality_runner is not None:
                     self._dash_set("current_worker", "QualityRunner")
+                    self._emit("QualityStarted")
+                    self._emit("WorkerStarted", worker="Quality", task="ruff / black / mypy")
                     print(f"  [qual] Running quality checks (ruff/black/mypy)...")
                     quality_iter = self._run_quality_phase(cycle)
                     iterations.append(quality_iter)
+                    self._emit("WorkerFinished", worker="Quality", success=quality_iter.success)
+                    self._emit("QualityFinished")
                     if quality_iter.success:
                         self._dash_add_completed("Quality checks")
                         print(f"  [qual] Quality checks passed ✓")
@@ -228,15 +297,21 @@ class DevLoop:
                     self._auto_commit(goal, commit_message, iterations)
                 break
 
+            # Tests failed
+            self._emit("TestsFailed", output=test_iter.notes[:1000])
+            self._emit("WorkerFinished", worker="Testing", success=False)
+
             # ──────────────────────────────────────────────────────────
             # PHASE 3: Debugging (self-healing)
             # ──────────────────────────────────────────────────────────
             self._dash_set("current_worker", "DebugLoop")
+            self._emit("WorkerStarted", worker="Research", task=f"self-repair cycle {cycle}")
             print(f"  [fix]  Tests failed — attempting self-repair (cycle {cycle})...")
             # Build the same scoped test command the debug loop should use
             scoped_cmd = _build_scoped_test_cmd(test_cmd, file_editor, resolved_dir)
             debug_iter = self._run_debug_phase(cycle, scoped_cmd, test_iter.notes, resolved_dir)
             iterations.append(debug_iter)
+            self._emit("WorkerFinished", worker="Research", success=debug_iter.success)
             if not debug_iter.success:
                 self._dash_increment_retries()
 
@@ -244,9 +319,11 @@ class DevLoop:
             # PHASE 4: Reflection
             # ──────────────────────────────────────────────────────────
             self._dash_set("current_worker", "ReflectionEngine")
+            self._emit("WorkerStarted", worker="Review", task=f"reflecting on cycle {cycle}")
             print(f"  [reflect] Learning from cycle {cycle}...")
             reflect_iter = self._run_reflection_phase(cycle, goal, test_iter, debug_iter)
             iterations.append(reflect_iter)
+            self._emit("WorkerFinished", worker="Review", success=True)
             self._dash_add_completed(f"Cycle {cycle}")
 
             if cycle == self._max_iterations:

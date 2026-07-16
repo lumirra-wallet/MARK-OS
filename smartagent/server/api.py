@@ -226,6 +226,26 @@ async def execute(req: ExecuteRequest) -> dict:
         event_bus = EventBus()
         broadcaster.install(event_bus, connection_manager, loop)
 
+        # Periodic StatusChanged ticker — keeps the dashboard's elapsed timer live.
+        async def _status_ticker() -> None:
+            while _state.running:
+                await asyncio.sleep(2)
+                if not _state.running:
+                    break
+                await connection_manager.broadcast({
+                    "type":      "event",
+                    "name":      ServerEvents.STATUS_CHANGED,
+                    "payload":   {
+                        "running":   _state.running,
+                        "goal":      _state.goal,
+                        "workspace": _state.workspace,
+                        "elapsed":   _state.elapsed,
+                    },
+                    "timestamp": _now_iso(),
+                })
+
+        ticker_task = asyncio.create_task(_status_ticker(), name="mark-status-ticker")
+
         try:
             # Build a minimal agent that uses our event bus
             settings = Settings(workspace_path=_state.workspace)
@@ -234,7 +254,7 @@ async def execute(req: ExecuteRequest) -> dict:
             # workers that publish via agent.events are also captured.
             agent.events = event_bus
 
-            eng = SoftwareEngineer.with_agent(agent)
+            eng = SoftwareEngineer.with_agent(agent, event_bus=event_bus)
 
             def _build() -> Any:
                 with intercept_print(event_bus):
@@ -272,6 +292,7 @@ async def execute(req: ExecuteRequest) -> dict:
         finally:
             _state.running = False
             _state._task   = None
+            ticker_task.cancel()
             broadcaster.uninstall(event_bus)
 
         await connection_manager.broadcast({

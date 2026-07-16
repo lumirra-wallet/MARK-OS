@@ -185,6 +185,7 @@ class SoftwareEngineer:
         project_memory: Any | None = None,
         workspace_scanner: Any | None = None,
         interactive: bool = False,
+        event_bus: Any | None = None,
     ) -> None:
         self._dev_loop          = dev_loop
         self._ceo               = ceo_agent
@@ -194,9 +195,18 @@ class SoftwareEngineer:
         self._project_memory    = project_memory
         self._workspace_scanner = workspace_scanner
         self._interactive       = interactive
+        self._event_bus         = event_bus
 
         self._analyzer  = RequirementAnalyzer(model_manager=model_manager)
         self._clarifier = ClarificationEngine(model_manager=model_manager)
+
+    def _emit(self, name: str, **payload: Any) -> None:
+        """Publish an event on the wired EventBus, silently ignoring failures."""
+        if self._event_bus is not None:
+            try:
+                self._event_bus.publish(name, **payload)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Factory
@@ -208,6 +218,7 @@ class SoftwareEngineer:
         agent: Any,
         interactive: bool = False,
         cwd: str = ".",
+        event_bus: Any | None = None,
     ) -> "SoftwareEngineer":
         """Build a fully-wired SoftwareEngineer from a live ``SmartAgent``."""
         from smartagent.dev_loop.dev_loop import DevLoop
@@ -220,7 +231,7 @@ class SoftwareEngineer:
         except Exception:
             pass
 
-        dev_loop = DevLoop.with_agent(agent, cwd=cwd)
+        dev_loop = DevLoop.with_agent(agent, cwd=cwd, event_bus=event_bus)
         # Inject dashboard into dev_loop
         if dashboard is not None:
             dev_loop._dashboard = dashboard  # type: ignore[attr-defined]
@@ -248,6 +259,7 @@ class SoftwareEngineer:
             project_memory=getattr(agent, "project_memory", None),
             workspace_scanner=workspace_scanner,
             interactive=interactive,
+            event_bus=event_bus,
         )
 
     # ------------------------------------------------------------------
@@ -320,15 +332,19 @@ class SoftwareEngineer:
         # Step 0: Workspace scan — skip for medium (speed)
         # ----------------------------------------------------------
         if complexity not in (TaskComplexity.MEDIUM,):
+            self._emit("WorkerStarted", worker="Research", task="workspace scan")
             report.workspace_summary = self._scan_workspace(scan_path)
+            self._emit("WorkerFinished", worker="Research", success=True)
             logger.info("SoftwareEngineer: workspace=%r", report.workspace_summary[:80])
 
         # ----------------------------------------------------------
         # Step 1: Requirement analysis
         # ----------------------------------------------------------
+        self._emit("WorkerStarted", worker="Planning", task="requirement analysis")
         print(f"  [req]  Analyzing requirements...")
         req = self._analyze(goal, project_name)
         report.requirements = req
+        self._emit("WorkerFinished", worker="Planning", success=True)
         logger.info(
             "SoftwareEngineer: analysis done  complexity=%s  domains=%s",
             req.complexity, req.domains,
@@ -548,7 +564,10 @@ class SoftwareEngineer:
             add_r  = self._git.add(".")
             if add_r.success:
                 commit_r = self._git.commit(msg)
-                return getattr(commit_r, "sha", "") or ""
+                sha = getattr(commit_r, "sha", "") or ""
+                if sha:
+                    self._emit("GitCommit", sha=sha, message=msg)
+                return sha
         except Exception as exc:
             logger.warning("SoftwareEngineer: git commit failed: %s", exc)
         return ""
