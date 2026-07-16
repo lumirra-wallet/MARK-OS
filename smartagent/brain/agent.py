@@ -35,6 +35,10 @@ from smartagent.reflection.prompt_registry import PromptRegistry
 from smartagent.reflection.reflection_engine import ReflectionEngine
 from smartagent.workspace.workspace_manager import WorkspaceManager
 from smartagent.multi_agent.ceo_agent import CEOAgent
+from smartagent.project_memory.project_memory import ProjectMemory
+from smartagent.long_running.long_running_engine import LongRunningEngine
+from smartagent.dev_loop.dev_loop import DevLoop
+from smartagent.engineer.software_engineer import SoftwareEngineer
 from smartagent.research.research_manager import ResearchManager
 from smartagent.skills.permissions import Permission, PermissionManager
 from smartagent.skills.skill_engine import SkillEngine
@@ -225,6 +229,30 @@ class SmartAgent:
         # Sits above the executive: CEO decomposes goals into team assignments,
         # each team runs its own Orchestrator with team-scoped workers.
         self.ceo = CEOAgent.with_agent(self)
+
+        # Milestone 22 — Project Memory.
+        # Stores per-project tech-stack profiles so every future task in that
+        # project benefits from known context (framework, test runner, DB, etc.)
+        self.project_memory = ProjectMemory(
+            base_path=getattr(settings, "project_memory_path", "project_memory")
+        )
+
+        # Milestone 23 — Long Running Execution.
+        # Wraps the CEO pipeline with structured CompletionReport output,
+        # per-phase timing, and optional progress callbacks.
+        self.long_running_engine = LongRunningEngine(
+            ceo_agent=self.ceo,
+            memory_manager=self.memory,
+            project_memory=self.project_memory,
+        )
+
+        # Milestone 24 — Autonomous Development Loop.
+        # plan → code → test → debug → reflect → retry until tests pass.
+        self.dev_loop = DevLoop.with_agent(self)
+
+        # Milestone 25 — Full Software Engineer.
+        # Analyze requirements → clarify → plan → execute DevLoop → commit.
+        self.software_engineer = SoftwareEngineer.with_agent(self)
 
     def handle_message(self, message: str) -> str:
         """

@@ -153,6 +153,7 @@ def build_default_registry() -> WorkerRegistry:
     from smartagent.executive.workers.report_worker import ReportWorker
     from smartagent.executive.workers.knowledge_worker import KnowledgeWorker
     from smartagent.executive.workers.debug_worker import DebugWorker
+    from smartagent.executive.workers.git_worker import GitWorker
 
     # GenericWorker — used as fallback for unrecognised task types.
     class _GenericWorker:

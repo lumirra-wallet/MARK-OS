@@ -37,6 +37,11 @@ from smartagent.ui.commands import (
     workspace,
 )
 from smartagent.ui.commands import debug_cmd
+from smartagent.ui.commands import git_cmd        # Milestone 21 — Git Engine
+from smartagent.ui.commands import project_cmd    # Milestone 22 — Project Memory
+from smartagent.ui.commands import long_run_cmd   # Milestone 23 — Long Running Execution
+from smartagent.ui.commands import dev_loop_cmd   # Milestone 24 — Autonomous Dev Loop
+from smartagent.ui.commands import engineer_cmd   # Milestone 25 — Full Software Engineer
 from smartagent.ui.repl import Repl
 
 _logger = get_logger(__name__)
@@ -92,6 +97,11 @@ class Console:
         multi_agent.register(self._router)  # Milestone 17 — multi-agent collaboration
         intelligence.register(self._router) # Milestone 18 — workspace intelligence
         debug_cmd.register(self._router)    # Milestone 20 — self debugging
+        git_cmd.register(self._router)      # Milestone 21 — Git Engine
+        project_cmd.register(self._router)  # Milestone 22 — Project Memory
+        long_run_cmd.register(self._router) # Milestone 23 — Long Running Execution
+        dev_loop_cmd.register(self._router) # Milestone 24 — Autonomous Dev Loop
+        engineer_cmd.register(self._router) # Milestone 25 — Full Software Engineer
 
         # Milestone 9: free-text fallback — when the user types something that
         # isn't a recognised command AND a model is active, route the raw input

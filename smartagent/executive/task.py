@@ -63,6 +63,7 @@ class TaskType(Enum):
     REPORT = "report"
     GENERIC = "generic"
     DEBUGGING = "debugging"  # Milestone 20 — Self Debugging
+    GIT       = "git"        # Milestone 21 — Git Engine
 
 
 def _now_iso() -> str:
