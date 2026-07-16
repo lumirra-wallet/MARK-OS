@@ -1,0 +1,805 @@
+At this point, I'd stop thinking in terms of "features" and start thinking in terms of **making MARK autonomous**.
+
+Here's how I'd define the next three milestones so they build naturally on everything you've already completed.
+
+---
+
+# MILESTONE 12 — Tool Intelligence & Autonomous Execution
+
+## PROJECT
+
+SmartAgent / MARK AI Operating System
+
+## Objective
+
+Upgrade MARK from an AI that generates text into an AI that can decide when to use tools.
+
+Workers should autonomously select and execute tools to complete tasks instead of relying solely on LLM responses.
+
+The existing architecture (Executive, Workers, Scheduler, ModelManager, Skills, Knowledge, Memory, Mind) MUST remain unchanged.
+
+No architecture redesign.
+
+---
+
+## Existing System
+
+Already implemented:
+
+* Executive Controller
+* Scheduler
+* Worker Registry
+* AI Workers
+* Knowledge Engine
+* Memory Engine
+* Tool Engine
+* Skill Engine
+* Model Manager
+* Streaming
+* Console
+
+Reuse everything.
+
+---
+
+# Goal
+
+Workers should be capable of reasoning like:
+
+```
+Need current information?
+
+↓
+
+Search Tool
+
+↓
+
+Need Python execution?
+
+↓
+
+Python Tool
+
+↓
+
+Need filesystem?
+
+↓
+
+File Tool
+
+↓
+
+Need shell command?
+
+↓
+
+Terminal Tool
+
+↓
+
+Continue reasoning
+
+↓
+
+Produce final answer
+```
+
+---
+
+# Tool Selection
+
+Every worker should decide whether a tool is needed.
+
+Example
+
+Research Worker
+
+may call
+
+```
+search
+knowledge
+memory
+```
+
+Coding Worker
+
+may call
+
+```
+python
+filesystem
+terminal
+```
+
+Testing Worker
+
+may call
+
+```
+python
+
+pytest
+
+filesystem
+```
+
+Documentation Worker
+
+may call
+
+```
+filesystem
+
+knowledge
+```
+
+---
+
+# Tool Planning
+
+Every worker must follow
+
+```
+Think
+
+↓
+
+Need Tool?
+
+↓
+
+Select Tool
+
+↓
+
+Execute Tool
+
+↓
+
+Observe Result
+
+↓
+
+Continue Thinking
+
+↓
+
+Finish
+```
+
+Do NOT hardcode workflows.
+
+---
+
+# Tool Execution
+
+Use ONLY
+
+```
+agent.tool_engine
+```
+
+Never execute tools directly.
+
+---
+
+# Tool Result Memory
+
+Every tool execution should be stored.
+
+ExecutionContext stores
+
+```
+tool
+
+arguments
+
+result
+
+duration
+
+success
+```
+
+---
+
+# Console
+
+Display
+
+```
+▶ Coding Worker
+
+Thinking...
+
+Using Tool: python
+
+Running...
+
+✓ Success
+
+Continuing...
+
+Completed
+```
+
+---
+
+# Recovery
+
+If a tool fails
+
+Worker should
+
+```
+Retry
+
+↓
+
+Alternative Tool
+
+↓
+
+Continue
+
+↓
+
+Graceful failure
+```
+
+---
+
+# Tests
+
+Create
+
+```
+tests/test_tool_workers.py
+```
+
+Verify
+
+* tool selection
+* execution
+* retries
+* context updates
+* scheduler compatibility
+* existing tests remain green
+
+---
+
+# Documentation
+
+Update all docs.
+
+---
+
+# Success
+
+```
+plan Build calculator
+
+run
+```
+
+should actually execute Python to validate generated code instead of only generating it.
+
+---
+
+---
+
+# MILESTONE 13 — Parallel Executive Engine
+
+## PROJECT
+
+SmartAgent / MARK AI Operating System
+
+## Objective
+
+Upgrade the Executive Scheduler to support parallel execution.
+
+Independent workers should run simultaneously whenever dependencies allow.
+
+Do NOT redesign Planner or TaskGraph.
+
+Reuse existing dependency graph.
+
+---
+
+# Goal
+
+Instead of
+
+```
+Research
+
+↓
+
+Knowledge
+
+↓
+
+Design
+
+↓
+
+Coding
+
+↓
+
+Testing
+```
+
+allow
+
+```
+Research
+      \
+       \
+Knowledge
+
+↓
+
+Design
+
+↓
+
+Coding
+      \
+       \
+Documentation
+
+↓
+
+Testing
+      \
+       \
+Review
+```
+
+---
+
+# Scheduler
+
+Create
+
+```
+ParallelScheduler
+```
+
+or upgrade the existing scheduler.
+
+Must use
+
+```
+ThreadPoolExecutor
+```
+
+No asyncio.
+
+---
+
+# Rules
+
+Tasks execute only when
+
+all dependencies complete.
+
+Never violate DAG ordering.
+
+---
+
+# Worker Pool
+
+Configurable
+
+```
+max_workers = 4
+```
+
+through Settings.
+
+---
+
+# Live Console
+
+Display
+
+```
+▶ Research
+
+▶ Knowledge
+
+✓ Research
+
+✓ Knowledge
+
+▶ Design
+
+▶ Coding
+
+✓ Coding
+
+▶ Testing
+```
+
+---
+
+# Resource Limits
+
+Prevent
+
+* duplicate execution
+
+* deadlocks
+
+* starvation
+
+* race conditions
+
+---
+
+# Execution Context
+
+Must be thread-safe.
+
+Protect
+
+```
+results
+
+metadata
+
+history
+```
+
+with locks.
+
+---
+
+# Performance Metrics
+
+Show
+
+```
+Execution Time
+
+Sequential
+
+Parallel
+
+Speedup
+```
+
+---
+
+# Tests
+
+Stress tests
+
+100+
+
+parallel plans
+
+random DAGs
+
+dependency correctness
+
+thread safety
+
+---
+
+# Documentation
+
+Update all docs.
+
+---
+
+# Success
+
+```
+plan Build REST API
+
+run
+```
+
+should execute multiple workers simultaneously whenever dependencies permit.
+
+---
+
+---
+
+# MILESTONE 14 — Autonomous Learning & Self-Improvement
+
+## PROJECT
+
+SmartAgent / MARK AI Operating System
+
+## Objective
+
+Transform MARK into a continuously improving AI Operating System.
+
+Every completed execution should improve future executions.
+
+No architecture redesign.
+
+Reuse Memory, Knowledge, Mind, Executive.
+
+---
+
+# Goal
+
+After every run
+
+```
+Execution
+
+↓
+
+Self Review
+
+↓
+
+Failure Detection
+
+↓
+
+Knowledge Update
+
+↓
+
+Memory Update
+
+↓
+
+Prompt Improvement
+
+↓
+
+Confidence Update
+
+↓
+
+Future executions improve
+```
+
+---
+
+# Reflection Engine
+
+Create
+
+```
+smartagent/reflection/
+```
+
+Modules
+
+```
+reflection_engine.py
+
+critic.py
+
+improvement_planner.py
+
+execution_analyzer.py
+
+confidence_engine.py
+```
+
+---
+
+# Reflection Worker
+
+After every execution
+
+spawn
+
+```
+Reflection Worker
+```
+
+Responsibilities
+
+* What succeeded?
+
+* What failed?
+
+* Missing knowledge?
+
+* Missing tools?
+
+* Better plan?
+
+* Better prompts?
+
+---
+
+# Prompt Evolution
+
+Worker prompts become versioned.
+
+Store
+
+```
+Prompt v1
+
+↓
+
+Prompt v2
+
+↓
+
+Prompt v3
+```
+
+Track improvement history.
+
+---
+
+# Knowledge Growth
+
+Automatically propose
+
+new concepts
+
+relationships
+
+evidence
+
+confidence adjustments
+
+into Knowledge Inbox.
+
+Never bypass approval workflow.
+
+---
+
+# Memory Growth
+
+Store
+
+```
+Lessons learned
+
+Common mistakes
+
+Successful strategies
+
+User preferences
+
+Execution summaries
+```
+
+---
+
+# Confidence Adaptation
+
+Track
+
+```
+Worker accuracy
+
+Tool reliability
+
+Model quality
+
+Execution success
+```
+
+Adjust routing decisions automatically.
+
+---
+
+# Analytics Dashboard
+
+New commands
+
+```
+learning
+
+analytics
+
+reflection
+
+history
+
+improvements
+```
+
+Display
+
+```
+Executions
+
+Success Rate
+
+Knowledge Growth
+
+Worker Accuracy
+
+Model Usage
+
+Tool Usage
+
+Average Confidence
+
+Learning Trend
+```
+
+---
+
+# Self-Evaluation
+
+MARK should be able to answer
+
+```
+What did I learn today?
+
+What should I improve?
+
+Which worker performs best?
+
+Which tools fail most often?
+
+What knowledge is missing?
+```
+
+---
+
+# Tests
+
+Create
+
+```
+tests/test_reflection.py
+```
+
+Verify
+
+* reflection
+
+* learning
+
+* confidence updates
+
+* knowledge proposals
+
+* prompt versioning
+
+* analytics
+
+* backward compatibility
+
+---
+
+# Documentation
+
+Update
+
+* README
+* CHANGELOG
+* ARCHITECTURE
+* ROADMAP
+* SMARTAGENT
+
+---
+
+# Success
+
+After multiple executions:
+
+```
+plan Build Flask API
+
+run
+
+run
+
+run
+```
+
+MARK should produce measurably better plans, richer context, higher-confidence outputs, and a growing body of approved knowledge and execution history, demonstrating continuous learning while preserving the modular architecture established throughout the project.
