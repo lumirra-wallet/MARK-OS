@@ -1,0 +1,293 @@
+PROJECT
+========
+Project Name: MARK AI Operating System
+Version: 2.0
+
+OBJECTIVE
+=========
+
+MARK already has:
+
+- Brain
+- Mind
+- Memory
+- Knowledge
+- Skills
+- Tool Engine
+- Model Manager (Ollama)
+- Executive Planner
+- Worker Agents
+- CEO Multi-Agent Orchestration
+- Workspace Intelligence
+- File Editing
+- Self Debugging
+- Git Engine
+- Project Memory
+- Long Running Execution
+- Autonomous Development Loop
+- Software Engineer
+
+The architecture is complete.
+
+DO NOT create another subsystem.
+
+Instead, transform MARK from a framework into a production-grade autonomous software engineer.
+
+======================================================
+PHASE 1 — VERIFY EXISTING IMPLEMENTATION
+======================================================
+
+First inspect the entire repository.
+
+Do NOT duplicate anything.
+
+If functionality already exists:
+
+- improve it
+- optimize it
+- remove duplication
+- fix architecture
+- improve reliability
+
+Never create parallel implementations.
+
+======================================================
+PHASE 2 — END-TO-END EXECUTION
+======================================================
+
+MARK must be able to receive a goal:
+
+engineer Build a FastAPI Todo API
+
+and autonomously:
+
+1. Analyze requirements
+2. Ask only essential clarification questions
+3. Scan the workspace
+4. Build execution plan
+5. Assign workers
+6. Generate files
+7. Modify existing files
+8. Run tests
+9. Detect failures
+10. Fix failures
+11. Retry automatically
+12. Update documentation
+13. Commit changes
+14. Produce final execution report
+
+No manual copy/paste.
+
+======================================================
+PHASE 3 — REAL FILE OPERATIONS
+======================================================
+
+Workers must no longer return strings.
+
+Workers must:
+
+- create files
+- edit files
+- delete files
+- move files
+- rename files
+
+through a unified FileEditor API.
+
+Every modification must support:
+
+- preview
+- rollback
+- diff
+- audit log
+
+======================================================
+PHASE 4 — REAL DEBUG LOOP
+======================================================
+
+Implement a production debugging loop.
+
+Run
+
+↓
+
+Capture stdout/stderr
+
+↓
+
+Parse traceback
+
+↓
+
+Determine failing worker
+
+↓
+
+Generate fix
+
+↓
+
+Patch files
+
+↓
+
+Run again
+
+↓
+
+Repeat until:
+
+SUCCESS
+
+or
+
+Maximum retry count reached.
+
+======================================================
+PHASE 5 — CODE QUALITY
+======================================================
+
+Automatically execute:
+
+pytest
+
+ruff
+
+black
+
+mypy
+
+(if available)
+
+Fix issues before considering a task complete.
+
+======================================================
+PHASE 6 — EXECUTION DASHBOARD
+======================================================
+
+Add a rich console dashboard showing:
+
+Current Goal
+
+Current Worker
+
+Completed Tasks
+
+Running Tasks
+
+Queued Tasks
+
+Files Modified
+
+Tests Passing
+
+Retries
+
+Execution Time
+
+Current Model
+
+Tool Calls
+
+Memory Updates
+
+Knowledge Updates
+
+======================================================
+PHASE 7 — PERFORMANCE
+======================================================
+
+Improve:
+
+- startup speed
+- memory usage
+- context compression
+- prompt reuse
+- model caching
+- worker reuse
+
+Avoid unnecessary model calls.
+
+======================================================
+PHASE 8 — RELIABILITY
+======================================================
+
+Every subsystem must gracefully recover from:
+
+- model unavailable
+- tool failure
+- git failure
+- test failure
+- timeout
+- malformed output
+
+No uncaught exceptions should terminate MARK.
+
+======================================================
+PHASE 9 — VALIDATION
+======================================================
+
+Demonstrate MARK successfully completing all of these:
+
+engineer Build Calculator CLI
+
+engineer Build REST API
+
+engineer Build Flask Blog
+
+engineer Build Markdown Parser
+
+engineer Add JWT Authentication
+
+Show:
+
+- generated files
+- test execution
+- debugging
+- retries
+- git commits
+- final summary
+
+======================================================
+TESTING
+======================================================
+
+Maintain 100% backward compatibility.
+
+Do not remove existing APIs.
+
+All previous tests must continue passing.
+
+Add comprehensive tests for all new behavior.
+
+======================================================
+DOCUMENTATION
+======================================================
+
+Update:
+
+README.md
+
+ARCHITECTURE.md
+
+ROADMAP.md
+
+CHANGELOG.md
+
+SMARTAGENT.md
+
+Include architecture diagrams and execution flow.
+
+======================================================
+IMPORTANT
+======================================================
+
+Quality is more important than quantity.
+
+Do not add unnecessary abstractions.
+
+Do not create duplicate systems.
+
+Refactor existing implementations whenever possible.
+
+The goal is to make MARK behave like a professional autonomous software engineering agent rather than simply increasing the number of modules.
