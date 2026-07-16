@@ -251,7 +251,170 @@ export const markApi = {
     if (!res.ok) throw new Error('recent workspaces failed');
     return res.json() as Promise<{ recent: string[] }>;
   },
+
+  // ── Model Router (Feature 15) ─────────────────────────────────────────────
+
+  getModelRouter: async (baseUrl: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/models/router'));
+    if (!res.ok) throw new Error('model router failed');
+    return res.json() as Promise<{ routes: Record<string, string> }>;
+  },
+
+  updateModelRouter: async (baseUrl: string, routes: Record<string, string>) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/models/router'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ routes }),
+    });
+    if (!res.ok) throw new Error('model router update failed');
+    return res.json() as Promise<{ routes: Record<string, string> }>;
+  },
+
+  resetModelRouter: async (baseUrl: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/models/router/reset'), { method: 'POST' });
+    if (!res.ok) throw new Error('model router reset failed');
+    return res.json() as Promise<{ routes: Record<string, string> }>;
+  },
+
+  // ── Enhanced Git (Feature 12) ─────────────────────────────────────────────
+
+  getGitBranches: async (baseUrl: string, workspace?: string) => {
+    const url = new URL(getMarkApiUrl(baseUrl, '/git/branches'));
+    if (workspace) url.searchParams.set('workspace', workspace);
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new Error('git branches failed');
+    return res.json() as Promise<{ branches: GitBranchInfo[]; current: string }>;
+  },
+
+  createGitBranch: async (baseUrl: string, name: string, checkout = true, workspace?: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/git/branch'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, checkout, workspace }),
+    });
+    if (!res.ok) throw new Error('branch create failed');
+    return res.json() as Promise<{ success: boolean; branch: string }>;
+  },
+
+  checkoutGitBranch: async (baseUrl: string, branch: string, workspace?: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/git/checkout'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch, workspace }),
+    });
+    if (!res.ok) throw new Error('checkout failed');
+    return res.json() as Promise<{ success: boolean; branch: string }>;
+  },
+
+  getGitStaged: async (baseUrl: string, workspace?: string) => {
+    const url = new URL(getMarkApiUrl(baseUrl, '/git/staged'));
+    if (workspace) url.searchParams.set('workspace', workspace);
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new Error('staged diff failed');
+    return res.json() as Promise<{ diff: string; stat: string; files: string[] }>;
+  },
+
+  stageFiles: async (baseUrl: string, files: string[], workspace?: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/git/stage'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files, workspace }),
+    });
+    if (!res.ok) throw new Error('stage failed');
+    return res.json() as Promise<{ success: boolean; stat: string }>;
+  },
+
+  unstageFiles: async (baseUrl: string, files: string[], workspace?: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/git/unstage'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files, workspace }),
+    });
+    if (!res.ok) throw new Error('unstage failed');
+    return res.json() as Promise<{ success: boolean }>;
+  },
+
+  gitCommit: async (baseUrl: string, message: string, workspace?: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/git/commit'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, workspace }),
+    });
+    if (!res.ok) throw new Error('commit failed');
+    return res.json() as Promise<{ success: boolean; hash: string; message: string }>;
+  },
+
+  getGitStashes: async (baseUrl: string, workspace?: string) => {
+    const url = new URL(getMarkApiUrl(baseUrl, '/git/stashes'));
+    if (workspace) url.searchParams.set('workspace', workspace);
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new Error('stashes failed');
+    return res.json() as Promise<{ stashes: { ref: string; message: string; when: string }[] }>;
+  },
+
+  gitStash: async (baseUrl: string, message: string, workspace?: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/git/stash'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, workspace }),
+    });
+    if (!res.ok) throw new Error('stash failed');
+    return res.json() as Promise<{ success: boolean }>;
+  },
+
+  gitStashPop: async (baseUrl: string, workspace?: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/git/stash/pop'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace }),
+    });
+    if (!res.ok) throw new Error('stash pop failed');
+    return res.json() as Promise<{ success: boolean }>;
+  },
+
+  getGitPrSummary: async (baseUrl: string, base = 'main', workspace?: string) => {
+    const url = new URL(getMarkApiUrl(baseUrl, '/git/pr-summary'));
+    url.searchParams.set('base', base);
+    if (workspace) url.searchParams.set('workspace', workspace);
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new Error('PR summary failed');
+    return res.json() as Promise<{ branch: string; base: string; commits: GitCommit[]; summary: string }>;
+  },
+
+  // ── Checkpoints (Feature 10) ──────────────────────────────────────────────
+
+  createCheckpoint: async (baseUrl: string, body: {
+    workspace?: string; label?: string; goal?: string;
+    messages?: unknown[]; pipeline?: unknown[];
+  }) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/checkpoints'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error('checkpoint create failed');
+    return res.json();
+  },
+
+  // ── Task graph (Feature 1) ────────────────────────────────────────────────
+
+  planTaskGraph: async (baseUrl: string, goal: string, runId?: string, workspace?: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/task-graph/plan'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ goal, run_id: runId || '', workspace: workspace || '.' }),
+    });
+    if (!res.ok) throw new Error('task graph plan failed');
+    return res.json();
+  },
+
+  // ── Evaluations (Feature 17) ──────────────────────────────────────────────
+
+  submitEvaluation: async (baseUrl: string, data: Record<string, unknown>) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/evaluations'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('evaluation submit failed');
+    return res.json();
+  },
 };
+
+// ── Enhanced git types ────────────────────────────────────────────────────────
+
+export interface GitBranchInfo {
+  name: string; hash: string; subject: string; current: boolean;
+}
 
 // ── System types ─────────────────────────────────────────────────────────────
 

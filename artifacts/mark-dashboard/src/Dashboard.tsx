@@ -5,22 +5,30 @@ import {
   LineChart, Settings, Clock, Plug, Unplug, Zap,
   Mic, AudioWaveform, Volume2, Square,
   GitBranch, Brain, Box, Workflow,
-  MemoryStick,
+  Bookmark, Terminal, Briefcase, Wrench, Code2, Award,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChatView } from './components/ChatView';
+import { ChatView }          from './components/ChatView';
 import { ApprovalsSidebar } from './components/ApprovalsSidebar';
-import { ExecutionView } from './components/ExecutionView';
-import { SettingsView } from './components/SettingsView';
-import { FilesView } from './components/FilesView';
-import { LogsView } from './components/LogsView';
-import { PerformanceView } from './components/PerformanceView';
-import { WorkersView } from './components/WorkersView';
-import { VoicePanel } from './components/VoicePanel';
-import { PipelineView } from './components/PipelineView';
-import { GitPanel } from './components/GitPanel';
-import { MemoryPanel } from './components/MemoryPanel';
-import { ModelsPanel } from './components/ModelsPanel';
+import { ExecutionView }     from './components/ExecutionView';
+import { SettingsView }      from './components/SettingsView';
+import { FilesView }         from './components/FilesView';
+import { LogsView }          from './components/LogsView';
+import { PerformanceView }   from './components/PerformanceView';
+import { WorkersView }       from './components/WorkersView';
+import { VoicePanel }        from './components/VoicePanel';
+import { PipelineView }      from './components/PipelineView';
+import { GitPanel }          from './components/GitPanel';
+import { MemoryPanel }       from './components/MemoryPanel';
+import { ModelsPanel }       from './components/ModelsPanel';
+import { ToolsPanel }        from './components/ToolsPanel';
+import { TimelineView }      from './components/TimelineView';
+import { CheckpointsPanel }  from './components/CheckpointsPanel';
+import { EvaluationPanel }   from './components/EvaluationPanel';
+import { LiveTerminal }      from './components/LiveTerminal';
+import { JobsPanel }         from './components/JobsPanel';
+import { TaskGraphView }     from './components/TaskGraphView';
+import { CodeIndexPanel }    from './components/CodeIndexPanel';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { markApi, SystemMetrics } from '@/lib/markApi';
@@ -45,9 +53,9 @@ function VoiceMicIndicator() {
       <TooltipTrigger asChild>
         <div className={`flex items-center gap-1.5 text-xs font-medium ${color} select-none cursor-default`}>
           {voice.state === 'speaking'
-            ? <Volume2 className="w-3.5 h-3.5 animate-pulse" />
+            ? <Volume2       className="w-3.5 h-3.5 animate-pulse" />
             : voice.muted
-              ? <Mic className="w-3.5 h-3.5 opacity-40" />
+              ? <Mic         className="w-3.5 h-3.5 opacity-40" />
               : <AudioWaveform className={`w-3.5 h-3.5 ${voice.state === 'listening' ? 'animate-pulse' : ''}`} />
           }
           <span className="hidden sm:inline capitalize">{voice.state}</span>
@@ -55,6 +63,35 @@ function VoiceMicIndicator() {
       </TooltipTrigger>
       <TooltipContent side="bottom" className="text-xs">
         Voice · {voice.mode.replace(/_/g, ' ')} · {voice.state}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+// ── Token Budget pill (Feature 13) ───────────────────────────────────────────
+
+function TokenBudgetPill() {
+  const { tokenBudget } = useMarkStore();
+  if (!tokenBudget.used) return null;
+  const pct = Math.min(100, Math.round((tokenBudget.used / tokenBudget.window) * 100));
+  const hot = pct > 80;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="hidden lg:flex items-center gap-1.5 text-[10px] font-mono bg-muted/40 px-2 py-1 rounded border border-border/40 select-none cursor-default">
+          <span className={hot ? 'text-amber-400' : 'text-muted-foreground'}>
+            Tokens {pct}%
+          </span>
+          <div className="w-12 h-1 rounded-full bg-muted overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${hot ? 'bg-amber-400' : 'bg-accent'}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="text-xs">
+        Token budget: {tokenBudget.used.toLocaleString()} / {tokenBudget.window.toLocaleString()} (~{pct}%)
       </TooltipContent>
     </Tooltip>
   );
@@ -70,13 +107,9 @@ function MetricsPill({ metrics }: { metrics: SystemMetrics | null }) {
     <Tooltip>
       <TooltipTrigger asChild>
         <div className="hidden lg:flex items-center gap-2 text-[10px] font-mono bg-muted/40 px-2 py-1 rounded border border-border/40 select-none cursor-default">
-          <span className={cpuHot ? 'text-amber-400' : 'text-muted-foreground'}>
-            CPU {metrics.cpu_pct}%
-          </span>
+          <span className={cpuHot ? 'text-amber-400' : 'text-muted-foreground'}>CPU {metrics.cpu_pct}%</span>
           <span className="text-border">·</span>
-          <span className={memHot ? 'text-amber-400' : 'text-muted-foreground'}>
-            RAM {metrics.mem_pct}%
-          </span>
+          <span className={memHot ? 'text-amber-400' : 'text-muted-foreground'}>RAM {metrics.mem_pct}%</span>
         </div>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="text-xs">
@@ -114,14 +147,13 @@ export default function Dashboard() {
     return () => clearInterval(t);
   }, [running, elapsed]);
 
-  // Metrics polling (every 5 s, only when connected)
+  // Metrics polling (every 5 s)
   const fetchMetrics = useCallback(async () => {
-    if (connectionStatus !== 'connected' && connectionStatus !== 'disconnected') return;
     try {
       const m = await markApi.getMetrics(serverUrl);
       setMetrics(m);
     } catch { /* server may not be up yet */ }
-  }, [serverUrl, connectionStatus]);
+  }, [serverUrl]);
 
   useEffect(() => {
     fetchMetrics();
@@ -144,16 +176,13 @@ export default function Dashboard() {
             <Zap className="w-4 h-4 text-accent" />
             <span className="font-bold tracking-tight">MARK</span>
           </div>
-
           <div className="h-3.5 w-px bg-border shrink-0" />
-
           {workspace && (
             <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground font-mono bg-muted/40 px-2 py-0.5 rounded border border-border/40 max-w-[220px]">
               <FolderGit2 className="w-3 h-3 shrink-0" />
               <span className="truncate">{workspace}</span>
             </div>
           )}
-
           {running && goal && (
             <div className="hidden lg:block max-w-[280px]">
               <span className="text-xs truncate font-medium bg-accent/10 text-accent border border-accent/20 px-2.5 py-0.5 rounded-full">
@@ -166,16 +195,12 @@ export default function Dashboard() {
         {/* Right: metrics + voice + timer + status + stop */}
         <div className="flex items-center gap-2.5 shrink-0">
           <MetricsPill metrics={metrics} />
-
+          <TokenBudgetPill />
           <VoiceMicIndicator />
-
-          {/* Elapsed */}
           <div className="flex items-center gap-1.5 text-xs font-mono bg-muted/40 px-2.5 py-1 rounded border border-border/40">
             <Clock className={`w-3.5 h-3.5 ${running ? 'text-accent animate-pulse' : 'text-muted-foreground'}`} />
             {formatTime(liveElapsed)}
           </div>
-
-          {/* Connection */}
           <div className="flex items-center gap-1.5 text-xs font-medium">
             {connectionStatus === 'connected' ? (
               <span className="flex items-center gap-1 text-emerald-500"><Plug className="w-3.5 h-3.5" /><span className="hidden sm:inline">Connected</span></span>
@@ -185,8 +210,6 @@ export default function Dashboard() {
               <span className="flex items-center gap-1 text-muted-foreground"><Unplug className="w-3.5 h-3.5" /><span className="hidden sm:inline">Disconnected</span></span>
             )}
           </div>
-
-          {/* Stop button (only while running) */}
           {running && (
             <button
               onClick={cancelRun}
@@ -204,37 +227,43 @@ export default function Dashboard() {
       <div className="flex-1 flex overflow-hidden">
 
         {/* Left icon rail */}
-        <aside className="w-14 shrink-0 border-r border-border/50 bg-sidebar flex flex-col items-center py-3 gap-1">
+        <aside className="w-14 shrink-0 border-r border-border/50 bg-sidebar flex flex-col items-center py-3 gap-1 overflow-y-auto">
 
           {/* PRIMARY: Chat */}
-          <NavIcon
-            icon={MessageSquare}
-            active={activeTab === 'chat'}
-            onClick={() => setActiveTab('chat')}
-            tooltip="Chat"
-            glow={running}
-          />
+          <NavIcon icon={MessageSquare} active={activeTab === 'chat'}     onClick={() => setActiveTab('chat')}     tooltip="Chat"           glow={running} />
 
-          <div className="w-6 h-px bg-border/40 my-1" />
+          <Divider />
 
           {/* Execution group */}
-          <NavIcon icon={Activity}  active={activeTab === 'execution'} onClick={() => setActiveTab('execution')} tooltip="Execution" />
-          <NavIcon icon={Workflow}  active={activeTab === 'pipeline'}  onClick={() => setActiveTab('pipeline')}  tooltip="Pipeline Graph" />
-          <NavIcon icon={Cpu}       active={activeTab === 'workers'}   onClick={() => setActiveTab('workers')}   tooltip="Workers" />
+          <NavIcon icon={Activity}    active={activeTab === 'execution'}   onClick={() => setActiveTab('execution')}   tooltip="Execution" />
+          <NavIcon icon={GitBranch}   active={activeTab === 'taskgraph'}   onClick={() => setActiveTab('taskgraph')}   tooltip="Task Graph" />
+          <NavIcon icon={Workflow}    active={activeTab === 'pipeline'}    onClick={() => setActiveTab('pipeline')}    tooltip="Pipeline Graph" />
+          <NavIcon icon={Cpu}         active={activeTab === 'workers'}     onClick={() => setActiveTab('workers')}     tooltip="Workers" />
+          <NavIcon icon={Briefcase}   active={activeTab === 'jobs'}        onClick={() => setActiveTab('jobs')}        tooltip="Long Running Jobs" />
 
-          <div className="w-6 h-px bg-border/40 my-1" />
+          <Divider />
 
           {/* Project group */}
-          <NavIcon icon={FolderGit2} active={activeTab === 'files'} onClick={() => setActiveTab('files')} tooltip="Files" />
-          <NavIcon icon={GitBranch}  active={activeTab === 'git'}   onClick={() => setActiveTab('git')}   tooltip="Git" />
-          <NavIcon icon={FileText}   active={activeTab === 'logs'}  onClick={() => setActiveTab('logs')}  tooltip="Logs" />
+          <NavIcon icon={FolderGit2}  active={activeTab === 'files'}      onClick={() => setActiveTab('files')}       tooltip="Files" />
+          <NavIcon icon={FolderGit2}  active={activeTab === 'git'}        onClick={() => setActiveTab('git')}         tooltip="Git" />
+          <NavIcon icon={FileText}    active={activeTab === 'logs'}        onClick={() => setActiveTab('logs')}        tooltip="Logs" />
+          <NavIcon icon={Terminal}    active={activeTab === 'terminal'}    onClick={() => setActiveTab('terminal')}    tooltip="Terminal" />
+          <NavIcon icon={Bookmark}    active={activeTab === 'checkpoints'} onClick={() => setActiveTab('checkpoints')} tooltip="Checkpoints" />
 
-          <div className="w-6 h-px bg-border/40 my-1" />
+          <Divider />
 
           {/* Intelligence group */}
-          <NavIcon icon={Brain}      active={activeTab === 'memory'}      onClick={() => setActiveTab('memory')}      tooltip="Memory" />
-          <NavIcon icon={Box}        active={activeTab === 'models'}      onClick={() => setActiveTab('models')}      tooltip="Models" />
-          <NavIcon icon={LineChart}  active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} tooltip="Performance" />
+          <NavIcon icon={Brain}       active={activeTab === 'memory'}      onClick={() => setActiveTab('memory')}      tooltip="Memory" />
+          <NavIcon icon={Box}         active={activeTab === 'models'}      onClick={() => setActiveTab('models')}      tooltip="Models" />
+          <NavIcon icon={Code2}       active={activeTab === 'codeindex'}   onClick={() => setActiveTab('codeindex')}   tooltip="Codebase Index + RAG" />
+          <NavIcon icon={Wrench}      active={activeTab === 'tools'}       onClick={() => setActiveTab('tools')}       tooltip="Tools & Plugins" />
+
+          <Divider />
+
+          {/* Observability group */}
+          <NavIcon icon={Clock}       active={activeTab === 'timeline'}    onClick={() => setActiveTab('timeline')}    tooltip="Agent Timeline" />
+          <NavIcon icon={Award}       active={activeTab === 'evaluation'}  onClick={() => setActiveTab('evaluation')}  tooltip="Run Evaluations" />
+          <NavIcon icon={LineChart}   active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} tooltip="Performance" />
 
           {/* Voice */}
           <NavIcon
@@ -246,7 +275,7 @@ export default function Dashboard() {
             accent={voice.running}
           />
 
-          <div className="mt-auto">
+          <div className="mt-auto pt-2">
             <NavIcon icon={Settings} active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} tooltip="Settings" />
           </div>
         </aside>
@@ -266,13 +295,21 @@ export default function Dashboard() {
                 >
                   {activeTab === 'chat'        && <ChatView />}
                   {activeTab === 'execution'   && <ExecutionView />}
+                  {activeTab === 'taskgraph'   && <TaskGraphView />}
                   {activeTab === 'pipeline'    && <PipelineView />}
                   {activeTab === 'workers'     && <WorkersView />}
+                  {activeTab === 'jobs'        && <JobsPanel />}
                   {activeTab === 'files'       && <FilesView />}
                   {activeTab === 'git'         && <GitPanel />}
                   {activeTab === 'logs'        && <LogsView />}
+                  {activeTab === 'terminal'    && <LiveTerminal />}
+                  {activeTab === 'checkpoints' && <CheckpointsPanel />}
                   {activeTab === 'memory'      && <MemoryPanel />}
                   {activeTab === 'models'      && <ModelsPanel />}
+                  {activeTab === 'codeindex'   && <CodeIndexPanel />}
+                  {activeTab === 'tools'       && <ToolsPanel />}
+                  {activeTab === 'timeline'    && <TimelineView />}
+                  {activeTab === 'evaluation'  && <EvaluationPanel />}
                   {activeTab === 'performance' && <PerformanceView />}
                   {activeTab === 'voice'       && <VoicePanel />}
                   {activeTab === 'settings'    && <SettingsView />}
@@ -296,7 +333,11 @@ export default function Dashboard() {
   );
 }
 
-// ── NavIcon ───────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function Divider() {
+  return <div className="w-6 h-px bg-border/40 my-1 shrink-0" />;
+}
 
 function NavIcon({
   icon: Icon, active, onClick, tooltip, pulse = false, accent = false, glow = false,
@@ -314,7 +355,7 @@ function NavIcon({
       <TooltipTrigger asChild>
         <button
           onClick={onClick}
-          className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition-all
+          className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition-all shrink-0
             ${active
               ? 'bg-accent text-accent-foreground shadow-md shadow-accent/20'
               : glow

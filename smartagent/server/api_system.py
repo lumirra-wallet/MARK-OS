@@ -321,6 +321,29 @@ async def workspace_recent() -> dict:
     return {"recent": list(reversed(_recent_workspaces[-10:]))}
 
 
+@router.get("/models/router")
+async def get_model_router() -> dict:
+    """Get current per-worker model routing config (Feature 15)."""
+    from smartagent.server.model_router import get_all_routes
+    return {"routes": get_all_routes()}
+
+
+class ModelRouterUpdateRequest(BaseModel):
+    routes: dict[str, str]
+
+
+@router.post("/models/router")
+async def update_model_router(req: ModelRouterUpdateRequest) -> dict:
+    from smartagent.server.model_router import update_routes
+    return {"routes": update_routes(req.routes)}
+
+
+@router.post("/models/router/reset")
+async def reset_model_router() -> dict:
+    from smartagent.server.model_router import reset_routes
+    return {"routes": reset_routes()}
+
+
 def record_workspace(path: str) -> None:
     """Called by the execute endpoint to track workspace history."""
     abs_path = os.path.abspath(path)

@@ -24,11 +24,14 @@ interface OllamaModel {
 
 export function ModelsPanel() {
   const { serverUrl } = useMarkStore();
-  const [models,  setModels]  = useState<OllamaModel[]>([]);
-  const [active,  setActive]  = useState<string>('');
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState<string>('');
+  const [models,   setModels]   = useState<OllamaModel[]>([]);
+  const [active,   setActive]   = useState<string>('');
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState<string>('');
   const [switching, setSwitching] = useState<string>('');
+  const [routes,   setRoutes]   = useState<Record<string, string>>({});
+  const [routeTab, setRouteTab] = useState(false);
+  const [editRoute, setEditRoute] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -214,6 +217,68 @@ export function ModelsPanel() {
           })}
         </div>
       </ScrollArea>
+
+      {/* ── Model Router section (Feature 15) ─────────────────────────────── */}
+      <div className="border-t border-border/50 shrink-0">
+        <button
+          onClick={async () => {
+            if (!routeTab) {
+              try {
+                const r = await markApi.getModelRouter(serverUrl);
+                setRoutes(r.routes);
+                setEditRoute({ ...r.routes });
+              } catch { /* offline */ }
+            }
+            setRouteTab(v => !v);
+          }}
+          className="w-full flex items-center justify-between px-4 py-2 hover:bg-muted/20 transition-colors"
+        >
+          <span className="text-xs font-medium text-muted-foreground">Model Router</span>
+          <span className="text-[10px] text-muted-foreground">{routeTab ? '▲ hide' : '▼ show'}</span>
+        </button>
+
+        {routeTab && (
+          <div className="px-4 pb-3 space-y-2 max-h-64 overflow-y-auto">
+            <p className="text-[10px] text-muted-foreground/60 mb-1">
+              Assign a specific model to each worker role. Overrides the global active model.
+            </p>
+            {Object.entries(editRoute).map(([worker, model]) => (
+              <div key={worker} className="flex items-center gap-2">
+                <span className="text-[10px] font-mono w-28 shrink-0 text-muted-foreground">{worker}</span>
+                <input
+                  value={model}
+                  onChange={e => setEditRoute(r => ({ ...r, [worker]: e.target.value }))}
+                  className="flex-1 bg-muted/20 border border-border/50 rounded px-2 py-0.5 text-[11px] font-mono focus:outline-none focus:border-accent/50"
+                />
+              </div>
+            ))}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={async () => {
+                  try {
+                    const r = await markApi.updateModelRouter(serverUrl, editRoute);
+                    setRoutes(r.routes);
+                  } catch { /* offline */ }
+                }}
+                className="text-[10px] px-2.5 py-1 bg-accent/20 text-accent rounded hover:bg-accent/30"
+              >
+                Apply
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const r = await markApi.resetModelRouter(serverUrl);
+                    setRoutes(r.routes); setEditRoute({ ...r.routes });
+                  } catch { /* offline */ }
+                }}
+                className="text-[10px] px-2.5 py-1 bg-muted/40 rounded hover:bg-muted/60"
+              >
+                Reset defaults
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Footer hint */}
       <div className="px-4 py-2 border-t border-border/50 bg-card/20 shrink-0">

@@ -23,10 +23,19 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from smartagent.server.api import router
-from smartagent.server.api_system import router as system_router
-from smartagent.server.voice_manager import voice_manager
-from smartagent.server.websocket import connection_manager
+from smartagent.server.api              import router
+from smartagent.server.api_system       import router as system_router
+from smartagent.server.api_tools        import router as tools_router
+from smartagent.server.api_timeline     import router as timeline_router
+from smartagent.server.api_checkpoints  import router as checkpoints_router
+from smartagent.server.api_eval         import router as eval_router
+from smartagent.server.api_jobs         import router as jobs_router
+from smartagent.server.api_task_graph   import router as task_graph_router
+from smartagent.server.api_code         import router as code_router
+from smartagent.server.api_terminal     import router as terminal_router
+from smartagent.server.api_git_enhanced import router as git_enhanced_router
+from smartagent.server.voice_manager    import voice_manager
+from smartagent.server.websocket        import connection_manager
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +66,7 @@ app = FastAPI(
         "All intelligence stays in the existing Python subsystems; "
         "this API is a thin presentation bridge."
     ),
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -78,3 +87,12 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 app.include_router(router)
 app.include_router(system_router)
+app.include_router(tools_router)
+app.include_router(timeline_router)
+app.include_router(checkpoints_router)
+app.include_router(eval_router)
+app.include_router(jobs_router)
+app.include_router(task_graph_router)
+app.include_router(code_router)
+app.include_router(terminal_router)
+app.include_router(git_enhanced_router)

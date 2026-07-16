@@ -1,0 +1,643 @@
+Overall, this is a **very solid checkpoint**. The dashboard has evolved from a chat UI into something much closer to **Cursor + Claude Code + OpenHands + LangGraph Studio**. The missing pieces are no longer basic panels—they're **agent capabilities**.
+
+If this is MARK's current state, I **wouldn't spend another sprint polishing the UI**. I'd shift almost entirely to making the agent itself smarter.
+
+Here's the next prompt I'd give Claude/Code Assistant.
+
+---
+
+# VNext Prompt — MARK v2 Autonomous Agent
+
+The UI foundation is complete. Do **not** spend time on cosmetic improvements. The next milestone is making MARK behave like a professional autonomous software engineer.
+
+Implement the following features in parallel.
+
+---
+
+# 1. Real Planning Agent (Highest Priority)
+
+Replace the current linear planner with a task graph.
+
+Instead of
+
+```
+Research
+↓
+
+Plan
+↓
+
+Code
+↓
+
+Test
+↓
+
+Done
+```
+
+generate a dependency graph:
+
+```
+Authentication
+├── Login
+├── Logout
+├── JWT
+└── Middleware
+
+Dashboard
+├── API
+├── UI
+└── Tests
+
+Payments
+├── Stripe
+└── Webhooks
+```
+
+Each node should have:
+
+* id
+* title
+* description
+* dependencies
+* estimated complexity
+* status
+* assigned worker
+
+Display this live inside PipelineView.
+
+---
+
+# 2. Parallel Worker Scheduler
+
+Workers should no longer execute sequentially.
+
+Implement a scheduler.
+
+Example:
+
+```
+Research
+          \
+           \
+Planning ----->
+
+        /--------\
+Coding A Coding B Coding C
+
+        \--------/
+
+Testing
+
+Review
+```
+
+Independent tasks should execute simultaneously.
+
+The scheduler should automatically:
+
+* respect dependencies
+* reuse idle workers
+* retry failed nodes
+* cancel downstream nodes when required
+
+---
+
+# 3. Tool Calling Framework
+
+Introduce a real Tool Registry.
+
+```
+Tool
+
+id
+name
+description
+schema
+
+execute()
+```
+
+Initial tools:
+
+Filesystem
+
+Git
+
+Terminal
+
+Python
+
+Ripgrep
+
+Web Search
+
+HTTP Fetch
+
+Markdown Parser
+
+JSON Parser
+
+SQLite
+
+Future MCP tools should plug into the same registry.
+
+---
+
+# 4. Memory Engine
+
+Current memory only displays markdown.
+
+Convert it into searchable semantic memory.
+
+Architecture:
+
+```
+Conversation
+
+↓
+
+Embedding
+
+↓
+
+Vector Store
+
+↓
+
+Retrieval
+
+↓
+
+Planning
+```
+
+Store:
+
+project decisions
+
+architecture
+
+bugs
+
+TODOs
+
+coding preferences
+
+successful fixes
+
+previous conversations
+
+Support:
+
+```
+remember()
+
+forget()
+
+search()
+
+summarize()
+```
+
+---
+
+# 5. RAG over Repository
+
+Instead of dumping repository files into context:
+
+Create embeddings for
+
+Python
+
+TypeScript
+
+Markdown
+
+YAML
+
+JSON
+
+Requirements
+
+Documentation
+
+Allow workers to retrieve relevant code before coding.
+
+---
+
+# 6. Codebase Indexer
+
+Build an incremental repository index.
+
+Track:
+
+classes
+
+functions
+
+imports
+
+inheritance
+
+call graph
+
+symbols
+
+files
+
+dependencies
+
+Update automatically after edits.
+
+Expose:
+
+```
+GET /code/search
+
+GET /code/symbol
+
+GET /code/references
+
+GET /code/callgraph
+```
+
+---
+
+# 7. Multi-Agent Communication
+
+Workers should exchange structured messages.
+
+```
+Research
+
+↓
+
+Planning
+
+↓
+
+Coding
+
+↓
+
+Testing
+
+↓
+
+Reviewer
+```
+
+Each message includes:
+
+```
+sender
+
+receiver
+
+timestamp
+
+task
+
+payload
+
+confidence
+```
+
+Display messages live.
+
+---
+
+# 8. Self Reflection
+
+After every completed task:
+
+Generate
+
+```
+What succeeded
+
+What failed
+
+What should change
+
+Confidence
+
+Lessons learned
+```
+
+Store into memory automatically.
+
+---
+
+# 9. Conversation Branches
+
+Support branching conversations.
+
+```
+Main
+
+├── Refactor
+
+├── Bug Fix
+
+└── Feature X
+```
+
+Allow switching branches.
+
+---
+
+# 10. Checkpoints
+
+Every significant milestone automatically creates:
+
+Workspace snapshot
+
+Git diff
+
+Conversation state
+
+Pipeline state
+
+Memory state
+
+One-click restore.
+
+---
+
+# 11. Live Terminal
+
+Embed a real terminal.
+
+Features:
+
+multiple tabs
+
+stream output
+
+ANSI colors
+
+interrupt process
+
+copy output
+
+run commands
+
+---
+
+# 12. Better Git Integration
+
+Support
+
+interactive staging
+
+commit creation
+
+branch creation
+
+branch switching
+
+merge
+
+rebase
+
+stash
+
+conflict viewer
+
+PR summary generation
+
+---
+
+# 13. Token Budget Manager
+
+Display
+
+Context window
+
+Tokens used
+
+Estimated cost
+
+Retrieved documents
+
+Dropped context
+
+Compression ratio
+
+Warn before overflow.
+
+---
+
+# 14. Long Running Jobs
+
+Support background jobs.
+
+Examples:
+
+```
+Refactor repository
+
+↓
+
+Continue running
+
+↓
+
+Reconnect later
+
+↓
+
+Resume state
+```
+
+Persist job state.
+
+---
+
+# 15. Model Router
+
+Instead of one Ollama model:
+
+Allow routing.
+
+Example:
+
+```
+Planning → GPT-5
+
+Coding → Qwen2.5-Coder
+
+Review → Claude
+
+Embeddings → bge-large
+
+Summaries → Llama
+```
+
+Rules configurable.
+
+---
+
+# 16. Agent Timeline
+
+Build a replayable timeline.
+
+```
+Prompt
+
+↓
+
+Planning
+
+↓
+
+Tool Call
+
+↓
+
+Filesystem
+
+↓
+
+Git
+
+↓
+
+Edit
+
+↓
+
+Tests
+
+↓
+
+Review
+```
+
+Click any event to inspect.
+
+---
+
+# 17. Evaluation Framework
+
+Automatically score every run.
+
+Metrics:
+
+planning quality
+
+tool usage
+
+hallucination risk
+
+code quality
+
+tests passed
+
+execution time
+
+context efficiency
+
+Display trends over time.
+
+---
+
+# 18. Plugin Architecture
+
+Support installing tools dynamically.
+
+```
+plugins/
+
+docker/
+
+mcp/
+
+python/
+
+node/
+```
+
+Each plugin registers:
+
+```
+name
+
+version
+
+tools
+
+permissions
+
+UI panel (optional)
+```
+
+---
+
+# 19. Security Layer
+
+Before every tool call:
+
+Validate permissions.
+
+Filesystem sandbox
+
+Command whitelist
+
+Workspace boundaries
+
+Safe delete
+
+Safe Git
+
+Audit log
+
+---
+
+# 20. Performance Dashboard
+
+Track:
+
+worker utilization
+
+queue length
+
+tool latency
+
+LLM latency
+
+embedding latency
+
+retrieval latency
+
+memory usage
+
+CPU
+
+GPU
+
+token throughput
+
+Render live charts.
+
+---
+
+## Final Goal
+
+Transform MARK from a dashboard into a **fully autonomous, production-grade AI software engineering platform** with:
+
+* hierarchical planning
+* parallel execution
+* semantic memory
+* repository-aware RAG
+* dynamic tool calling
+* model routing
+* resumable jobs
+* replayable timelines
+* plugin architecture
+* comprehensive observability
+
+**Success criterion:** MARK should be capable of taking a high-level software engineering goal, decomposing it into dependent tasks, execute those tasks in parallel using appropriate tools and models, recover from failures, learn from completed work, and present a transparent, replayable execution history.

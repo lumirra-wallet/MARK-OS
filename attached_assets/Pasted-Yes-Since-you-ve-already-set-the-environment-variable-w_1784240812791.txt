@@ -1,0 +1,334 @@
+Yes. Since you've already set the environment variable with your GitHub Models token, I'd have Replit Agent build the provider layer first instead of hardcoding Ollama. That way you can develop and test everything in the cloud, then switch to local Ollama with a single dropdown.
+
+Here's the prompt I'd give Replit Agent:
+
+---
+
+# Implement GitHub Models as the primary LLM provider (keep Ollama as a secondary provider)
+
+We now have a GitHub Models personal access token stored as:
+
+```
+GITHUB_TOKEN
+```
+
+Do NOT ask me for any additional configuration.
+
+## Goal
+
+Refactor MARK so the AI layer supports multiple providers.
+
+Provider interface:
+
+```
+LLMProvider
+    chat()
+    stream_chat()
+    embeddings()
+    list_models()
+```
+
+Implement providers:
+
+* GitHub Models (default)
+* Ollama (secondary)
+
+The UI should be identical regardless of provider.
+
+---
+
+# Backend
+
+Create
+
+```
+smartagent/llm/
+```
+
+with
+
+```
+base.py
+github_provider.py
+ollama_provider.py
+factory.py
+```
+
+Factory chooses provider based on
+
+```
+ACTIVE_PROVIDER
+```
+
+Default
+
+```
+github
+```
+
+---
+
+## GitHub Provider
+
+Use OpenAI's official Python SDK pointed at GitHub Models.
+
+Base URL
+
+```
+https://models.github.ai/inference
+```
+
+Use
+
+```
+GITHUB_TOKEN
+```
+
+from environment.
+
+Support streaming.
+
+Support temperature.
+
+Support system prompts.
+
+Support JSON responses.
+
+Support tool calling if available.
+
+Implement
+
+```
+chat(messages,...)
+
+stream_chat(...)
+
+embeddings(text)
+
+list_models()
+```
+
+---
+
+## Model Management
+
+Backend endpoints
+
+```
+GET  /providers
+GET  /providers/current
+POST /providers/switch
+GET  /models
+POST /models/select
+```
+
+Persist selected provider/model.
+
+Default model
+
+```
+gpt-4.1-mini
+```
+
+Fallback
+
+```
+gpt-4o-mini
+```
+
+---
+
+# Frontend
+
+Update Models panel.
+
+Instead of only Ollama:
+
+Top dropdown
+
+```
+Provider
+
+GitHub Models
+Ollama
+```
+
+Below that
+
+```
+Available Models
+```
+
+Populate dynamically from backend.
+
+Selecting a model instantly switches backend.
+
+Show
+
+```
+✓ Active
+```
+
+badge.
+
+---
+
+# Chat
+
+Do not change UI.
+
+All chat requests should automatically go through provider factory.
+
+Streaming must continue working.
+
+Markdown rendering remains.
+
+Code blocks remain.
+
+---
+
+# Embeddings
+
+When provider == GitHub
+
+Use
+
+```
+text-embedding-3-small
+```
+
+When provider == Ollama
+
+Use configured Ollama embedding model.
+
+Retriever code should not care which provider is active.
+
+---
+
+# Future-proof architecture
+
+Every future feature
+
+Memory
+
+Agents
+
+Planning
+
+RAG
+
+Voice
+
+Tool calling
+
+Pipeline
+
+Research
+
+should ONLY call
+
+```
+provider.chat()
+
+provider.embeddings()
+```
+
+Never call OpenAI/Ollama directly again.
+
+---
+
+# Settings
+
+Create new Settings page.
+
+Allow changing
+
+* Provider
+* Active model
+* Temperature
+* Max Tokens
+* Streaming on/off
+
+Persist settings.
+
+---
+
+# Diagnostics
+
+Add
+
+```
+/health/llm
+```
+
+Return
+
+```
+provider
+model
+latency
+available
+token_valid
+streaming
+```
+
+---
+
+# Performance
+
+Cache model list.
+
+Reuse HTTP client.
+
+Support concurrent requests.
+
+Support streaming cancellation.
+
+Automatic retries.
+
+Graceful timeout handling.
+
+---
+
+# Error Handling
+
+If GitHub Models fails:
+
+Show a friendly banner.
+
+Allow retry.
+
+If provider unavailable:
+
+Automatically fall back to Ollama if installed.
+
+---
+
+# Testing
+
+Add unit tests for
+
+* provider factory
+* GitHub provider
+* model switching
+* embeddings
+* streaming
+* fallback behavior
+
+All existing tests must continue passing.
+
+---
+
+# Constraints
+
+* Do not remove any existing MARK functionality.
+* Keep the provider abstraction clean.
+* Preserve the current WebSocket architecture.
+* Preserve the existing React UI.
+* Ensure adding future providers (OpenAI API, Anthropic, Gemini, Azure, LM Studio, vLLM) requires only a new provider class.
+
+Deliver a fully working implementation without placeholders.
+
+---
+
+I also recommend one architectural improvement beyond this: don't build MARK as "an Ollama app" or "a GitHub Models app." Build it as a provider-agnostic AI operating system. Every AI feature—chat, agents, RAG, memory, voice, planning, coding, and evaluation—should go through the same provider interface. Then switching between GitHub Models during development and local Ollama later becomes a one-click change instead of a major refactor. That design will make future additions like OpenAI, Anthropic, Gemini, or local vLLM much easier.

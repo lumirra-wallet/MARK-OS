@@ -17,4 +17,4 @@
 - [Engineer file-write pipeline fix](engineer-file-write-fix.md) — 5-bug root cause, system prompt format, FileEditor CWD fix, test scoping; 2311 total tests.
 - [Progressive Execution Architecture](progressive-execution.md) — 3-tier routing (trivial→fast path, medium→lean, large→full); "system with" fires LARGE before MEDIUM; custom Planners need **kwargs; 2386 total tests.
 - [MARK Web Backend Phase 1](mark-web-backend.md) — subscribe_all uses == not is; path traversal needs resolve()+is_relative_to() not startswith(); module-level imports for patchability.
-- [MARK Web Dashboard Phase 2+](mark-web-dashboard.md) — React+Vite; ChatView primary; Pipeline/Git/Memory/Models panels; metrics TopNav; api_system.py adds git/memory/models/metrics/workspace endpoints; psutil+httpx required.
+- [MARK Web Dashboard Phase 2+](mark-web-dashboard.md) — All 20 spec features complete; 8 new backend api_*.py files; 12 new frontend panels; branches/token-budget/reflection in store; 2460 Python tests + 0 TS errors.

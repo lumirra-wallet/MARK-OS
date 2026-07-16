@@ -92,6 +92,13 @@ interface MarkState {
   messages: ChatMessage[];
   currentMarkMsgId: string | null;
 
+  // Feature 9 — Conversation Branches
+  branches:     Record<string, ChatMessage[]>;
+  activeBranch: string;
+
+  // Feature 13 — Token Budget
+  tokenBudget: { used: number; window: number };
+
   // Voice
   voice: VoiceState;
 
@@ -108,6 +115,11 @@ interface MarkState {
   closeFile:         (path: string) => void;
   setActiveFileTab:  (path: string | null) => void;
   setWorkspace:      (ws: string) => void;
+
+  // Branch actions (Feature 9)
+  createBranch:  (name: string) => void;
+  switchBranch:  (name: string) => void;
+  deleteBranch:  (name: string) => void;
 
   // Voice
   startVoice:           (mode: VoiceMode) => Promise<void>;
@@ -282,7 +294,41 @@ export const useMarkStore = create<MarkState>((set, get) => {
     logs:             [],
     messages:         [],
     currentMarkMsgId: null,
+    branches:         { main: [] },
+    activeBranch:     'main',
+    tokenBudget:      { used: 0, window: 8192 },
     voice:            { ...DEFAULT_VOICE },
+
+    // ── Branch actions (Feature 9) ────────────────────────────────────────────
+
+    createBranch: (name) => set(state => ({
+      branches: { ...state.branches, [name]: [...state.messages] },
+    })),
+
+    switchBranch: (name) => set(state => {
+      // Save current messages into current branch, then restore target branch
+      const currentBranch = state.activeBranch;
+      const updated = {
+        ...state.branches,
+        [currentBranch]: [...state.messages],
+      };
+      return {
+        branches:     updated,
+        activeBranch: name,
+        messages:     updated[name] ?? [],
+        currentMarkMsgId: null,
+      };
+    }),
+
+    deleteBranch: (name) => set(state => {
+      if (name === 'main') return {};
+      const branches = { ...state.branches };
+      delete branches[name];
+      if (state.activeBranch === name) {
+        return { branches, activeBranch: 'main', messages: branches['main'] ?? [], currentMarkMsgId: null };
+      }
+      return { branches };
+    }),
 
     // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -581,6 +627,21 @@ export const useMarkStore = create<MarkState>((set, get) => {
               case 'VoiceError':
                 set(state => ({ voice: { ...state.voice, state: 'error' } }));
                 addTimeline(`Voice error: ${payload.error}`);
+                break;
+
+              // ── Feature 13: Token Budget ───────────────────────────────────
+              case 'TokenBudgetUpdate':
+                set({ tokenBudget: { used: payload.used ?? 0, window: payload.window ?? 8192 } });
+                break;
+
+              // ── Feature 8: Self Reflection ─────────────────────────────────
+              case 'ReflectionComplete':
+                addTimeline(`Reflection: ${payload.lesson || 'completed'}`);
+                break;
+
+              // ── Feature 17: Evaluation ────────────────────────────────────
+              case 'EvaluationComplete':
+                addTimeline(`Evaluation complete · run ${payload.run_id}`);
                 break;
             }
           } catch (err) {

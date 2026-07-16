@@ -213,11 +213,30 @@ async def execute(req: ExecuteRequest) -> dict:
     _state.goal             = req.goal
     _state.workspace        = os.path.abspath(req.workspace)
     _state.start_time       = time.monotonic()
+    _state.cancel_requested = False
+    _state.workers          = []
 
     # Track recent workspaces
     try:
         from smartagent.server.api_system import record_workspace
         record_workspace(_state.workspace)
+    except Exception:
+        pass
+
+    # Register as a long-running job (Feature 14)
+    try:
+        from smartagent.server.api_jobs import register_job
+        from smartagent.server.api_timeline import new_run_id
+        _state._run_id = new_run_id()
+        register_job(req.goal, _state.workspace, _state._run_id)
+    except Exception:
+        _state._run_id = ""
+
+    # Generate task graph for goal (Feature 1)
+    try:
+        from smartagent.server.api_task_graph import _heuristic_plan, _task_graph as tg
+        import smartagent.server.api_task_graph as tg_mod
+        tg_mod._task_graph = _heuristic_plan(req.goal, getattr(_state, "_run_id", ""))
     except Exception:
         pass
     _state.cancel_requested = False
@@ -307,6 +326,81 @@ async def execute(req: ExecuteRequest) -> dict:
             _state._task   = None
             ticker_task.cancel()
             broadcaster.uninstall(event_bus)
+
+        # ── Post-run hooks ────────────────────────────────────────────────────
+        run_id   = getattr(_state, "_run_id", "")
+        elapsed  = time.monotonic() - _state.start_time
+
+        # Feature 14 — complete the long-running job
+        try:
+            from smartagent.server.api_jobs import complete_job
+            complete_job(run_id, success=ev_name == ServerEvents.RUN_COMPLETED,
+                         result={"summary": ev_payload.get("summary", "")[:200]})
+        except Exception:
+            pass
+
+        # Feature 13 — token budget estimate (chars/4 ≈ tokens)
+        try:
+            goal_tokens   = len(req.goal) // 4
+            budget_tokens = 8192
+            await connection_manager.broadcast({
+                "type":    "event",
+                "name":    ServerEvents.TOKEN_BUDGET_UPDATE,
+                "payload": {"used": goal_tokens, "window": budget_tokens,
+                            "ratio": round(goal_tokens / budget_tokens, 3)},
+                "timestamp": _now_iso(),
+            })
+        except Exception:
+            pass
+
+        # Feature 17 — auto-submit evaluation
+        try:
+            from smartagent.server.api_eval import score_run
+            files_c  = len(ev_payload.get("files_created", []))
+            files_m  = len(ev_payload.get("files_modified", []))
+            score_run(
+                run_id=run_id, goal=req.goal,
+                success=ev_name == ServerEvents.RUN_COMPLETED,
+                elapsed_s=elapsed,
+                files_created=files_c, files_modified=files_m,
+                tests_passed=0, tests_failed=0,
+                tool_calls=0, tool_successes=0,
+                workers_completed=len([w for w in _state.workers if w.get("status") == "success"]),
+                workers_failed=len([w for w in _state.workers if w.get("status") == "failed"]),
+            )
+            await connection_manager.broadcast({
+                "type":    "event",
+                "name":    ServerEvents.EVALUATION_COMPLETE,
+                "payload": {"run_id": run_id, "success": ev_name == ServerEvents.RUN_COMPLETED},
+                "timestamp": _now_iso(),
+            })
+        except Exception:
+            pass
+
+        # Feature 8 — self-reflection
+        try:
+            reflection = {
+                "succeeded": ev_name == ServerEvents.RUN_COMPLETED,
+                "goal":      req.goal[:200],
+                "elapsed_s": round(elapsed, 1),
+                "lesson":    "Run completed." if ev_name == ServerEvents.RUN_COMPLETED
+                             else "Run did not complete — check error payload.",
+            }
+            await connection_manager.broadcast({
+                "type":    "event",
+                "name":    ServerEvents.REFLECTION_COMPLETE,
+                "payload": reflection,
+                "timestamp": _now_iso(),
+            })
+        except Exception:
+            pass
+
+        # Record in timeline
+        try:
+            from smartagent.server.api_timeline import record_event
+            record_event(ev_name, ev_payload, run_id=run_id)
+        except Exception:
+            pass
 
         await connection_manager.broadcast({
             "type":      "event",

@@ -91,6 +91,39 @@ class ServerEvents:
     RUN_CANCELLED = "RunCancelled"
     RUN_FAILED    = "RunFailed"
 
+    # Task graph / multi-agent (Feature 1, 2, 7)
+    TASK_GRAPH_UPDATED   = "TaskGraphUpdated"
+    TASK_NODE_STARTED    = "TaskNodeStarted"
+    TASK_NODE_COMPLETED  = "TaskNodeCompleted"
+    TASK_NODE_FAILED     = "TaskNodeFailed"
+    AGENT_MESSAGE        = "AgentMessage"
+
+    # Checkpoints (Feature 10)
+    CHECKPOINT_CREATED   = "CheckpointCreated"
+
+    # Jobs (Feature 14)
+    JOB_STARTED          = "JobStarted"
+    JOB_PAUSED           = "JobPaused"
+    JOB_RESUMED          = "JobResumed"
+    JOB_COMPLETED        = "JobCompleted"
+
+    # Evaluation (Feature 17)
+    EVALUATION_COMPLETE  = "EvaluationComplete"
+
+    # Reflection (Feature 8)
+    REFLECTION_STARTED   = "ReflectionStarted"
+    REFLECTION_COMPLETE  = "ReflectionComplete"
+
+    # Token budget (Feature 13)
+    TOKEN_BUDGET_UPDATE  = "TokenBudgetUpdate"
+
+    # Tool calls (Feature 3)
+    TOOL_CALLED          = "ToolCalled"
+    TOOL_RESULT          = "ToolResult"
+
+    # Terminal (Feature 11)
+    TERMINAL_OUTPUT      = "TerminalOutput"
+
     # Voice pipeline
     VOICE_STARTED          = "VoiceStarted"
     VOICE_STOPPED          = "VoiceStopped"
