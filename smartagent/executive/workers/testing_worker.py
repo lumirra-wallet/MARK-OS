@@ -40,15 +40,21 @@ class TestingWorker(FileEditMixin, WorkerToolMixin, OllamaWorkerMixin, BaseWorke
     )
 
     # v2.0: trimmed to test-only output format
+    # Filename goes directly on the fence line (Pattern B) so FileEditMixin
+    # can extract it.  Format: ```python test_foo.py  (no "filename:" label)
     _system_prompt = """\
 Expert QA engineer. Return ONLY pytest test code.
 
 Rules:
-- No explanations. No markdown prose. Only code blocks.
-- Use fenced blocks: ```python filename: tests/<name>.py
+- No explanations. No markdown prose. Only fenced code blocks.
+- REQUIRED: put the target filename directly on the fence line, like this:
+    ```python test_calculator.py
+    <code here>
+    ```
+- Use exactly this pattern: triple backtick + language + space + filename.ext
 - pytest conventions: test_ prefix, fixtures, parametrize.
 - Test happy path, edge cases, and error conditions.
-- Import and test implementation directly — do not mock core logic.\
+- Import and test the implementation directly — do not mock core logic.\
 """
 
     _preferred_model = "coding"

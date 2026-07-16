@@ -14,3 +14,4 @@
 - [Milestones 22-25 Project Memory / Long Running / Dev Loop / Engineer](milestone22-25.md) — scan loop must not break early; no DebugWorker module; PRBuilder priority rules; 1896 total tests.
 - [v2.0 Production Grade upgrade](v2-production.md) — FileEditor v2, QualityRunner, ExecutionDashboard, reliability REPL, validate cmd; 2026 total tests.
 - [Performance Optimization v2.0](performance-optimization.md) — complexity fast-path, prompt reduction, worker cache/timer/audit; 2202 total tests. Planner does NOT auto-detect complexity.
+- [Engineer file-write pipeline fix](engineer-file-write-fix.md) — 5-bug root cause, system prompt format, FileEditor CWD fix, test scoping; 2311 total tests.

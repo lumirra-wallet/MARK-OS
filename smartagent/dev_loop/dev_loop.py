@@ -1,5 +1,5 @@
 """
-DevLoop — Milestone 24 + v2.0 upgrade.
+DevLoop — Milestone 24 + v2.0 upgrade + v2.0 file-write fix.
 
 Implements the full autonomous cycle:
     Receive Goal → Plan → Workers → Coding → Testing → Quality → Debugging
@@ -10,6 +10,15 @@ v2.0 adds:
   - ExecutionDashboard integration for live progress tracking.
   - More granular stop reasons and iteration metadata.
 
+v2.0 file-write fix:
+  - ``run()`` accepts ``project_dir`` — the directory where generated files live.
+  - Before planning, the Orchestrator's FileEditor is rooted at ``project_dir``.
+  - After planning, the file_editor is retrieved from the execution context so
+    ``_run_test_phase`` can scope pytest to only the generated test files.
+  - ``_run_test_phase`` and ``_run_debug_phase`` run ``subprocess`` with
+    ``cwd=project_dir`` so relative imports in generated code work correctly.
+  - The LoopResult carries ``files_created`` / ``files_modified`` / ``project_dir``.
+
 Usage::
 
     loop = DevLoop.with_agent(agent)
@@ -19,6 +28,7 @@ Usage::
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, Optional
 
@@ -118,6 +128,7 @@ class DevLoop:
         auto_commit: bool = False,
         commit_message: str = "",
         run_quality: bool = True,
+        project_dir: str | None = None,
     ) -> LoopResult:
         """
         Run the autonomous development loop for *goal*.
@@ -128,18 +139,28 @@ class DevLoop:
             auto_commit:  If True and loop succeeds, auto-commit via GitClient.
             commit_message: Commit message override (derived from goal if empty).
             run_quality:  Whether to run the quality phase (ruff/black/mypy).
+            project_dir:  Directory where generated files should be written and
+                          where tests should run.  Defaults to ``os.getcwd()``.
 
         Returns:
             :class:`LoopResult` — success=True when all tests pass.
         """
         t0 = time.monotonic()
-        result = LoopResult(goal=goal, success=False)
-        iterations: list[LoopIteration] = []
 
+        # Resolve the project directory once for the whole run
+        resolved_dir = os.path.abspath(project_dir) if project_dir else os.getcwd()
         logger.info(
-            "DevLoop: starting  goal=%r  max_iterations=%d",
-            goal[:80], self._max_iterations,
+            "DevLoop: starting  goal=%r  project_dir=%s  max_iterations=%d",
+            goal[:80], resolved_dir, self._max_iterations,
         )
+
+        # v2.0 fix — tell the orchestrator where to root the FileEditor so
+        # generated files land in the project directory (not in ./output/).
+        _set_orchestrator_project_dir(self._executive, resolved_dir)
+
+        result = LoopResult(goal=goal, success=False, project_dir=resolved_dir)
+        iterations: list[LoopIteration] = []
+        file_editor: Any = None  # retrieved after first planning phase
 
         # Dashboard
         if self._dashboard is not None:
@@ -164,13 +185,17 @@ class DevLoop:
                 result.stop_reason = "planning_failed"
                 break
 
+            # v2.0 fix — retrieve the file_editor from the execution context
+            # so we can scope pytest to only the generated test files.
+            file_editor = _get_file_editor(self._executive)
+
             self._dash_add_completed("Planning")
 
             # ──────────────────────────────────────────────────────────
             # PHASE 2: Testing
             # ──────────────────────────────────────────────────────────
             self._dash_set("current_worker", "TestRunner")
-            test_iter = self._run_test_phase(cycle, test_cmd)
+            test_iter = self._run_test_phase(cycle, test_cmd, file_editor, resolved_dir)
             iterations.append(test_iter)
             self._dash_set_tests(test_iter.tests_passed, test_iter.tests_failed)
 
@@ -187,7 +212,7 @@ class DevLoop:
                     if quality_iter.success:
                         self._dash_add_completed("Quality checks")
 
-                result.success    = True
+                result.success     = True
                 result.stop_reason = "success"
                 result.final_summary = (
                     f"All tests passed after {cycle} cycle(s). "
@@ -201,7 +226,9 @@ class DevLoop:
             # PHASE 3: Debugging (self-healing)
             # ──────────────────────────────────────────────────────────
             self._dash_set("current_worker", "DebugLoop")
-            debug_iter = self._run_debug_phase(cycle, test_cmd, test_iter.notes)
+            # Build the same scoped test command the debug loop should use
+            scoped_cmd = _build_scoped_test_cmd(test_cmd, file_editor, resolved_dir)
+            debug_iter = self._run_debug_phase(cycle, scoped_cmd, test_iter.notes, resolved_dir)
             iterations.append(debug_iter)
             if not debug_iter.success:
                 self._dash_increment_retries()
@@ -227,6 +254,21 @@ class DevLoop:
         result.iterations    = iterations
         result.total_elapsed = time.monotonic() - t0
 
+        # v2.0 fix — collect which files were created/modified during this run
+        if file_editor is not None:
+            try:
+                edits = file_editor.list_edits()
+                result.files_created = [
+                    e.path for e in edits
+                    if e.success and e.operation == "create"
+                ]
+                result.files_modified = [
+                    e.path for e in edits
+                    if e.success and e.operation in ("edit", "patch")
+                ]
+            except Exception:
+                pass
+
         if self._dashboard is not None:
             try:
                 self._dashboard.complete(result.success)
@@ -236,8 +278,10 @@ class DevLoop:
         self._persist(goal, result)
 
         logger.info(
-            "DevLoop: done  success=%s  cycles=%d  elapsed=%.1fs",
+            "DevLoop: done  success=%s  cycles=%d  elapsed=%.1fs  "
+            "files_created=%d  files_modified=%d",
             result.success, _cycle_count(iterations), result.total_elapsed,
+            len(result.files_created), len(result.files_modified),
         )
         return result
 
@@ -270,19 +314,40 @@ class DevLoop:
             elapsed=time.monotonic() - t0,
         )
 
-    def _run_test_phase(self, cycle: int, test_cmd: str) -> LoopIteration:
+    def _run_test_phase(
+        self,
+        cycle: int,
+        test_cmd: str,
+        file_editor: Any = None,
+        project_dir: str | None = None,
+    ) -> LoopIteration:
+        """
+        Run tests for the generated project.
+
+        v2.0 fix: when ``file_editor`` is available, pytest is scoped to
+        only the test files generated by this run (so SmartAgent's own 2000+
+        tests are never accidentally discovered).  The subprocess runs with
+        ``cwd=project_dir`` so relative imports in generated code work.
+        """
         import subprocess
         t0 = time.monotonic()
         passed = failed = 0
         notes  = ""
 
+        # Build the scoped command targeting only generated test files
+        scoped_cmd = _build_scoped_test_cmd(test_cmd, file_editor, project_dir)
+        cwd = project_dir or None
+
+        logger.info("DevLoop: running tests: %r (cwd=%s)", scoped_cmd, cwd)
+
         try:
             proc = subprocess.run(
-                test_cmd,
+                scoped_cmd,
                 shell=True,
                 capture_output=True,
                 text=True,
                 timeout=300,
+                cwd=cwd,
             )
             output  = proc.stdout + proc.stderr
             success = proc.returncode == 0
@@ -290,7 +355,7 @@ class DevLoop:
             notes   = _last_lines(output, 6)
         except subprocess.TimeoutExpired:
             success = False
-            notes   = f"Test command timed out after 300s: {test_cmd}"
+            notes   = f"Test command timed out after 300s: {scoped_cmd}"
         except Exception as exc:
             success = False
             notes   = str(exc)
@@ -335,6 +400,7 @@ class DevLoop:
         cycle: int,
         test_cmd: str,
         test_output: str,
+        project_dir: str | None = None,
     ) -> LoopIteration:
         t0 = time.monotonic()
         notes = ""
@@ -350,6 +416,10 @@ class DevLoop:
             )
 
         try:
+            # v2.0 fix — point the DebugLoop at the generated project dir
+            if project_dir is not None:
+                _patch_debug_loop_cwd(self._debug_loop, project_dir)
+
             debug_result = self._debug_loop.run(test_cmd)
             success      = debug_result.success
             attempts     = len(debug_result.attempts)
@@ -480,6 +550,98 @@ class DevLoop:
             self._memory.remember(entry, category="DevLoop")
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# v2.0 fix — helpers for project_dir threading
+# ---------------------------------------------------------------------------
+
+def _set_orchestrator_project_dir(executive: Any, project_dir: str) -> None:
+    """
+    Propagate *project_dir* to the Orchestrator so its FileEditor is rooted
+    at the right location before ``receive_goal()`` is called.
+    """
+    try:
+        if executive is None:
+            return
+        orch = getattr(executive, "_orchestrator", None)
+        if orch is not None and hasattr(orch, "set_project_dir"):
+            orch.set_project_dir(project_dir)
+            logger.debug("DevLoop: project_dir=%s set on orchestrator", project_dir)
+    except Exception as exc:
+        logger.debug("DevLoop._set_orchestrator_project_dir: %s", exc)
+
+
+def _get_file_editor(executive: Any) -> Any:
+    """Retrieve the FileEditor from the executive's current execution context."""
+    try:
+        ctx = getattr(executive, "current_context", None)
+        if ctx is not None:
+            return ctx.metadata.get("file_editor")
+    except Exception:
+        pass
+    return None
+
+
+def _build_scoped_test_cmd(
+    test_cmd: str,
+    file_editor: Any,
+    project_dir: str | None,
+) -> str:
+    """
+    Build a pytest command targeting only the generated test files.
+
+    When *file_editor* has recorded test files (``test_*.py`` / ``*_test.py``),
+    the default ``pytest`` command is replaced with ``pytest <test_files>``.
+    Custom test commands (e.g. ``pytest tests/`` or ``python -m pytest -x``)
+    are returned unchanged so the user retains full control.
+
+    If no test files have been generated yet, returns the original command so
+    the caller can handle the empty-output case.
+    """
+    if file_editor is None:
+        return test_cmd
+
+    # Only scope the bare default command; leave user-specified commands alone
+    bare_cmds = {"pytest", "python -m pytest"}
+    is_bare = test_cmd.strip() in bare_cmds
+
+    try:
+        edits = file_editor.list_edits()
+        test_files = [
+            e.path for e in edits
+            if e.success
+            and e.operation in ("create", "edit")
+            and _is_test_file(e.path)
+        ]
+    except Exception:
+        return test_cmd
+
+    if not test_files:
+        # No generated test files — return as-is; tests will fail/warn naturally
+        return test_cmd
+
+    if is_bare:
+        return "pytest " + " ".join(test_files)
+
+    return test_cmd
+
+
+def _patch_debug_loop_cwd(debug_loop: Any, project_dir: str) -> None:
+    """Redirect the DebugLoop's working directory to *project_dir*."""
+    try:
+        if hasattr(debug_loop, "_cwd"):
+            debug_loop._cwd = project_dir
+        elif hasattr(debug_loop, "cwd"):
+            debug_loop.cwd = project_dir
+    except Exception:
+        pass
+
+
+def _is_test_file(path: str) -> bool:
+    """Return True if *path* looks like a pytest test file."""
+    name = os.path.basename(path)
+    return name.startswith("test_") or name.endswith("_test.py")
 
 
 # ---------------------------------------------------------------------------

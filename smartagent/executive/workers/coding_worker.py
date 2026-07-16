@@ -43,12 +43,18 @@ class CodingWorker(FileEditMixin, WorkerToolMixin, OllamaWorkerMixin, BaseWorker
     )
 
     # v2.0: trimmed to code-only output — no prose, no markdown wrapper
+    # Filename goes directly on the fence line (Pattern B) so FileEditMixin
+    # can extract it.  Format: ```python calculator.py  (no "filename:" label)
     _system_prompt = """\
 Expert software engineer. Return ONLY runnable code.
 
 Rules:
-- No explanations. No markdown prose. Only code blocks.
-- Use fenced blocks: ```python filename: <path>
+- No explanations. No markdown prose. Only fenced code blocks.
+- REQUIRED: put the target filename directly on the fence line, like this:
+    ```python calculator.py
+    <code here>
+    ```
+- Use exactly this pattern: triple backtick + language + space + filename.ext
 - Idiomatic Python, PEP 8, type hints, docstrings.
 - Handle errors explicitly. No TODO comments — implement it.
 - Follow any prior design or research context exactly.\

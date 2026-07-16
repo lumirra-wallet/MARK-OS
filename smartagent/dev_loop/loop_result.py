@@ -43,21 +43,27 @@ class LoopResult:
     Aggregate result of the full autonomous development loop.
 
     Attributes:
-        goal:          Original goal string.
-        success:       True if the final state is all tests green.
-        iterations:    All cycle records in execution order.
-        final_summary: Prose summary from the last completed phase.
-        total_elapsed: Total wall-clock time in seconds.
-        stop_reason:   Why the loop stopped (``"success"``, ``"max_iterations"``,
-                       ``"error"``).
+        goal:           Original goal string.
+        success:        True if the final state is all tests green.
+        iterations:     All cycle records in execution order.
+        final_summary:  Prose summary from the last completed phase.
+        total_elapsed:  Total wall-clock time in seconds.
+        stop_reason:    Why the loop stopped (``"success"``,
+                        ``"max_iterations"``, ``"error"``).
+        files_created:  Paths of files created by workers in this run.
+        files_modified: Paths of files edited/patched by workers in this run.
+        project_dir:    Absolute path where generated files were written.
     """
 
-    goal:          str
-    success:       bool
-    iterations:    list[LoopIteration] = field(default_factory=list)
-    final_summary: str   = ""
-    total_elapsed: float = 0.0
-    stop_reason:   str   = "unknown"
+    goal:           str
+    success:        bool
+    iterations:     list[LoopIteration] = field(default_factory=list)
+    final_summary:  str   = ""
+    total_elapsed:  float = 0.0
+    stop_reason:    str   = "unknown"
+    files_created:  list[str] = field(default_factory=list)
+    files_modified: list[str] = field(default_factory=list)
+    project_dir:    str   = ""
 
     # ------------------------------------------------------------------
     # Display
@@ -74,6 +80,18 @@ class LoopResult:
             f"  Elapsed   : {self.total_elapsed:.1f}s",
             "",
         ]
+
+        # Files created / modified during this run
+        if self.files_created or self.files_modified:
+            lines.append("  Files:")
+            for f in self.files_created:
+                lines.append(f"    + {f}")
+            for f in self.files_modified:
+                lines.append(f"    ~ {f}")
+            if self.project_dir:
+                lines.append(f"    (in {self.project_dir})")
+            lines.append("")
+
         if self.iterations:
             lines.append("  Trace:")
             for it in self.iterations:

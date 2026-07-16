@@ -193,15 +193,29 @@ class Orchestrator:
     # Milestone 19 — FileEditor injection
     # ------------------------------------------------------------------
 
+    def set_project_dir(self, path: str) -> None:
+        """
+        Set the directory where generated project files should be written.
+
+        Called by :class:`~smartagent.dev_loop.dev_loop.DevLoop` before
+        ``execute_goal()`` so that ``_inject_file_editor`` uses the right
+        base directory.  Must be an absolute path.
+        """
+        self._project_dir: str = path
+        logger.debug("Orchestrator: project_dir set to %s", path)
+
     def _inject_file_editor(self, context: ExecutionContext) -> None:
         """
-        Milestone 19: create a :class:`~smartagent.workspace.file_editor.FileEditor`
-        scoped to the active workspace's ``output/`` directory and inject it
-        into ``context.metadata["file_editor"]``.
+        Milestone 19 / v2.0 fix: create a FileEditor scoped to the project
+        directory and inject it into ``context.metadata["file_editor"]``.
 
-        When no workspace is active, injects an editor rooted at a temporary
-        ``output/`` directory relative to the working directory so workers
-        can still write files.
+        Priority order for the base directory:
+          1. ``self._project_dir``  — set by DevLoop via :meth:`set_project_dir`
+          2. Active workspace ``output_path``  — when a workspace is open
+          3. Current working directory  — safe default (was ``output/`` before v2.0 fix)
+
+        The old ``output/`` sub-directory is no longer used as the default
+        because generated files would be invisible to ``find . -name "*.py"``.
 
         Best-effort: any failure is logged and never surfaces to callers.
         """
@@ -209,10 +223,13 @@ class Orchestrator:
             from smartagent.workspace.file_editor import FileEditor
             import os
 
-            if self._workspace_manager is not None and self._workspace_manager.active:
+            project_dir = getattr(self, "_project_dir", None)
+            if project_dir:
+                output_dir = project_dir
+            elif self._workspace_manager is not None and self._workspace_manager.active:
                 output_dir = self._workspace_manager.active.output_path
             else:
-                output_dir = os.path.join(os.getcwd(), "output")
+                output_dir = os.getcwd()  # v2.0 fix: was os.path.join(os.getcwd(), "output")
 
             editor = FileEditor(output_dir)
             context.metadata["file_editor"] = editor

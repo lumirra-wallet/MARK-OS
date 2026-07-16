@@ -28,6 +28,7 @@ Usage::
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -60,6 +61,9 @@ class SoftwareEngineerReport:
         total_elapsed:    Wall-clock seconds.
         success:          True when all phases passed.
         summary:          One-paragraph prose summary.
+        files_created:    Paths of files created in the project directory.
+        files_modified:   Paths of files modified in the project directory.
+        project_dir:      Absolute path where generated files were written.
     """
 
     goal:              str                          = ""
@@ -73,6 +77,9 @@ class SoftwareEngineerReport:
     total_elapsed:     float                        = 0.0
     success:           bool                         = False
     summary:           str                          = ""
+    files_created:     list                         = field(default_factory=list)
+    files_modified:    list                         = field(default_factory=list)
+    project_dir:       str                          = ""
 
     def as_display_lines(self) -> list[str]:
         icon  = "✓" if self.success else "~"
@@ -115,6 +122,17 @@ class SoftwareEngineerReport:
         # Git
         if self.committed:
             lines.append(f"  ✓ Committed  sha={self.commit_sha or '(see log)'}")
+            lines.append("")
+
+        # Files created / modified
+        if self.files_created or self.files_modified:
+            lines.append("  Files:")
+            for f in self.files_created:
+                lines.append(f"    + {f}")
+            for f in self.files_modified:
+                lines.append(f"    ~ {f}")
+            if self.project_dir:
+                lines.append(f"    (in {self.project_dir})")
             lines.append("")
 
         # Summary
@@ -246,6 +264,7 @@ class SoftwareEngineer:
         max_iterations: int = 5,
         run_quality: bool = True,
         scan_path: str = ".",
+        project_dir: str | None = None,
     ) -> SoftwareEngineerReport:
         """
         Full engineer pipeline: scan → analyze → clarify → plan → code → test
@@ -261,13 +280,17 @@ class SoftwareEngineer:
             max_iterations: Override max dev-loop iterations.
             run_quality:    Whether to run ruff/black/mypy after tests pass.
             scan_path:      Path to scan for workspace intelligence.
+            project_dir:    Directory where generated files should be written and
+                            where tests should run.  Defaults to the current
+                            working directory.
 
         Returns:
             :class:`SoftwareEngineerReport`
         """
         t0 = time.monotonic()
         use_interactive = self._interactive if interactive is None else interactive
-        report = SoftwareEngineerReport(goal=goal)
+        resolved_project_dir = os.path.abspath(project_dir) if project_dir else os.getcwd()
+        report = SoftwareEngineerReport(goal=goal, project_dir=resolved_project_dir)
 
         logger.info("SoftwareEngineer: starting  goal=%r", goal[:80])
 
@@ -311,6 +334,7 @@ class SoftwareEngineer:
                 test_cmd=test_cmd,
                 auto_commit=False,  # we handle commits ourselves
                 run_quality=run_quality,
+                project_dir=resolved_project_dir,
             )
         else:
             from smartagent.dev_loop.loop_result import LoopResult
@@ -321,8 +345,10 @@ class SoftwareEngineer:
                 final_summary="No DevLoop wired — running planning only.",
             )
 
-        report.loop_result = loop_result
-        report.success     = loop_result.success
+        report.loop_result    = loop_result
+        report.success        = loop_result.success
+        report.files_created  = getattr(loop_result, "files_created", [])
+        report.files_modified = getattr(loop_result, "files_modified", [])
 
         # Quality summary from loop iterations
         quality_iters = [
