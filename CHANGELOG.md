@@ -7,6 +7,57 @@ the architecture is still settling.
 
 ## [Unreleased]
 
+## Milestone 11 Phase 1 — Executive Framework
+
+### Overview
+Gives MARK an "executive brain" — a goal-driven orchestration layer that
+decomposes goals into task plans, manages a dependency-aware task graph,
+queues tasks for execution, and runs them through a synchronous scheduler.
+No AI is invoked in Phase 1.  All workers are stubs.
+
+### New package: `smartagent/executive/`
+
+| Module | Purpose |
+| --- | --- |
+| `task.py` | `Task` dataclass + `TaskStatus` / `TaskType` enums |
+| `task_graph.py` | Directed acyclic task graph with topological sort |
+| `task_queue.py` | FIFO queue for ready-to-execute tasks |
+| `execution_state.py` | `ExecutionState` enum for full-run lifecycle |
+| `execution_context.py` | Live state of one goal-execution run |
+| `planner.py` | Rule-based goal decomposition (5 templates, keyword routing) |
+| `worker_registry.py` | Registry mapping task types to worker classes |
+| `scheduler.py` | Synchronous dependency-aware task scheduler |
+| `orchestrator.py` | Wires Planner → TaskGraph → TaskQueue → Scheduler |
+| `executive_controller.py` | Top-level API: `plan()`, `receive_goal()`, `run()` |
+
+### Plan templates (rule-based, no AI)
+
+| Template | Trigger keywords | Tasks |
+| --- | --- | --- |
+| `api` | api, rest, backend, service, endpoint … | Research → Architecture → Implementation → Testing → Documentation |
+| `script` | script, cli, tool, utility, automation … | Research → Implementation → Testing |
+| `research` | research, analysis, study, investigate … | Research → Analysis → Report |
+| `algorithm` | algorithm, sort, data structure, optimize … | Research → Design → Implementation → Testing |
+| `database` | database, schema, sql, migration, orm … | Research → Design → Implementation → Testing → Documentation |
+| `default` | (everything else) | Research → Design → Implementation → Testing → Review |
+
+### New console commands
+
+| Command | Description |
+| --- | --- |
+| `plan <goal>` | Decompose a goal and display the task graph |
+| `tasks` | Show task list from the most recent plan |
+
+### `SmartAgent` change
+`agent.executive` — new `ExecutiveController` (planning) instance.  Separate
+from `agent.mind` (Mind OS executive controller).
+
+### Tests
+`tests/test_executive.py` — **142 new tests** covering every class and
+all code paths.  All pre-Phase-1 tests continue to pass.
+
+---
+
 ## v1.1 — Streaming Upgrade
 
 ### Overview

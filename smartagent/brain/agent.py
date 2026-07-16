@@ -22,6 +22,7 @@ from smartagent.config.settings import Settings
 from smartagent.knowledge.knowledge_manager import KnowledgeManager
 from smartagent.logs.logger import get_logger
 from smartagent.memory.memory_manager import MemoryManager
+from smartagent.executive.executive_controller import ExecutiveController as PlanningController
 from smartagent.mind.executive.executive_controller import ExecutiveController, MindProviders
 from smartagent.mind.state.state_machine import InternalState
 from smartagent.models.config.model_settings import ModelSettings
@@ -184,6 +185,11 @@ class SmartAgent:
             ),
             event_bus=self.events,
         )
+
+        # Milestone 11 — Executive Framework (planning & task orchestration).
+        # Distinct from `self.mind` (which is the Mind OS executive controller).
+        # `agent.executive` is the goal-decomposition and task-scheduling layer.
+        self.executive = PlanningController()
 
     def handle_message(self, message: str) -> str:
         """

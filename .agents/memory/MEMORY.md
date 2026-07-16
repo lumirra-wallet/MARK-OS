@@ -5,3 +5,4 @@
 - [Milestone 8 Console OS v1](milestone8-console-os.md) — command framework design, KnowledgeManager API quirks, logging race-condition fix, REPL test patterns.
 - [Milestone 9 Ollama Integration](milestone9-ollama.md) — OllamaProvider exclusion trick, health() direct-HTTP pattern, fallback_chat wiring, coding auto-routing, PromptBuilder extensions.
 - [Milestone 10 Streaming Upgrade](milestone10-streaming.md) — generate_stream/chat_stream, spinner, stats, prompt cache, warmup, lazy loading; tmp_agent fixture must set streaming_enabled=False for pre-M10 tests.
+- [Milestone 11 Phase 1 Executive Framework](milestone11-phase1-executive.md) — planning/task layer; agent.executive vs agent.mind naming; stub scheduler; rule-based Planner with 5 templates.

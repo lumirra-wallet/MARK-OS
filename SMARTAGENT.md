@@ -170,6 +170,19 @@ up. See `README.md` for the current package layout and status.
   observes and represents MARK's own state; it never drives Brain routing
   and changes no other subsystem's behavior. See `smartagent/mind/`,
   `ARCHITECTURE.md`, and `CHANGELOG.md v0.7`.
+- `executive` — **implemented (Milestone 11 Phase 1 — Executive Framework).**
+  `smartagent/executive/` gives MARK an "executive brain": a goal-driven
+  orchestration layer that decomposes goals into task plans, manages a
+  dependency-aware ``TaskGraph``, queues tasks via ``TaskQueue``, and
+  executes them through a synchronous ``Scheduler``.  The ``Planner``
+  uses rule-based keyword matching to select from five plan templates (api,
+  script, research, algorithm, database, default) — no AI is invoked.
+  The ``ExecutiveController`` (at ``agent.executive``, distinct from the
+  Mind OS controller at ``agent.mind``) exposes three clean operations:
+  ``plan(goal)``, ``receive_goal(goal)``, and ``run()``.  Console commands:
+  ``plan <goal>`` (display the task graph) and ``tasks`` (show task details).
+  Phase 2 will add real ``BaseWorker`` subclasses; Phase 4 will connect
+  workers to the Ollama model with specialist system prompts.
 - `models` streaming — **implemented (Streaming Upgrade v1.1).** The Ollama
   integration now streams tokens in real time. `OllamaProvider` gains
   `generate_stream()` and `chat_stream()` (using `stream: true` on

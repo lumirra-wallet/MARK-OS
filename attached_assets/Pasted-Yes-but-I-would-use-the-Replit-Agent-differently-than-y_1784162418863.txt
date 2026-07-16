@@ -1,0 +1,443 @@
+Yes—but I would use the Replit Agent differently than you have been.
+
+Up to Milestone 10, you were asking it to build huge milestones in one shot. That worked because most of the work was infrastructure. **Milestone 11 is different.** It's the beginning of MARK becoming autonomous, and the architecture matters much more than the number of files.
+
+I would split Milestone 11 into **five phases**. After each phase, run the tests and manually verify the behavior before moving on.
+
+---
+
+# Phase 1 — Executive Framework
+
+**Goal:** Give MARK an "executive brain."
+
+Create a new package:
+
+```text
+smartagent/executive/
+
+    __init__.py
+
+    executive_controller.py
+    planner.py
+    orchestrator.py
+
+    task.py
+    task_graph.py
+    task_queue.py
+
+    execution_context.py
+    execution_state.py
+
+    scheduler.py
+
+    worker_registry.py
+```
+
+Nothing should execute AI yet.
+
+The goal is only to build the framework.
+
+The ExecutiveController should become something like:
+
+```text
+receive_goal()
+
+↓
+
+create_plan()
+
+↓
+
+build_task_graph()
+
+↓
+
+submit_to_queue()
+
+↓
+
+scheduler executes
+
+↓
+
+return results
+```
+
+At the end of Phase 1 you should be able to type
+
+```text
+plan Build a calculator
+```
+
+and see
+
+```text
+Goal
+
+↓
+
+Task 1
+Research
+
+↓
+
+Task 2
+Design
+
+↓
+
+Task 3
+Implement
+
+↓
+
+Task 4
+Test
+
+↓
+
+Task 5
+Review
+```
+
+No AI is required yet.
+
+---
+
+# Phase 2 — Worker Agents
+
+Now create
+
+```text
+workers/
+
+    base_worker.py
+
+    research_worker.py
+
+    planning_worker.py
+
+    coding_worker.py
+
+    testing_worker.py
+
+    review_worker.py
+
+    documentation_worker.py
+
+    memory_worker.py
+
+    knowledge_worker.py
+```
+
+Each worker only needs
+
+```python
+execute(task, context)
+```
+
+Initially they can return
+
+```text
+Completed
+```
+
+Don't call Ollama yet.
+
+The important part is
+
+Worker Registry.
+
+```text
+ResearchWorker
+
+↓
+
+registered
+
+↓
+
+Planner knows it exists
+```
+
+---
+
+# Phase 3 — Scheduler
+
+This is where MARK starts acting like an operating system.
+
+The scheduler should know
+
+```text
+Pending
+
+Ready
+
+Running
+
+Blocked
+
+Completed
+
+Failed
+```
+
+Example
+
+```text
+Research
+
+↓
+
+completed
+
+↓
+
+Coding unlocked
+
+↓
+
+Testing unlocked
+
+↓
+
+Review unlocked
+```
+
+Dependencies should work automatically.
+
+---
+
+# Phase 4 — Ollama Integration
+
+Now connect workers to the model.
+
+Research Worker
+
+becomes
+
+```text
+System Prompt
+
+↓
+
+Research specialist
+
+↓
+
+User Goal
+
+↓
+
+Generate report
+```
+
+Coding Worker
+
+```text
+System Prompt
+
+↓
+
+Expert Python engineer
+
+↓
+
+Write code
+```
+
+Testing Worker
+
+```text
+System Prompt
+
+↓
+
+Software QA engineer
+```
+
+Same Ollama model.
+
+Different system prompts.
+
+This is how multi-agent systems usually start.
+
+---
+
+# Phase 5 — Executive Loop
+
+Finally
+
+```text
+User
+
+↓
+
+Executive
+
+↓
+
+Planner
+
+↓
+
+Workers
+
+↓
+
+Results
+
+↓
+
+Executive
+
+↓
+
+Merge
+
+↓
+
+Return response
+```
+
+Now MARK actually coordinates work.
+
+---
+
+# New Console Commands
+
+Add commands gradually:
+
+### Phase 1
+
+```text
+plan
+
+tasks
+```
+
+---
+
+### Phase 2
+
+```text
+workers
+
+worker info
+```
+
+---
+
+### Phase 3
+
+```text
+queue
+
+run
+
+cancel
+```
+
+---
+
+### Phase 4
+
+```text
+trace
+
+history
+```
+
+---
+
+# Testing
+
+Don't wait until the end.
+
+After every phase:
+
+```bash
+pytest
+```
+
+Everything should still pass.
+
+Then manually test.
+
+Example
+
+```text
+mark> plan Build a REST API
+```
+
+Should print
+
+```text
+1 Research
+
+2 Architecture
+
+3 Implementation
+
+4 Testing
+
+5 Documentation
+```
+
+---
+
+Then
+
+```text
+mark> workers
+```
+
+Should show
+
+```text
+Research Worker
+
+Planning Worker
+
+Coding Worker
+
+Testing Worker
+
+Review Worker
+```
+
+---
+
+Then
+
+```text
+mark> run
+```
+
+Should execute the queue.
+
+---
+
+# Should you use the Replit Agent?
+
+**Yes—but don't ask it to "build Milestone 11" in one prompt.**
+
+Instead, give it one architectural phase at a time.
+
+For example:
+
+> Implement only Phase 1 of Milestone 11. Create the `smartagent/executive` package with the ExecutiveController, Planner, Task, TaskQueue, TaskGraph, ExecutionContext, ExecutionState, Scheduler, WorkerRegistry, and Orchestrator. Do not integrate Ollama or create worker logic yet. Maintain existing architecture, update documentation, and ensure all existing tests continue to pass with zero regressions.
+
+When Phase 1 is complete and stable, move to Phase 2, then Phase 3, and so on.
+
+## One more suggestion
+
+I would also ask the Replit Agent to **stop after each phase and summarize**:
+
+* What files were created.
+* How they interact.
+* What console commands were added.
+* How many tests were added.
+* Whether the full test suite still passes.
+
+That makes it much easier to review the architecture before adding the next layer.
