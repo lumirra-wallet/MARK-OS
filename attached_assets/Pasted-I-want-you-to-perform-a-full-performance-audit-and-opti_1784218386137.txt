@@ -1,0 +1,213 @@
+I want you to perform a full performance audit and optimization of MARK's AI execution pipeline.
+
+DO NOT rewrite the architecture.
+
+DO NOT remove any features.
+
+DO NOT change public APIs unless absolutely necessary.
+
+Instead, profile the existing system and optimize it.
+
+=========================
+PHASE 1 — PERFORMANCE AUDIT
+=========================
+
+Instrument every AI worker and every Ollama request.
+
+For every worker execution record:
+
+- worker name
+- model used
+- prompt size (characters + estimated tokens)
+- response size
+- time waiting for first token
+- total generation time
+- tokens/sec (estimate)
+- total execution time
+
+Print a timing table after every engineer/CEO run.
+
+Example:
+
+Research
+Prompt: 620 tokens
+Output: 90 tokens
+Time to first token: 1.3s
+Generation: 3.8s
+
+Implementation
+Prompt: 1100 tokens
+Output: 320 tokens
+Time: 6.2s
+
+Testing
+Prompt: 480 tokens
+Output: 75 tokens
+Time: 2.1s
+
+=========================
+PHASE 2 — PROMPT AUDIT
+=========================
+
+Determine exactly what is being injected into every worker prompt.
+
+Measure contribution from:
+
+- system prompt
+- project memory
+- workspace scan
+- knowledge graph
+- previous task outputs
+- reflection history
+- execution history
+- conversation history
+- tool history
+
+Produce a breakdown like:
+
+System Prompt........400 tokens
+Workspace............650 tokens
+Memory...............120 tokens
+Knowledge............90 tokens
+Previous Results.....210 tokens
+
+Total...............1470 tokens
+
+Highlight anything unnecessary.
+
+=========================
+PHASE 3 — PROMPT OPTIMIZATION
+=========================
+
+Without changing behavior:
+
+Reduce prompt size aggressively.
+
+Research Worker:
+maximum 150 words.
+
+Planning Worker:
+maximum 150 words.
+
+Review Worker:
+maximum 200 words.
+
+Documentation Worker:
+maximum 250 words.
+
+Coding Worker:
+
+Return ONLY code.
+
+No explanations.
+
+No markdown.
+
+Testing Worker:
+
+Return ONLY tests.
+
+No explanations.
+
+Only inject the minimum required context.
+
+Do not send entire execution histories.
+
+Do not send the entire knowledge graph.
+
+Do not send all memories.
+
+Summarize when possible.
+
+=========================
+PHASE 4 — MODEL ROUTING
+=========================
+
+Audit model selection.
+
+Simple coding:
+
+- hello world
+- calculator
+- CRUD
+- bug fixes
+
+must always use the coding model.
+
+Large architectural planning may use the larger model.
+
+Never send trivial tasks to expensive models.
+
+=========================
+PHASE 5 — STREAMING
+=========================
+
+Verify streaming actually streams.
+
+If responses buffer until completion,
+find the bottleneck and fix it.
+
+Tokens should appear immediately after generation starts.
+
+=========================
+PHASE 6 — REQUIREMENT ANALYZER
+=========================
+
+Audit the analyzer.
+
+Example:
+
+"Build a calculator CLI"
+
+must NOT classify as frontend.
+
+Fix all obvious misclassifications.
+
+=========================
+PHASE 7 — BENCHMARKS
+=========================
+
+Create benchmark commands.
+
+Benchmark:
+
+- hello world
+- calculator
+- REST API
+- bug fix
+
+Measure:
+
+planning time
+
+coding time
+
+testing time
+
+total time
+
+=========================
+PHASE 8 — REPORT
+=========================
+
+At completion produce:
+
+1. every bottleneck discovered
+
+2. every optimization applied
+
+3. before/after timings
+
+4. files modified
+
+5. architectural justification
+
+=========================
+
+Success criteria:
+
+Creating hello.py should complete in under 10 seconds on a local Ollama 7B model.
+
+A calculator project should complete significantly faster than the current implementation.
+
+The optimization must preserve all existing functionality and all existing tests must continue to pass.
