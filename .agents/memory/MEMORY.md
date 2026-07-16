@@ -16,3 +16,4 @@
 - [Performance Optimization v2.0](performance-optimization.md) — complexity fast-path, prompt reduction, worker cache/timer/audit; 2202 total tests. Planner does NOT auto-detect complexity.
 - [Engineer file-write pipeline fix](engineer-file-write-fix.md) — 5-bug root cause, system prompt format, FileEditor CWD fix, test scoping; 2311 total tests.
 - [Progressive Execution Architecture](progressive-execution.md) — 3-tier routing (trivial→fast path, medium→lean, large→full); "system with" fires LARGE before MEDIUM; custom Planners need **kwargs; 2386 total tests.
+- [MARK Web Backend Phase 1](mark-web-backend.md) — subscribe_all uses == not is; path traversal needs resolve()+is_relative_to() not startswith(); module-level imports for patchability.

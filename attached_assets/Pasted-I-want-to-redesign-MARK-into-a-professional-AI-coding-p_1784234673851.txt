@@ -1,0 +1,86 @@
+I want to redesign MARK into a professional AI coding platform inspired by the architecture of Replit Agent, Cursor, Claude Code, OpenHands, and VS Code.
+
+Do NOT copy proprietary code or internal implementations.
+
+Instead, design and implement an original production-grade backend that achieves similar capabilities using open technologies and clean architecture.
+
+Requirements:
+
+- Python 3.12
+- FastAPI
+- asyncio
+- WebSockets for real-time streaming
+- Event-driven architecture
+- Modular service layer
+- Dependency injection
+- Plugin/tool system
+- Workspace manager
+- Permission manager
+- File system abstraction
+- Shell executor
+- Git service
+- Multi-agent orchestration
+- LLM provider abstraction (Ollama, OpenAI, Anthropic, etc.)
+- Streaming token support
+- Task queue
+- Background workers
+- Session management
+- Project indexing
+- Memory service
+- Vector search abstraction
+- Live execution graph
+- Real-time logs
+- Cancellation support
+- Progress events
+- Health monitoring
+- Metrics collection
+- Recovery from crashes
+- Automatic state persistence
+
+The backend should expose APIs for:
+
+- starting an engineering task
+- streaming execution
+- approving file changes
+- previewing diffs
+- applying edits
+- executing tests
+- running git commands
+- cancelling execution
+- querying worker status
+- querying project status
+
+Everything must communicate through an internal Event Bus.
+
+Every subsystem should publish events rather than directly calling the UI.
+
+Design the backend as if multiple frontends could connect simultaneously:
+
+- React Dashboard
+- CLI
+- VS Code Extension
+- Mobile App
+- REST API
+
+The backend must not depend on any specific frontend.
+
+The React dashboard will simply subscribe to WebSocket events.
+
+Design this as a scalable, production-quality architecture rather than a simple Python application.
+
+Create it incrementally in phases.
+
+Before writing code, produce:
+
+1. Complete architecture diagram
+2. Folder structure
+3. Service responsibilities
+4. Event flow
+5. API design
+6. WebSocket protocol
+7. Data models
+8. Execution lifecycle
+9. Security model
+10. Permission model
+
+Then implement each subsystem one at a time with tests after every phase.

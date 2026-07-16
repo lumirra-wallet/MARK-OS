@@ -1,0 +1,67 @@
+"""
+MARK FastAPI application.
+
+Creates the FastAPI app, wires up CORS, includes all routers, and
+sets up a startup/shutdown lifespan that logs the server URL.
+
+Start::
+
+    uvicorn smartagent.server.app:app --reload --port 8000
+
+Or via pnpm::
+
+    pnpm run mark:server
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from smartagent.server.api import router
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    port = os.environ.get("PORT", "8000")
+    logger.info("MARK server starting on port %s", port)
+    print(f"  [server] MARK API ready  →  http://localhost:{port}")
+    print(f"  [server] WebSocket stream →  ws://localhost:{port}/ws")
+    yield
+    logger.info("MARK server shutting down")
+
+
+app = FastAPI(
+    title="MARK AI OS — Web API",
+    description=(
+        "REST + WebSocket layer over the MARK backend.\n\n"
+        "All intelligence stays in the existing Python subsystems; "
+        "this API is a thin presentation bridge."
+    ),
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# ---------------------------------------------------------------------------
+# CORS — allow all origins in development so the React dashboard (running on
+# a different port) can connect without proxy config.
+# ---------------------------------------------------------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------------------------------------------------------------------
+# Routers
+# ---------------------------------------------------------------------------
+app.include_router(router)

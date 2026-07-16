@@ -104,10 +104,22 @@ class EventBus:
         # inspectable in tests and gives a natural audit trail of "what did
         # the Brain do" without adding a separate logging path.
         self._history: list[Event] = []
+        # Catch-all handlers: called for EVERY event regardless of name.
+        # Used by the WebSocket broadcaster so it can forward all events
+        # without needing to enumerate every possible event name.
+        self._catch_all: list[EventHandler] = []
 
     def subscribe(self, event_name: str, handler: EventHandler) -> None:
         """Register `handler` to be called whenever `event_name` is published."""
         self._subscribers.setdefault(event_name, []).append(handler)
+
+    def subscribe_all(self, handler: EventHandler) -> None:
+        """Register `handler` to be called for every published event (wildcard)."""
+        self._catch_all.append(handler)
+
+    def unsubscribe_all(self, handler: EventHandler) -> None:
+        """Remove a previously registered catch-all handler."""
+        self._catch_all = [h for h in self._catch_all if h != handler]
 
     def publish(self, event_name: str, **payload: Any) -> Event:
         """Publish `event_name` with `payload`, notify subscribers, and return the `Event`."""
@@ -115,6 +127,9 @@ class EventBus:
         self._history.append(event)
         logger.info("Event published: %s %s", event.name, event.payload)
         for handler in self._subscribers.get(event_name, []):
+            handler(event)
+        # Notify catch-all handlers (e.g. the WebSocket broadcaster).
+        for handler in self._catch_all:
             handler(event)
         return event
 
