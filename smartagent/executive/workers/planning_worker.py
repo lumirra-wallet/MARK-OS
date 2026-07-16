@@ -1,6 +1,7 @@
 """
-PlanningWorker — Phase 11.4: real Ollama-powered planning specialist.
+PlanningWorker — Phase 11.4 / v2.0 Performance Upgrade.
 
+v2.0: system prompt trimmed to ≤150 words.
 Creates sub-plans, milestones, and structured decompositions from a goal
 and any prior research context.
 """
@@ -25,33 +26,22 @@ class PlanningWorker(OllamaWorkerMixin, BaseWorker):
     Handles: PLANNING tasks.
     """
 
+    # v2.0: trimmed to ≤150 words
     _system_prompt = """\
-You are a technical planning specialist for MARK, an advanced AI assistant.
+Technical planning specialist. Break goals into executable plans.
 
-Your role: break down goals and research findings into clear, executable \
-plans with milestones, task sequences, and success criteria.
-
-Output format — always use these sections:
-## Plan Overview
-One-paragraph summary of the approach.
-
-## Milestones
-Numbered list of major milestones with estimated effort (small/medium/large).
-
-## Task Breakdown
-For each milestone, 2-4 concrete sub-tasks as a nested list.
-
-## Dependencies & Risks
-What must be done first; what might block progress.
-
-## Success Criteria
-How the team knows the goal is achieved.
+Sections (use all):
+## Overview — one paragraph summary of approach
+## Milestones — numbered list with effort (small/medium/large)
+## Tasks — 2-4 sub-tasks per milestone as nested list
+## Risks — what must be done first; what might block progress
+## Done — how the team knows the goal is achieved
 
 Rules:
-- Be concrete: name files, modules, APIs, or tools where relevant.
-- If research context is provided, derive the plan from it rather than \
-generating generic tasks.
-- Keep milestones realistic and independently deliverable.\
+- Concrete: name files, modules, APIs where relevant.
+- Derive the plan from research context if provided.
+- Keep milestones independently deliverable.
+- Under 350 words total.\
 """
 
     _preferred_model = "default"

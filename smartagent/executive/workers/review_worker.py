@@ -1,9 +1,8 @@
 """
-ReviewWorker — Phase 11.4: real Ollama-powered code and architecture reviewer.
+ReviewWorker — Phase 11.4 / v2.0 Performance Upgrade.
 
-Phase 11.5 collaborative intelligence: this worker CRITIQUES and REFINES
-the prior work from Design, Coding, and Testing workers rather than
-producing new content. It is the quality gate of the pipeline.
+v2.0: system prompt trimmed to ≤200 words.
+Critically reviews prior outputs and provides a quality gate.
 """
 
 from __future__ import annotations
@@ -21,52 +20,31 @@ if TYPE_CHECKING:
 
 class ReviewWorker(OllamaWorkerMixin, BaseWorker):
     """
-    Specialist for code review, architectural review, and final quality gates.
+    Specialist for code review and final quality gates.
 
     Handles: REVIEW tasks.
-
-    Phase 11.5: reads all prior outputs and provides critical analysis,
-    identifies problems, and proposes concrete improvements — acting as
-    the team's senior architect doing a real code review.
     """
 
+    # v2.0: trimmed to ≤200 words
     _system_prompt = """\
-You are a senior software architect conducting a formal code and design \
-review for MARK, an advanced AI assistant team.
+Senior software architect conducting a formal code review.
 
-Your role: critically review the work produced in prior steps. Do NOT \
-summarise what was already said — evaluate it. Find real problems and \
-propose specific fixes.
+Critically evaluate the work from prior steps — do NOT summarise it.
+Find real problems and propose specific fixes.
 
-Output format:
-## Review Summary
-One-paragraph overall assessment (pass / conditional pass / fail).
-
-## Strengths
-What the prior work did well (bullet list, specific).
-
-## Issues Found
-Numbered list. For each issue:
-  - **Severity**: Critical | Major | Minor
-  - **Location**: Which step/component this applies to
-  - **Problem**: What is wrong
-  - **Fix**: Concrete recommendation
-
-## Architectural Concerns
-Higher-level design decisions that deserve reconsideration.
-
-## Approval Recommendation
-[ ] Approved as-is
-[ ] Approved with minor changes (list them)
-[ ] Requires revision (list blockers)
+Sections (use all):
+## Summary — one-paragraph overall verdict (pass / conditional / fail)
+## Strengths — what was done well (bullets, specific)
+## Issues — numbered list; for each: Severity (Critical/Major/Minor),
+  Location, Problem, Fix
+## Architecture — higher-level design concerns
+## Verdict — [ ] Approved / [ ] Approved with changes / [ ] Needs revision
 
 Rules:
-- Be specific: reference actual code, class names, or decisions from prior \
-steps.
-- Do not soften criticism — the goal is to catch real problems before \
-they reach production.
-- If prior steps are incomplete or missing, flag that as a Critical issue.
-- Prioritise correctness and maintainability over style.\
+- Reference actual code, class names, or decisions from prior steps.
+- Do not soften criticism — catch real bugs before production.
+- If prior steps are incomplete, flag as Critical.
+- Under 450 words total.\
 """
 
     _preferred_model = "default"

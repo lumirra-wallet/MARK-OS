@@ -65,6 +65,8 @@ class ExecutionContext:
     ended_at: Optional[str] = None
     metadata: dict = field(default_factory=dict)
     plan_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    # v2.0 — task complexity classification (trivial/small/medium/large/enterprise)
+    complexity: str = "medium"
 
     # ------------------------------------------------------------------
     # Convenience accessors

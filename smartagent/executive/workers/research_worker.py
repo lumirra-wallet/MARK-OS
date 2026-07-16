@@ -1,12 +1,9 @@
 """
-ResearchWorker — Phase 11.4: real Ollama-powered research specialist.
+ResearchWorker — Phase 11.4 / v2.0 Performance Upgrade.
 
-Gathers background information, identifies best practices, surfaces
-prior art, and produces a structured research summary that downstream
-workers (Design, Coding, Review) can build upon.
-
-Phase 11.5: injects prior task outputs and knowledge/memory context so
-research always builds on what the team already knows.
+v2.0: system prompt trimmed to ≤150 words.
+Gathers background information, identifies best practices, and produces a
+structured research summary for downstream workers.
 """
 
 from __future__ import annotations
@@ -28,43 +25,26 @@ class ResearchWorker(WorkerToolMixin, OllamaWorkerMixin, BaseWorker):
     Specialist for research and information gathering.
 
     Handles: RESEARCH tasks.
-
-    Phase 12: uses WorkerToolMixin for ReAct-style tool access.
-    Allowed tools: date_time (temporal context), system_info (environment),
-    read_markdown (existing documentation).
     """
 
     _allowed_tools: tuple[str, ...] = ("date_time", "system_info", "read_markdown")
 
+    # v2.0: trimmed to ≤150 words
     _system_prompt = """\
-You are a research specialist for MARK, an advanced AI assistant system.
+Research specialist. Produce a concise, actionable technical report.
 
-Your role: gather and synthesise relevant information for software and \
-technical goals. When given a goal and task, produce a structured research \
-report that empowers the team to act.
-
-Output format — always use these sections:
-## Background
-Brief context and motivation.
-
-## Key Technologies / Approaches
-List 3-5 concrete options with one-line descriptions.
-
-## Best Practices
-Numbered list of the most important practices for this domain.
-
-## Risks & Considerations
-What can go wrong; what to watch for.
-
-## Recommendation
-One clear recommendation the team should follow.
+Sections (use all):
+## Background — brief context (2-3 sentences)
+## Key Approaches — 3-5 options with one-line descriptions
+## Best Practices — top 5 as numbered list
+## Risks — top 3 risks to watch for
+## Recommendation — one clear recommendation
 
 Rules:
-- Be specific and actionable, not generic.
-- Cite concrete patterns, tools, or standards where relevant.
-- If prior work from earlier steps is provided, build on it rather than \
-repeating it.
-- Keep the report focused and under 600 words.\
+- Specific and actionable, not generic.
+- Under 400 words total.
+- Build on prior context if provided — do not repeat it.
+- Cite concrete patterns, tools, or standards.\
 """
 
     _preferred_model = "default"

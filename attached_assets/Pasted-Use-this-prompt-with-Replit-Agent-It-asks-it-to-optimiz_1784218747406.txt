@@ -1,0 +1,325 @@
+Use this prompt with Replit Agent. It asks it to optimize MARK so it behaves more like a real coding agent instead of waiting on the LLM for every phase.
+
+---
+
+# Prompt for Replit Agent
+
+MARK is functional, but execution is too slow. The problem is that every worker (Research → Design → Coding → Testing → Review) makes separate Ollama calls, even for simple tasks.
+
+I want you to optimize the execution engine for speed without changing the architecture.
+
+## Goal
+
+Reduce execution time by **5–20×** while keeping all existing features and tests.
+
+Do NOT rewrite the architecture.
+
+Improve it.
+
+---
+
+## 1. Add Task Complexity Detection
+
+Before planning, classify every goal as:
+
+* trivial
+* small
+* medium
+* large
+* enterprise
+
+Examples:
+
+**Trivial**
+
+* create hello.py
+* write calculator
+* add function
+* rename variable
+
+**Small**
+
+* REST API
+* Flask CRUD
+* FastAPI auth
+
+**Medium**
+
+* Todo app
+* Blog
+* Chat app
+
+**Large**
+
+* SaaS
+* CRM
+* ERP
+
+Store complexity in ExecutionContext.
+
+---
+
+## 2. Skip unnecessary workers
+
+For trivial tasks:
+
+Research ❌
+
+Architecture ❌
+
+Review ❌
+
+Run only:
+
+Coding
+
+Testing
+
+Example:
+
+engineer Create hello.py
+
+Should become:
+
+Coding
+
+↓
+
+Testing
+
+Done
+
+Not five AI conversations.
+
+---
+
+## 3. Rule-based fast path
+
+Detect common requests without AI.
+
+Examples:
+
+* Create hello.py
+* Write calculator
+* Add README
+* Create requirements.txt
+* Create .gitignore
+* Create FastAPI app
+* Create Flask app
+
+Generate the plan instantly.
+
+No LLM required.
+
+---
+
+## 4. Merge workers
+
+Instead of
+
+Research
+
+↓
+
+Architecture
+
+↓
+
+Coding
+
+↓
+
+Testing
+
+↓
+
+Review
+
+merge into one prompt whenever possible.
+
+Example:
+
+"You are an expert software engineer.
+
+Research the problem internally.
+
+Design the solution.
+
+Write production code.
+
+Write tests.
+
+Review your own work.
+
+Return the final answer."
+
+One Ollama call instead of five.
+
+---
+
+## 5. Cache worker outputs
+
+Cache by
+
+goal
+
+complexity
+
+worker type
+
+model
+
+Reuse identical outputs.
+
+---
+
+## 6. Warm models
+
+When MARK starts:
+
+load default model
+
+generate one token
+
+keep model resident
+
+No cold starts.
+
+---
+
+## 7. Parallelize independent tasks
+
+If two tasks have no dependencies, execute simultaneously.
+
+Example:
+
+Documentation
+
+Testing
+
+can run together.
+
+Use ThreadPoolExecutor.
+
+Respect DAG dependencies.
+
+---
+
+## 8. Timeout slow workers
+
+Default timeout:
+
+90 seconds
+
+If exceeded:
+
+retry once
+
+then continue with fallback.
+
+Never hang forever.
+
+---
+
+## 9. Streaming everywhere
+
+All model calls must stream tokens immediately.
+
+No waiting for complete responses.
+
+Spinner until first token.
+
+---
+
+## 10. Lightweight prompts
+
+Reduce worker system prompts.
+
+Avoid repeating identity, memory, and long instructions.
+
+Each prompt should be concise and role-specific.
+
+---
+
+## 11. Smart model routing
+
+Use:
+
+* qwen2.5-coder for coding/testing
+* llama3.1 for planning/reasoning
+* cheap model for trivial tasks
+
+Automatically choose based on task type.
+
+---
+
+## 12. Performance metrics
+
+Add:
+
+performance
+
+command.
+
+Show:
+
+* average worker time
+* model latency
+* cache hit rate
+* prompt tokens
+* completion tokens
+* total execution time
+* slowest worker
+
+---
+
+## 13. Preserve compatibility
+
+Do NOT break:
+
+* all commands
+* CEO
+* Teams
+* Executive
+* Reflection
+* Dev Loop
+* Git
+* Workspace
+* Project Memory
+
+All tests must continue passing.
+
+---
+
+## Success Criteria
+
+After optimization:
+
+Example:
+
+engineer Create hello.py
+
+Should finish in **under 10 seconds** on local Ollama.
+
+Simple calculator:
+
+under **20 seconds**.
+
+Medium project:
+
+under **2 minutes**.
+
+Large project:
+
+significantly faster than current execution.
+
+At the end:
+
+1. Run the complete test suite.
+2. Report execution time improvements.
+3. Report benchmark results before and after optimization.
+4. Ensure all tests still pass.
+
+---
+
+This optimization pass should make MARK feel much closer to modern coding agents while preserving your existing architecture.

@@ -1,6 +1,7 @@
 """
-DocumentationWorker — Phase 11.4: real Ollama-powered technical writer.
+DocumentationWorker — Phase 11.4 / v2.0 Performance Upgrade.
 
+v2.0: system prompt trimmed to ≤250 words.
 Generates README files, API docs, inline comments, and user guides from
 the implementation and design context produced by prior workers.
 """
@@ -24,10 +25,6 @@ class DocumentationWorker(WorkerToolMixin, OllamaWorkerMixin, BaseWorker):
     Specialist for generating technical documentation.
 
     Handles: DOCUMENTATION tasks.
-
-    Phase 12: uses WorkerToolMixin for ReAct-style tool access.
-    Allowed tools: file_read (read source code), directory_list,
-    read_markdown (inspect existing docs), search_files.
     """
 
     _allowed_tools: tuple[str, ...] = (
@@ -37,46 +34,29 @@ class DocumentationWorker(WorkerToolMixin, OllamaWorkerMixin, BaseWorker):
         "search_files",
     )
 
+    # v2.0: trimmed to ≤250 words
     _system_prompt = """\
-You are a technical writer for MARK, an advanced AI assistant.
+Technical writer for a developer audience.
 
-Your role: generate clear, accurate, and well-structured documentation \
-for the software produced in prior steps. Write for the intended audience \
-(developers, unless stated otherwise).
+Generate clear, accurate documentation for the software from prior steps.
 
-Output format (choose what's relevant):
-## README
+Sections (use what's relevant):
+## README — title, one-line description, badges
+### Installation — step-by-step setup
+### Usage — most common use cases with code examples
+### API Reference — for each public function/class/endpoint:
+  signature, parameters (name|type|description), returns, example
+### Contributing — brief guide if open-source
 
-Project title, one-line description, badges (if applicable).
-
-### Installation
-Step-by-step setup instructions.
-
-### Usage
-Code examples showing the most common use cases.
-
-### API Reference
-For each public function/class/endpoint:
-  - Signature
-  - Parameters (name | type | description)
-  - Returns
-  - Example
-
-### Contributing
-Brief contribution guide if the project is open-source.
-
-## Inline Documentation
-
-If the task calls for docstrings or comments, provide the fully documented \
-version of the code from prior steps.
+## Inline Documentation — if the task requires docstrings or comments,
+provide the fully documented version of the code.
 
 Rules:
-- Base documentation on the actual implementation from prior steps — do \
-not invent features that were not implemented.
-- Use Markdown for prose documentation; use Python docstring format for \
-inline code documentation.
-- Write in plain, direct language — avoid marketing language.
-- Include at least one working code example.\
+- Base docs on the actual implementation — do not invent features.
+- Markdown for prose; Python docstring format for inline docs.
+- Plain, direct language — no marketing copy.
+- Include at least one working code example.
+- Under 600 words total.\
 """
 
     _preferred_model = "default"

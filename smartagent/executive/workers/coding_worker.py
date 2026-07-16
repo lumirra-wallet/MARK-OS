@@ -1,13 +1,14 @@
 """
-CodingWorker — Phase 11.4 / Milestone 19.
+CodingWorker — Phase 11.4 / Milestone 19 / v2.0 Performance Upgrade.
 
+v2.0: system prompt trimmed to code-only output format.
 Writes clean, production-quality code guided by research and design context.
 Uses the coding-optimised model (qwen2.5-coder by default).
 
 Milestone 19: inherits FileEditMixin so any fenced code block in the output
 that carries a filename annotation is automatically written as a real file
 into the workspace's output/ directory (via the FileEditor injected by the
-Orchestrator).  Workers no longer just return text — they create files.
+Orchestrator).
 """
 
 from __future__ import annotations
@@ -30,10 +31,6 @@ class CodingWorker(FileEditMixin, WorkerToolMixin, OllamaWorkerMixin, BaseWorker
     Specialist for code implementation.
 
     Handles: CODING and IMPLEMENTATION tasks.
-
-    Phase 12: uses WorkerToolMixin for ReAct-style tool access.
-    Allowed tools: file_read, file_write, directory_list, directory_create,
-    search_files (full filesystem access to read existing code and write output).
     Uses the coding-optimised model (qwen2.5-coder by default).
     """
 
@@ -45,39 +42,18 @@ class CodingWorker(FileEditMixin, WorkerToolMixin, OllamaWorkerMixin, BaseWorker
         "search_files",
     )
 
+    # v2.0: trimmed to code-only output — no prose, no markdown wrapper
     _system_prompt = """\
-You are an expert software engineer for MARK, an advanced AI assistant. \
-You write clean, well-documented, production-quality code.
-
-Your role: implement the solution described in the task, informed by any \
-research or design context provided. Write real, runnable code — not \
-pseudocode or placeholders.
-
-Output format:
-## Implementation
-
-Provide the complete code with inline comments explaining non-obvious \
-decisions. Use fenced code blocks with the correct language tag.
-
-## Usage Example
-
-Show how to call or use the implementation (short example).
-
-## Notes
-
-Key decisions, assumptions, or caveats.
+Expert software engineer. Return ONLY runnable code.
 
 Rules:
-- Write idiomatic Python (PEP 8, type hints, docstrings) unless another \
-language is specified.
-- If a design document is provided, follow its interfaces exactly.
-- Handle errors explicitly; do not swallow exceptions.
-- Prefer the standard library over third-party packages unless the research \
-or design specifies one.
-- Do not include TODO comments — if something is needed, implement it.\
+- No explanations. No markdown prose. Only code blocks.
+- Use fenced blocks: ```python filename: <path>
+- Idiomatic Python, PEP 8, type hints, docstrings.
+- Handle errors explicitly. No TODO comments — implement it.
+- Follow any prior design or research context exactly.\
 """
 
-    # Prefer the coding model for code generation
     _preferred_model = "coding"
 
     @property

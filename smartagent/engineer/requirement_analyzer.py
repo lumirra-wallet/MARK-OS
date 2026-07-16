@@ -1,5 +1,17 @@
 """
-RequirementAnalyzer — Milestone 25: Full Software Engineer.
+RequirementAnalyzer — Milestone 25 / v2.0 Performance Upgrade.
+
+v2.0 fixes:
+  - "calculator CLI", "cli", "command-line", "script", "utility" → backend
+    (were previously missing from backend keywords, causing them to fall
+    through to the wrong domain or get no domain at all)
+  - Removed "interface" and "web app" from frontend keywords — too ambiguous
+    (a CLI has an "interface"; a "web app" built on Flask is backend-first)
+  - Removed "ui" from frontend — a "CLI UI" should not classify as frontend
+  - Added "screen" / "button" only via explicit frontend patterns to avoid
+    false positives on terminal UI libraries (curses, rich)
+  - Added "cli", "command line", "utility", "script", "function" explicitly
+    to backend so they always win over the default path
 
 Analyzes a natural-language goal and extracts:
   - Complexity estimate (small / medium / large / xlarge)
@@ -85,12 +97,20 @@ class RequirementReport:
 
 _DOMAIN_KEYWORDS: dict[str, list[str]] = {
     "backend": [
+        # Original
         "api", "rest", "graphql", "server", "backend", "endpoint", "service",
         "fastapi", "django", "flask", "express", "rails", "spring",
+        # v2.0 additions — CLI / script / utility goals must route here
+        "cli", "command line", "command-line", "script", "utility", "tool",
+        "calculator", "function", "automation", "bot", "crawler", "scraper",
+        "library", "module", "package", "class", "algorithm", "parser",
     ],
     "frontend": [
-        "frontend", "ui", "interface", "web app", "dashboard", "react",
-        "vue", "angular", "svelte", "next.js", "tailwind", "html", "css",
+        # v2.0: removed "ui", "interface", "web app" — too ambiguous
+        # Only keep unambiguously visual/browser keywords
+        "frontend", "react", "vue", "angular", "svelte", "next.js",
+        "tailwind", "html", "css", "dashboard", "web page", "webpage",
+        "browser", "component", "stylesheet", "responsive",
     ],
     "mobile": [
         "mobile", "ios", "android", "react native", "flutter", "expo",
@@ -164,6 +184,29 @@ _COMPLEXITY_RULES: list[tuple[int, str]] = [
 
 _DEFAULT_TEAMS: list[str] = ["research", "engineering", "qa", "documentation"]
 
+# v2.0: goals containing these patterns should NEVER add "frontend" even if
+# another keyword overlaps (e.g. "web app" in a Flask context)
+_BACKEND_ONLY_PATTERNS: list[re.Pattern] = [
+    re.compile(p, re.I) for p in [
+        r"\bcli\b",
+        r"\bcommand[\s-]line\b",
+        r"\bcalculator\b",
+        r"\bscript\b",
+        r"\butility\b",
+        r"\bfunction\b",
+        r"\balgorithm\b",
+        r"\bparser\b",
+        r"\bscraper\b",
+        r"\bcrawler\b",
+        r"\bbot\b",
+        r"\blibrary\b",
+        r"\bmodule\b",
+        r"\bpackage\b",
+        r"\bhello[\s._-]?world\b",
+        r"\bhello\.py\b",
+    ]
+]
+
 
 # ---------------------------------------------------------------------------
 # Analyzer
@@ -174,8 +217,7 @@ class RequirementAnalyzer:
     Analyzes a natural-language development goal and returns a
     :class:`RequirementReport`.
 
-    Uses keyword matching by default.  When a ``model_manager`` is provided
-    and Ollama is available, uses LLM enrichment (optional, graceful fallback).
+    v2.0: fixed domain classification for CLI/script/utility goals.
     """
 
     def __init__(self, model_manager: Any | None = None) -> None:
@@ -211,9 +253,16 @@ class RequirementAnalyzer:
 
     def _detect_domains(self, low: str) -> list[str]:
         found = []
+
+        # v2.0: check backend-only patterns first; if matched, suppress frontend
+        is_backend_only = any(p.search(low) for p in _BACKEND_ONLY_PATTERNS)
+
         for domain, keywords in _DOMAIN_KEYWORDS.items():
+            if domain == "frontend" and is_backend_only:
+                continue  # Never classify CLI/script goals as frontend
             if any(kw in low for kw in keywords):
                 found.append(domain)
+
         # Always include backend as default if nothing is found
         if not found:
             found = ["backend"]

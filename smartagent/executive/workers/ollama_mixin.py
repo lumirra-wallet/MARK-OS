@@ -1,28 +1,26 @@
 """
-OllamaWorkerMixin — Phase 11.4 / 11.5 AI execution layer for all workers.
+OllamaWorkerMixin — Phase 11.4 / 11.5 / v2.0 Performance Upgrade.
 
 Provides Ollama-powered execution with:
-  - Specialist system prompts per worker
+  - Specialist system prompts per worker (trimmed to word caps — v2.0)
   - Prior-work context injection (Phase 11.5 collaborative intelligence)
   - Knowledge and memory context enrichment
   - Confidence scoring
   - Graceful fallback to stub when Ollama is unavailable
+  - Per-worker timing (v2.0 — Phase 1: Performance Audit)
+  - Prompt-section auditing (v2.0 — Phase 2: Prompt Audit)
+  - Output caching (v2.0 — cache by goal+worker+model)
+  - Complexity-aware context caps (v2.0 — Phase 3: Prompt Optimization)
 
-Usage::
+Context caps (v2.0 — reduced from 3000/800):
+  _MAX_PRIOR_CHARS    = 500   (was 3000) per prior result
+  _MAX_CONTEXT_SNIPPET = 300  (was 800)  per knowledge/memory snippet
 
-    class MyWorker(OllamaWorkerMixin, BaseWorker):
-        _system_prompt = "You are a specialist in ..."
-        _preferred_model = "default"   # or "coding"
-
-        def execute(self, task, context):
-            return self._execute_with_ollama(task, context)
-
-Services are accessed via ``context.metadata`` keys injected by the
-Orchestrator (Phase 11.4):
-  - ``context.metadata["model_manager"]``   — ModelManager instance
-  - ``context.metadata["memory_manager"]``  — MemoryManager instance
-  - ``context.metadata["knowledge_manager"]`` — KnowledgeManager instance
-  - ``context.metadata["settings"]``        — Settings instance
+Services via ``context.metadata``:
+  "model_manager"    — ModelManager
+  "memory_manager"   — MemoryManager
+  "knowledge_manager"— KnowledgeManager
+  "settings"         — Settings
 
 If ``model_manager`` is absent the mixin returns ``_stub_result()``,
 so all existing tests continue to pass unchanged.
@@ -30,6 +28,7 @@ so all existing tests continue to pass unchanged.
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 from smartagent.logs.logger import get_logger
@@ -41,15 +40,20 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Maximum chars from a single prior result included in the context block.
-_MAX_PRIOR_CHARS = 3000
-# Maximum chars of knowledge/memory snippets appended to the prompt.
-_MAX_CONTEXT_SNIPPET = 800
+# v2.0 Performance Optimization — reduced from 3000 / 800
+_MAX_PRIOR_CHARS = 500
+_MAX_CONTEXT_SNIPPET = 300
 
 
 class OllamaWorkerMixin:
     """
     Mixin that upgrades any ``BaseWorker`` subclass to Phase 11.4 (Ollama).
+
+    v2.0 additions:
+      - Per-worker timing stored in ``context.metadata["worker_timings"]``
+      - Prompt-section audit stored in ``context.metadata["prompt_audits"]``
+      - Output cache (global singleton) — cache by goal+task+worker+model
+      - Complexity-aware prior-result cap (``TaskComplexity.max_prior_chars``)
 
     Subclasses set class-level attributes to customise behaviour:
 
@@ -59,9 +63,6 @@ class OllamaWorkerMixin:
     ``_preferred_model`` — ``"default"`` (general model) or ``"coding"``
         (coding-optimised model such as qwen2.5-coder).  The actual model
         id is resolved from ``Settings`` at runtime.
-
-    ``_worker_label`` — label used in stub results, e.g. ``"[Research]"``.
-        Defaults to the worker ``name`` property.
     """
 
     _system_prompt: str = "You are a helpful AI assistant."
@@ -73,7 +74,6 @@ class OllamaWorkerMixin:
 
     @property
     def phase(self) -> str:  # type: ignore[override]
-        """Phase 11.4 workers are real Ollama workers."""
         return "ollama"
 
     # ------------------------------------------------------------------
@@ -81,7 +81,6 @@ class OllamaWorkerMixin:
     # ------------------------------------------------------------------
 
     def _get_model_manager(self, context: "ExecutionContext"):
-        """Return the ModelManager from the context, or None."""
         return context.metadata.get("model_manager")
 
     def _get_memory_manager(self, context: "ExecutionContext"):
@@ -98,12 +97,6 @@ class OllamaWorkerMixin:
     # ------------------------------------------------------------------
 
     def _resolve_model_id(self, context: "ExecutionContext") -> str | None:
-        """
-        Resolve the target Ollama model id from Settings.
-
-        Returns ``None`` if settings are unavailable (caller falls back to
-        the ModelManager's currently active model).
-        """
         settings = self._get_settings(context)
         if settings is None:
             return None
@@ -115,49 +108,50 @@ class OllamaWorkerMixin:
     # Context assembly (Phase 11.5 — collaborative intelligence)
     # ------------------------------------------------------------------
 
-    def _format_prior_results(self, task: "Task", context: "ExecutionContext") -> str:
-        """
-        Build a markdown block of all prior task outputs that *task* depends on.
+    def _effective_prior_cap(self, context: "ExecutionContext") -> int:
+        """Return the max-chars cap for prior results, scaled by complexity."""
+        try:
+            from smartagent.performance.complexity import TaskComplexity
+            complexity_str = context.metadata.get("complexity", "medium")
+            try:
+                tc = TaskComplexity(complexity_str)
+                return tc.max_prior_chars
+            except ValueError:
+                pass
+        except ImportError:
+            pass
+        return _MAX_PRIOR_CHARS
 
-        This is the core of Phase 11.5 collaborative intelligence: every
-        worker starts from where the previous worker left off rather than
-        working in isolation.
-        """
-        # _prior_results is defined on BaseWorker
+    def _format_prior_results(self, task: "Task", context: "ExecutionContext") -> str:
         prior = self._prior_results(task, context)  # type: ignore[attr-defined]
         if not prior:
             return ""
+        cap = self._effective_prior_cap(context)
         parts: list[str] = ["---\n## Context from prior steps\n"]
         for i, result_text in enumerate(prior, 1):
             snippet = (
-                result_text[:_MAX_PRIOR_CHARS] + "\n…[truncated]"
-                if len(result_text) > _MAX_PRIOR_CHARS
+                result_text[:cap] + "\n…[truncated]"
+                if len(result_text) > cap
                 else result_text
             )
             parts.append(f"### Step {i}\n{snippet}\n")
         return "\n".join(parts)
 
     def _fetch_knowledge_context(self, context: "ExecutionContext") -> str:
-        """Query the KnowledgeManager for concepts relevant to the goal."""
         km = self._get_knowledge_manager(context)
         if km is None:
             return ""
         try:
-            # KnowledgeManager exposes a query engine; try keyword search
             results = km.search(context.goal, max_results=3)
             if not results:
                 return ""
-            snippets: list[str] = []
-            for r in results[:3]:
-                text = str(r)[:_MAX_CONTEXT_SNIPPET]
-                snippets.append(text)
+            snippets = [str(r)[:_MAX_CONTEXT_SNIPPET] for r in results[:3]]
             return "## Relevant Knowledge\n" + "\n\n".join(snippets)
         except Exception as exc:
             logger.debug("OllamaWorkerMixin: knowledge context unavailable: %s", exc)
             return ""
 
     def _fetch_memory_context(self, context: "ExecutionContext") -> str:
-        """Search MemoryManager for past experiences relevant to the goal."""
         mm = self._get_memory_manager(context)
         if mm is None:
             return ""
@@ -165,10 +159,7 @@ class OllamaWorkerMixin:
             memories = mm.search(context.goal, limit=3)
             if not memories:
                 return ""
-            snippets: list[str] = []
-            for m in memories[:3]:
-                text = str(m)[:_MAX_CONTEXT_SNIPPET]
-                snippets.append(text)
+            snippets = [str(m)[:_MAX_CONTEXT_SNIPPET] for m in memories[:3]]
             return "## Relevant Past Experience\n" + "\n\n".join(snippets)
         except Exception as exc:
             logger.debug("OllamaWorkerMixin: memory context unavailable: %s", exc)
@@ -182,31 +173,64 @@ class OllamaWorkerMixin:
         """
         Assemble the user-turn message list for ``chat_stream``.
 
-        Injects:
-          1. Prior task outputs (Phase 11.5 collaborative context).
-          2. The goal and current task description.
-          3. Knowledge and memory context if available.
+        v2.0: records a PromptAudit in context.metadata["prompt_audits"].
         """
-        sections: list[str] = []
+        prior_block   = self._format_prior_results(task, context)
+        goal_text     = f"## Goal\n{context.goal}"
+        task_text     = f"## Current Task\n**{task.title}**\n{task.description or task.title}"
+        knowledge_ctx = self._fetch_knowledge_context(context)
+        memory_ctx    = self._fetch_memory_context(context)
 
-        prior_block = self._format_prior_results(task, context)
+        sections: list[str] = []
         if prior_block:
             sections.append(prior_block)
-
-        sections.append(f"## Goal\n{context.goal}")
-        sections.append(
-            f"## Current Task\n**{task.title}**\n{task.description or task.title}"
-        )
-
-        knowledge_ctx = self._fetch_knowledge_context(context)
+        sections.append(goal_text)
+        sections.append(task_text)
         if knowledge_ctx:
             sections.append(knowledge_ctx)
-
-        memory_ctx = self._fetch_memory_context(context)
         if memory_ctx:
             sections.append(memory_ctx)
 
+        # v2.0 — Prompt audit (Phase 2)
+        self._record_prompt_audit(
+            context=context,
+            task=task,
+            prior_block=prior_block,
+            goal_text=goal_text,
+            task_text=task_text,
+            knowledge_ctx=knowledge_ctx,
+            memory_ctx=memory_ctx,
+        )
+
         return [{"role": "user", "content": "\n\n".join(sections)}]
+
+    def _record_prompt_audit(
+        self,
+        context: "ExecutionContext",
+        task: "Task",
+        prior_block: str,
+        goal_text: str,
+        task_text: str,
+        knowledge_ctx: str,
+        memory_ctx: str,
+    ) -> None:
+        """Store a PromptAudit entry in context.metadata — best-effort."""
+        try:
+            from smartagent.performance.prompt_auditor import measure_prompt
+            audit = measure_prompt(
+                system=self._system_prompt,
+                prior_results=prior_block,
+                goal=goal_text,
+                task_desc=task_text,
+                knowledge=knowledge_ctx,
+                memory=memory_ctx,
+            )
+            if "prompt_audits" not in context.metadata:
+                context.metadata["prompt_audits"] = {}
+            worker_name = getattr(self, "name", type(self).__name__)
+            context.metadata["prompt_audits"][worker_name] = audit
+        except Exception as exc:
+            logger.debug("OllamaWorkerMixin: prompt audit failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Ollama call
@@ -220,10 +244,8 @@ class OllamaWorkerMixin:
         """
         Stream a response for a caller-assembled full message list.
 
-        Unlike ``_stream_response()``, this method does **not** prepend the
-        ``_system_prompt`` — the caller is responsible for including a system
-        message if needed.  Used by ``WorkerToolMixin`` to manage the ReAct
-        message thread directly.
+        Unlike ``_stream_response()``, this does NOT prepend the
+        ``_system_prompt``.  Used by ``WorkerToolMixin``.
         """
         mm = self._get_model_manager(context)
         if mm is None:
@@ -236,7 +258,7 @@ class OllamaWorkerMixin:
             tokens = list(mm.chat_stream(full_messages, **kwargs))
             text = "".join(tokens).strip()
             return text if text else None
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "OllamaWorkerMixin [%s]: stream_full failed: %s",
                 getattr(self, "name", "worker"), exc,
@@ -248,14 +270,8 @@ class OllamaWorkerMixin:
         Return the best available system prompt for this worker.
 
         Priority:
-          1. Evolved prompt from the PromptRegistry (stored in
-             ``context.metadata["system_prompts"]`` by the ReflectionEngine
-             after the previous run).
+          1. Evolved prompt from the PromptRegistry (Milestone 14).
           2. The worker's class-level ``_system_prompt``.
-
-        This is the Milestone 14 prompt-evolution hook: every worker
-        automatically picks up improvements that the ReflectionEngine wrote
-        after the previous execution, with zero per-worker code changes.
         """
         worker_name = getattr(self, "name", type(self).__name__)
         system_prompts: dict = context.metadata.get("system_prompts", {})
@@ -276,19 +292,15 @@ class OllamaWorkerMixin:
         """
         Call ``ModelManager.chat_stream`` and collect all tokens.
 
-        Returns the joined text, or ``None`` if Ollama is unavailable or
-        the response is empty (triggers stub fallback in the caller).
+        Returns the joined text, or ``None`` if Ollama is unavailable.
         """
         mm = self._get_model_manager(context)
         if mm is None:
             return None
 
         model_id = self._resolve_model_id(context)
-        # Milestone 14: use evolved prompt if one exists for this worker
         system_prompt = self._resolve_system_prompt(context)
-        full_messages = [
-            {"role": "system", "content": system_prompt}
-        ] + messages
+        full_messages = [{"role": "system", "content": system_prompt}] + messages
 
         kwargs: dict = {}
         if model_id:
@@ -311,39 +323,14 @@ class OllamaWorkerMixin:
     # ------------------------------------------------------------------
 
     def _compute_confidence(self, text: str) -> float:
-        """
-        Heuristic confidence score (0.0 – 1.0) based on response quality.
-
-        Signals checked:
-          - Word count (more is generally better for substantive tasks).
-          - Structural markers (headers, bullet lists, numbered steps).
-          - Absence of apology / uncertainty phrases.
-        """
         if not text:
             return 0.0
-
         words = text.split()
-        word_count = len(words)
-
-        # Base score from length — saturates at ~400 words → 0.85
-        base = min(0.85, word_count / 400 * 0.85)
-
-        # Bonus for structured output
-        structure_markers = any(
-            marker in text
-            for marker in ("##", "**", "1.", "- ", "* ", "\n\n", "```")
-        )
-        if structure_markers:
+        base = min(0.85, len(words) / 400 * 0.85)
+        if any(m in text for m in ("##", "**", "1.", "- ", "* ", "\n\n", "```")):
             base = min(0.95, base + 0.10)
-
-        # Penalty for uncertainty / failure phrases
-        uncertainty = any(
-            phrase in text.lower()
-            for phrase in ("i cannot", "i am unable", "i don't know", "unavailable")
-        )
-        if uncertainty:
+        if any(p in text.lower() for p in ("i cannot", "i am unable", "i don't know", "unavailable")):
             base = max(0.0, base - 0.20)
-
         return round(base, 2)
 
     # ------------------------------------------------------------------
@@ -351,18 +338,78 @@ class OllamaWorkerMixin:
     # ------------------------------------------------------------------
 
     def _stub_result(self, task: "Task", context: "ExecutionContext") -> str:
-        """
-        Return a stub result when Ollama is unavailable.
-
-        Ensures the result contains the worker's name so existing tests
-        that check ``assert "Research" in result`` etc. continue to pass.
-        """
         worker_name = getattr(self, "name", "Worker")
         return (
             f"[{worker_name}] {task.title}\n"
             f"  Goal: {context.goal}\n"
             f"  (Ollama unavailable — stub result)"
         )
+
+    # ------------------------------------------------------------------
+    # v2.0 — Timing helpers
+    # ------------------------------------------------------------------
+
+    def _record_timing(
+        self,
+        context: "ExecutionContext",
+        prompt_text: str,
+        response_text: str,
+        elapsed: float,
+        model_id: str | None,
+        was_cached: bool = False,
+        was_stub: bool = False,
+    ) -> None:
+        """Store a WorkerTiming record in context.metadata — best-effort."""
+        try:
+            from smartagent.performance.worker_timer import WorkerTiming
+            worker_name = getattr(self, "name", type(self).__name__)
+            timing = WorkerTiming.record(
+                worker_name=worker_name,
+                model_id=model_id,
+                prompt_text=prompt_text,
+                response_text=response_text,
+                generation_time=elapsed,
+                was_cached=was_cached,
+                was_stub=was_stub,
+            )
+            if "worker_timings" not in context.metadata:
+                context.metadata["worker_timings"] = []
+            context.metadata["worker_timings"].append(timing)
+        except Exception as exc:
+            logger.debug("OllamaWorkerMixin: timing record failed: %s", exc)
+
+    # ------------------------------------------------------------------
+    # v2.0 — Cache helpers
+    # ------------------------------------------------------------------
+
+    def _cache_key(
+        self, context: "ExecutionContext", task: "Task", model_id: str | None
+    ) -> str:
+        try:
+            from smartagent.performance.worker_cache import get_global_cache
+            cache = get_global_cache()
+            worker_name = getattr(self, "name", type(self).__name__)
+            return cache.make_key(context.goal, task.title, worker_name, model_id)
+        except Exception:
+            return ""
+
+    def _cache_get(self, key: str) -> str | None:
+        if not key:
+            return None
+        try:
+            from smartagent.performance.worker_cache import get_global_cache
+            return get_global_cache().get(key)
+        except Exception:
+            return None
+
+    def _cache_put(self, key: str, value: str) -> None:
+        if not key:
+            return
+        try:
+            from smartagent.performance.worker_cache import get_global_cache
+            get_global_cache().put(key, value)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -376,33 +423,78 @@ class OllamaWorkerMixin:
         """
         Full Phase 11.4 execution: build messages → call Ollama → score.
 
-        Falls back to ``_stub_result()`` when Ollama is unreachable so all
-        existing tests remain green (``isinstance(result, str)`` is True).
+        v2.0 additions:
+          - Check worker cache before calling Ollama
+          - Record WorkerTiming after the call
+          - Falls back to ``_stub_result()`` when Ollama is unreachable
 
-        Confidence is stored in ``context.metadata["task_confidence"][task.id]``
-        so the Scheduler and Orchestrator can surface it in summaries.
-
-        Returns a plain ``str`` — compatible with the BaseWorker contract and
-        all existing scheduler/test expectations.
+        Returns a plain ``str`` compatible with the BaseWorker contract.
         """
-        messages = self._build_messages(task, context)
-        text = self._stream_response(context, messages)
+        model_id = self._resolve_model_id(context)
+        cache_key = self._cache_key(context, task, model_id)
+        was_cached = False
 
-        if text is None:
-            text = self._stub_result(task, context)
-            confidence = 0.0
+        # v2.0 — cache check
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            was_cached = True
+            text = cached
         else:
+            messages = self._build_messages(task, context)
+            prompt_text = messages[0]["content"] if messages else ""
+            t0 = time.perf_counter()
+            text = self._stream_response(context, messages)
+            elapsed = time.perf_counter() - t0
+
+            was_stub = text is None
+            if was_stub:
+                text = self._stub_result(task, context)
+
+            # Store timing (covers both real and stub calls)
+            self._record_timing(
+                context=context,
+                prompt_text=prompt_text,
+                response_text=text,
+                elapsed=elapsed,
+                model_id=model_id,
+                was_cached=False,
+                was_stub=was_stub,
+            )
+
+            # Cache successful non-stub responses
+            if not was_stub and cache_key:
+                self._cache_put(cache_key, text)
+
+            confidence = 0.0 if was_stub else self._compute_confidence(text)
+            worker_name = getattr(self, "name", "worker")
+            logger.debug(
+                "OllamaWorkerMixin [%s]: task=%r confidence=%.2f",
+                worker_name, task.title, confidence,
+            )
+            if "task_confidence" not in context.metadata:
+                context.metadata["task_confidence"] = {}
+            context.metadata["task_confidence"][task.id] = confidence
+            return text
+
+        # Cache hit — still record confidence + stub=False timing
+        if was_cached:
+            self._record_timing(
+                context=context,
+                prompt_text="",
+                response_text=text,
+                elapsed=0.0,
+                model_id=model_id,
+                was_cached=True,
+                was_stub=False,
+            )
             confidence = self._compute_confidence(text)
-
-        worker_name = getattr(self, "name", "worker")
-        logger.debug(
-            "OllamaWorkerMixin [%s]: task=%r confidence=%.2f",
-            worker_name, task.title, confidence,
-        )
-
-        # Store confidence in context.metadata for the execution summary
-        if "task_confidence" not in context.metadata:
-            context.metadata["task_confidence"] = {}
-        context.metadata["task_confidence"][task.id] = confidence
+            worker_name = getattr(self, "name", "worker")
+            logger.debug(
+                "OllamaWorkerMixin [%s]: cache hit task=%r",
+                worker_name, task.title,
+            )
+            if "task_confidence" not in context.metadata:
+                context.metadata["task_confidence"] = {}
+            context.metadata["task_confidence"][task.id] = confidence
 
         return text
