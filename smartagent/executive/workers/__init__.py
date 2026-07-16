@@ -1,16 +1,23 @@
 """
-smartagent.executive.workers — Specialist worker agents (Milestone 11, Phase 2).
+smartagent.executive.workers — Specialist worker agents (Milestone 11, Phases 4–5).
 
 Each worker handles one or more ``TaskType`` categories and implements::
 
-    execute(task: Task, context: ExecutionContext) -> str
+    execute(task: Task, context: ExecutionContext) -> str | WorkerResult
 
-Phase 2: workers are stubs — they return a formatted "Completed" string
-and record their output in the ``ExecutionContext``.
+Phase 4 (11.4): workers are powered by Ollama via ``OllamaWorkerMixin``.
+Each worker has a specialist system prompt and streams responses from the
+configured model.  Workers gracefully fall back to a stub result when
+Ollama is unavailable (e.g. during unit tests).
 
-Phase 4: each worker gains a system prompt and calls
-``ModelManager.generate_stream()`` / ``chat_stream()`` via the agent's
-``model_manager``, turning the stub into a real AI-powered specialist.
+Phase 5 (11.5): workers read prior task outputs for collaborative refinement,
+produce confidence-scored results, and support auto-retry on failure.
+
+Services are injected into ``ExecutionContext.metadata`` by the Orchestrator:
+  - ``model_manager``   — ModelManager for AI generation
+  - ``memory_manager``  — MemoryManager for context + persistence
+  - ``knowledge_manager`` — KnowledgeManager for concept enrichment
+  - ``settings``        — Settings for model id resolution
 
 Worker registration is centralised in ``build_default_registry()``
 (in ``smartagent.executive.worker_registry``) so the ``WorkerRegistry``
@@ -18,6 +25,7 @@ always maps every ``TaskType`` to the right class.
 """
 
 from smartagent.executive.workers.base_worker import BaseWorker, WorkerResult
+from smartagent.executive.workers.ollama_mixin import OllamaWorkerMixin
 from smartagent.executive.workers.research_worker import ResearchWorker
 from smartagent.executive.workers.planning_worker import PlanningWorker
 from smartagent.executive.workers.design_worker import DesignWorker
@@ -32,6 +40,7 @@ from smartagent.executive.workers.knowledge_worker import KnowledgeWorker
 __all__ = [
     "BaseWorker",
     "WorkerResult",
+    "OllamaWorkerMixin",
     "ResearchWorker",
     "PlanningWorker",
     "DesignWorker",

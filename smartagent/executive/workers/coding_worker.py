@@ -1,9 +1,8 @@
 """
-CodingWorker — writes implementation code.
+CodingWorker — Phase 11.4: real Ollama-powered code implementation specialist.
 
-Phase 2: stub.
-Phase 4: Ollama with an "expert Python engineer" system prompt, using
-         the coding model (qwen2.5-coder:7b by default).
+Writes clean, production-quality code guided by research and design context.
+Uses the coding-optimised model (qwen2.5-coder by default).
 """
 
 from __future__ import annotations
@@ -12,23 +11,57 @@ from typing import TYPE_CHECKING
 
 from smartagent.executive.task import TaskType
 from smartagent.executive.workers.base_worker import BaseWorker
+from smartagent.executive.workers.ollama_mixin import OllamaWorkerMixin
 
 if TYPE_CHECKING:
     from smartagent.executive.execution_context import ExecutionContext
     from smartagent.executive.task import Task
 
 
-class CodingWorker(BaseWorker):
+class CodingWorker(OllamaWorkerMixin, BaseWorker):
     """
     Specialist for code implementation.
 
     Handles: CODING and IMPLEMENTATION tasks.
 
-    Phase 4 system prompt (preview):
-        "You are an expert Python engineer.  Given a task description and
-        any prior research or design context, write clean, well-documented,
-        production-quality code."
+    Uses the coding model (qwen2.5-coder:7b by default) for better
+    code generation quality.
     """
+
+    _system_prompt = """\
+You are an expert software engineer for MARK, an advanced AI assistant. \
+You write clean, well-documented, production-quality code.
+
+Your role: implement the solution described in the task, informed by any \
+research or design context provided. Write real, runnable code — not \
+pseudocode or placeholders.
+
+Output format:
+## Implementation
+
+Provide the complete code with inline comments explaining non-obvious \
+decisions. Use fenced code blocks with the correct language tag.
+
+## Usage Example
+
+Show how to call or use the implementation (short example).
+
+## Notes
+
+Key decisions, assumptions, or caveats.
+
+Rules:
+- Write idiomatic Python (PEP 8, type hints, docstrings) unless another \
+language is specified.
+- If a design document is provided, follow its interfaces exactly.
+- Handle errors explicitly; do not swallow exceptions.
+- Prefer the standard library over third-party packages unless the research \
+or design specifies one.
+- Do not include TODO comments — if something is needed, implement it.\
+"""
+
+    # Prefer the coding model for code generation
+    _preferred_model = "coding"
 
     @property
     def name(self) -> str:
@@ -43,10 +76,4 @@ class CodingWorker(BaseWorker):
         return "Writes clean, production-quality implementation code."
 
     def execute(self, task: "Task", context: "ExecutionContext") -> str:
-        prior = self._prior_results(task, context)
-        design_note = f"  Based on: {prior[-1][:60]}…" if prior else ""
-        return (
-            f"[Coding] Completed: {task.title}\n"
-            f"{design_note}\n"
-            f"  Code implemented for: {context.goal}"
-        ).strip()
+        return self._execute_with_ollama(task, context)

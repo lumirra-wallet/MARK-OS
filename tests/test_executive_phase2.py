@@ -126,14 +126,14 @@ class TestBaseWorkerInterface:
             w = cls()
             assert isinstance(w.description, str) and w.description
 
-    def test_all_workers_phase_is_stub(self):
-        """All Phase 2 workers should report phase='stub'."""
+    def test_all_workers_phase_is_ollama(self):
+        """All Phase 11.4 workers should report phase='ollama' (real AI workers)."""
         workers = [
             ResearchWorker, PlanningWorker, DesignWorker, CodingWorker,
             TestingWorker, ReviewWorker, DocumentationWorker,
         ]
         for cls in workers:
-            assert cls().phase == "stub", f"{cls.__name__}.phase != 'stub'"
+            assert cls().phase == "ollama", f"{cls.__name__}.phase != 'ollama'"
 
     def test_prior_results_helper_returns_empty_when_no_deps(self):
         w = ResearchWorker()

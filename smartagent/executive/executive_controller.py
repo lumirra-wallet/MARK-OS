@@ -1,21 +1,19 @@
 """
-ExecutiveController — top-level interface for the Executive Framework.
+ExecutiveController — Phase 11.4/11.5 upgrade.
 
-Phase 2/3 upgrade: real workers, cancellation, run/cancel support.
+Phase 11.4: accepts optional AI service references and threads them
+through the Orchestrator so workers receive real ModelManager access.
 
-Public API (unchanged from Phase 1):
+Phase 11.5: exposes ``execution_summary()`` for richer post-run reporting.
+
+Public API (unchanged from Phase 2/3):
     controller.plan(goal)          → ExecutionContext (READY, not executed)
     controller.receive_goal(goal)  → ExecutionContext (COMPLETED/FAILED)
     controller.run()               → ExecutionContext (execute current plan)
     controller.cancel()            → cancels current plan mid-run
 
-Phase 2 change:
-    ``build_default_registry()`` now registers real ``BaseWorker`` classes.
-    The pipeline and interface are identical — only execution output changes.
-
-Phase 3 change:
-    ``cancel()`` method added.  ``run()`` returns the updated context even
-    when cancelled.  Console commands ``run`` and ``cancel`` call these.
+New Phase 11.4 factory:
+    ExecutiveController.with_agent(agent)  → pre-wired controller
 
 Note on naming:
     ``smartagent.mind.executive.executive_controller.ExecutiveController``
@@ -26,7 +24,7 @@ Note on naming:
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from smartagent.executive.execution_context import ExecutionContext
 from smartagent.executive.orchestrator import Orchestrator
@@ -54,9 +52,18 @@ class ExecutiveController:
         planner: Planner | None = None,
         scheduler: Scheduler | None = None,
         worker_registry: WorkerRegistry | None = None,
+        model_manager: Any | None = None,
+        memory_manager: Any | None = None,
+        knowledge_manager: Any | None = None,
+        settings: Any | None = None,
     ) -> None:
         self._worker_registry = worker_registry or build_default_registry()
         self._planner = planner or Planner()
+        self._model_manager = model_manager
+        self._memory_manager = memory_manager
+        self._knowledge_manager = knowledge_manager
+        self._settings = settings
+
         self._scheduler = scheduler or Scheduler(
             worker_registry=self._worker_registry
         )
@@ -64,17 +71,47 @@ class ExecutiveController:
             planner=self._planner,
             scheduler=self._scheduler,
             worker_registry=self._worker_registry,
+            model_manager=model_manager,
+            memory_manager=memory_manager,
+            knowledge_manager=knowledge_manager,
+            settings=settings,
         )
         self.current_context: Optional[ExecutionContext] = None
 
     # ------------------------------------------------------------------
-    # Primary API
+    # Phase 11.4 factory
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def with_agent(cls, agent: Any) -> "ExecutiveController":
+        """
+        Create a fully-wired controller from a live SmartAgent instance.
+
+        Extracts ModelManager, MemoryManager, KnowledgeManager, and Settings
+        from *agent* (any that are missing are silently skipped).
+
+        Usage::
+
+            ctrl = ExecutiveController.with_agent(agent)
+            ctx  = ctrl.receive_goal("Build a REST API for task management")
+        """
+        mm   = getattr(agent, "model_manager",   None)
+        mem  = getattr(agent, "memory",           None)
+        km   = getattr(agent, "knowledge",        None)
+        cfg  = getattr(agent, "settings",         None)
+        return cls(
+            model_manager=mm,
+            memory_manager=mem,
+            knowledge_manager=km,
+            settings=cfg,
+        )
+
+    # ------------------------------------------------------------------
+    # Primary API (unchanged from Phase 2/3)
     # ------------------------------------------------------------------
 
     def receive_goal(self, goal: str) -> ExecutionContext:
-        """
-        Full pipeline: plan + execute.  Returns the completed context.
-        """
+        """Full pipeline: plan + execute.  Returns the completed context."""
         logger.info("ExecutiveController: received goal=%r", goal)
         context = self._orchestrator.execute_goal(goal)
         self.current_context = context
@@ -95,8 +132,8 @@ class ExecutiveController:
         """
         Execute the current plan (from the last ``plan()`` call).
 
-        Phase 3: respects cancellation — if ``cancel()`` was called on the
-        context before ``run()`` finishes, execution stops cleanly.
+        Phase 11.4: injects AI services via the orchestrator's
+        ``_inject_services`` before each task runs.
 
         Raises:
             RuntimeError: If no plan has been created yet.
@@ -109,16 +146,25 @@ class ExecutiveController:
             "ExecutiveController: running plan for goal=%r",
             self.current_context.goal,
         )
+
+        # Inject services into the existing context before running
+        self._orchestrator._inject_services(self.current_context)
+
         context = self._scheduler.run(self.current_context)
         self.current_context = context
+
+        # Phase 11.5 — persist results if the run succeeded
+        if context.state.value == "completed":
+            self._orchestrator._save_to_memory(context)
+            self._orchestrator._propose_to_knowledge(context)
+
         return context
 
     def cancel(self) -> bool:
         """
         Cancel the current plan.
 
-        Marks all non-terminal tasks as BLOCKED and sets the context state
-        to CANCELLED.  Returns ``True`` if there was a plan to cancel,
+        Returns ``True`` if there was a non-terminal plan to cancel,
         ``False`` otherwise.
         """
         if self.current_context is None:
@@ -147,6 +193,56 @@ class ExecutiveController:
     def submit_to_queue(self, graph: TaskGraph) -> TaskQueue:
         """Step 3: seed a TaskQueue with initially-ready tasks."""
         return self._orchestrator.submit_to_queue(graph)
+
+    # ------------------------------------------------------------------
+    # Phase 11.5 — richer execution summary
+    # ------------------------------------------------------------------
+
+    def execution_summary(self) -> str:
+        """
+        Return a formatted execution summary for the current context.
+
+        Includes per-task confidence scores, timing, and retry counts.
+        Returns a help message if no context is available.
+        """
+        ctx = self.current_context
+        if ctx is None:
+            return "No execution context.  Run 'plan <goal>' then 'run'."
+
+        lines: list[str] = [
+            f"Execution: {ctx.goal}",
+            f"  State   : {ctx.state.value}",
+            f"  Tasks   : {ctx.completed_count}/{ctx.task_count} completed",
+            "",
+        ]
+
+        timings     = ctx.metadata.get("task_timing", {})
+        confidences = ctx.metadata.get("task_confidence", {})
+        retries     = ctx.metadata.get("task_retries", {})
+
+        for i, task in enumerate(ctx.task_graph.all_tasks(), 1):
+            icon = "✓" if task.status.value == "completed" else "✗"
+            t = timings.get(task.id, 0.0)
+            c = confidences.get(task.id)
+            r = retries.get(task.id, 0)
+
+            conf_str   = f"  conf={c:.0%}" if c is not None else ""
+            retry_str  = f"  retries={r}" if r > 0 else ""
+            lines.append(
+                f"  {i}. {icon}  {task.title}"
+                f"  ({t:.1f}s{conf_str}{retry_str})"
+            )
+
+        scores = list(confidences.values())
+        if scores:
+            avg = sum(scores) / len(scores)
+            lines.append(f"\n  Average confidence : {avg:.0%}")
+
+        total = sum(timings.values())
+        if total:
+            lines.append(f"  Total time         : {total:.1f}s")
+
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Inspection

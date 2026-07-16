@@ -7,3 +7,4 @@
 - [Milestone 10 Streaming Upgrade](milestone10-streaming.md) — generate_stream/chat_stream, spinner, stats, prompt cache, warmup, lazy loading; tmp_agent fixture must set streaming_enabled=False for pre-M10 tests.
 - [Milestone 11 Phase 1 Executive Framework](milestone11-phase1-executive.md) — planning/task layer; agent.executive vs agent.mind naming; stub scheduler; rule-based Planner with 5 templates.
 - [Milestone 11 Phases 2-3 Workers and Scheduler](milestone11-phase2-3-workers-scheduler.md) — 9 specialist workers, cancellation early-exit, BLOCKED→FAILED final state, list_workers dedup by id().
+- [Milestone 11 Phases 4-5 AI Workers](milestone11-phase4-5-ai-workers.md) — OllamaWorkerMixin, services via context.metadata, execute() must return str not WorkerResult, _GenericWorker stays stub, retry+confidence+persistence.
