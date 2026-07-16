@@ -441,6 +441,42 @@ class ModelManager:
 
         return registered
 
+    def load_github_models(
+        self,
+        default_model: str = "gpt-4.1-mini",
+        coding_model: str = "gpt-4.1",
+        fallback_model: str = "gpt-4o-mini",
+        token: str | None = None,
+    ) -> list[str]:
+        """
+        Create and register ``GitHubProvider`` instances for the configured models.
+
+        Silently no-ops when ``GITHUB_TOKEN`` is not set (so tests without the
+        env var continue to pass unchanged).
+
+        Returns the list of newly registered model ids.
+        """
+        import os
+        resolved_token = token or os.environ.get("GITHUB_TOKEN", "")
+        if not resolved_token:
+            logger.debug("load_github_models: GITHUB_TOKEN not set — skipping")
+            return []
+
+        try:
+            from smartagent.llm.github_provider import GitHubProvider
+        except ImportError:
+            logger.warning("load_github_models: smartagent.llm not available")
+            return []
+
+        registered: list[str] = []
+        for model_name in dict.fromkeys([default_model, coding_model, fallback_model]):
+            if self.registry.find(model_name) is None:
+                provider = GitHubProvider(model_name=model_name, token=resolved_token)
+                self.registry.register(provider)
+                registered.append(model_name)
+                logger.info("Registered GitHub model: %s", model_name)
+        return registered
+
     def describe(self) -> str:
         """One-line human-readable summary, mirroring `ToolEngine.describe()`."""
         available = self.list_available()

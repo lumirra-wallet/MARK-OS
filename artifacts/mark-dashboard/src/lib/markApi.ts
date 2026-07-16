@@ -408,6 +408,68 @@ export const markApi = {
     if (!res.ok) throw new Error('evaluation submit failed');
     return res.json();
   },
+
+  // ── Provider management (GitHub Models / Ollama) ──────────────────────────
+
+  getProviders: async (baseUrl: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/providers'));
+    if (!res.ok) throw new Error('providers fetch failed');
+    return res.json() as Promise<{ providers: ProviderInfo[] }>;
+  },
+
+  getCurrentProvider: async (baseUrl: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/providers/current'));
+    if (!res.ok) throw new Error('provider fetch failed');
+    return res.json() as Promise<LlmSettings>;
+  },
+
+  switchProvider: async (baseUrl: string, provider: string, model?: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/providers/switch'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, model }),
+    });
+    if (!res.ok) throw new Error('provider switch failed');
+    return res.json() as Promise<LlmSettings & { success: boolean }>;
+  },
+
+  selectModel: async (baseUrl: string, model: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/models/select'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model }),
+    });
+    if (!res.ok) throw new Error('model select failed');
+    return res.json();
+  },
+
+  getLlmHealth: async (baseUrl: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/health/llm'));
+    if (!res.ok) throw new Error('llm health failed');
+    return res.json() as Promise<LlmHealth>;
+  },
+
+  getLlmSettings: async (baseUrl: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/llm/settings'));
+    if (!res.ok) throw new Error('llm settings fetch failed');
+    return res.json() as Promise<LlmSettings>;
+  },
+
+  updateLlmSettings: async (baseUrl: string, updates: Partial<LlmSettings>) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/llm/settings'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) throw new Error('llm settings update failed');
+    return res.json() as Promise<LlmSettings>;
+  },
+
+  getGitHubModels: async (baseUrl: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/models/github'));
+    if (!res.ok) throw new Error('github models fetch failed');
+    return res.json() as Promise<{ models: GitHubModelInfo[]; error?: string }>;
+  },
 };
 
 // ── Enhanced git types ────────────────────────────────────────────────────────
@@ -447,17 +509,63 @@ export interface MemoryFilesResponse {
 
 export interface OllamaModel {
   name:     string;
+  id:       string;
   size_gb:  number;
   modified: string;
   family:   string;
   params:   string;
+  context?: number;
+  provider: string;
 }
 
 export interface ModelsResponse {
   models:      OllamaModel[];
   active:      string;
+  provider:    string;
   ollama_url?: string;
   error?:      string;
+}
+
+export interface ProviderInfo {
+  id:               string;
+  name:             string;
+  description:      string;
+  base_url:         string;
+  requires_token:   boolean;
+  token_env:        string | null;
+  capabilities:     string[];
+  default_model:    string;
+  token_present?:   boolean;
+  available:        boolean;
+  active:           boolean;
+}
+
+export interface LlmSettings {
+  provider:         string;
+  model:            string;
+  coding_model:     string;
+  temperature:      number;
+  max_tokens:       number;
+  streaming:        boolean;
+  github_available: boolean;
+  ollama_url?:      string;
+}
+
+export interface LlmHealth {
+  provider:    string;
+  model:       string;
+  latency_ms:  number | null;
+  available:   boolean;
+  token_valid: boolean;
+  streaming:   boolean;
+  error:       string | null;
+}
+
+export interface GitHubModelInfo {
+  id:             string;
+  family:         string;
+  context:        number;
+  supports_tools: boolean;
 }
 
 export interface SystemMetrics {

@@ -211,9 +211,58 @@ _active_model: str = ""
 
 @router.get("/models")
 async def list_models() -> dict:
-    """List available Ollama models."""
+    """
+    List available models for the active provider (GitHub Models or Ollama).
+
+    Returns a unified shape regardless of provider so the frontend needs no
+    special-casing:
+        { models: [{name, id, size_gb, modified, family, params, provider}],
+          active, provider, ollama_url?, error? }
+    """
     import httpx
+
+    # Determine active provider
+    try:
+        from smartagent.llm.factory import get_active_provider, get_llm_settings
+        provider = get_active_provider()
+        settings = get_llm_settings()
+    except Exception:
+        provider = "ollama"
+        settings = {}
+
+    if provider == "github":
+        token = os.environ.get("GITHUB_TOKEN", "")
+        active = settings.get("model", "gpt-4.1-mini")
+        if not token:
+            return {
+                "models": [], "active": active, "provider": "github",
+                "error": "GITHUB_TOKEN not set",
+            }
+        try:
+            from smartagent.llm.github_provider import GitHubProvider
+            p = GitHubProvider(token=token)
+            p.load()
+            raw_models = p.list_models()
+            models = [
+                {
+                    "name":     m["id"],
+                    "id":       m["id"],
+                    "size_gb":  0,
+                    "modified": "",
+                    "family":   m.get("family", ""),
+                    "params":   "",
+                    "context":  m.get("context", 128_000),
+                    "provider": "github",
+                }
+                for m in raw_models
+            ]
+            return {"models": models, "active": active, "provider": "github"}
+        except Exception as exc:
+            return {"models": [], "active": active, "provider": "github", "error": str(exc)}
+
+    # Ollama (default)
     ollama_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+    active = _active_model
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(f"{ollama_url}/api/tags")
@@ -222,34 +271,41 @@ async def list_models() -> dict:
             models = [
                 {
                     "name":     m.get("name", ""),
+                    "id":       m.get("name", ""),
                     "size_gb":  round(m.get("size", 0) / 1e9, 1),
                     "modified": m.get("modified_at", ""),
                     "family":   m.get("details", {}).get("family", ""),
                     "params":   m.get("details", {}).get("parameter_size", ""),
+                    "provider": "ollama",
                 }
                 for m in data.get("models", [])
             ]
     except Exception as exc:
-        return {"models": [], "active": _active_model, "error": str(exc)}
+        return {"models": [], "active": active, "provider": "ollama",
+                "ollama_url": ollama_url, "error": str(exc)}
 
-    # Try to detect active model from settings
-    active = _active_model
     if not active:
         try:
             from smartagent.config.settings import Settings  # type: ignore
-            settings = Settings()
-            active = getattr(settings, "model", "") or ""
+            s = Settings()
+            active = getattr(s, "ollama_default_model", "") or ""
         except Exception:
             pass
 
-    return {"models": models, "active": active, "ollama_url": ollama_url}
+    return {"models": models, "active": active, "provider": "ollama", "ollama_url": ollama_url}
 
 
 @router.post("/models/switch")
 async def switch_model(req: SwitchModelRequest) -> dict:
-    """Set the active Ollama model."""
+    """Set the active model (provider-aware)."""
     global _active_model
-    _active_model = req.model
+    try:
+        from smartagent.llm.factory import get_active_provider, switch_provider
+        provider = get_active_provider()
+        switch_provider(provider, req.model)
+        _active_model = req.model
+    except Exception:
+        _active_model = req.model
     return {"success": True, "model": _active_model}
 
 

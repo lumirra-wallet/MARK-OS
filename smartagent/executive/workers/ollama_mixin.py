@@ -97,6 +97,19 @@ class OllamaWorkerMixin:
     # ------------------------------------------------------------------
 
     def _resolve_model_id(self, context: "ExecutionContext") -> str | None:
+        # Ask the factory for the active provider's model first.
+        # Returns a model ID (str) when ACTIVE_PROVIDER=github is explicitly set;
+        # returns None otherwise so backward-compatible Ollama path below is used.
+        try:
+            from smartagent.llm.factory import get_model_for_role
+            factory_model = get_model_for_role(
+                "coding" if self._preferred_model == "coding" else "default"
+            )
+            if factory_model is not None:
+                return factory_model
+        except Exception:  # noqa: BLE001
+            pass
+        # Fallback: Ollama settings (preserves all pre-existing test behaviour)
         settings = self._get_settings(context)
         if settings is None:
             return None

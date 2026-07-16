@@ -81,6 +81,12 @@ class Settings:
     ollama_default_model: str = "llama3.1:8b"
     ollama_coding_model: str = "qwen2.5-coder:7b"
 
+    # LLM provider abstraction (GitHub Models / Ollama)
+    active_provider: str = ""   # read from ACTIVE_PROVIDER env var at runtime
+    github_default_model: str = "gpt-4.1-mini"
+    github_coding_model: str = "gpt-4.1"
+    github_fallback_model: str = "gpt-4o-mini"
+
     voice_enabled: bool = False
     automation_enabled: bool = False
     granted_permissions: list[str] = field(default_factory=lambda: ["read_memory", "write_memory"])

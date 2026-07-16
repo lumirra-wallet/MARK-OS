@@ -146,6 +146,16 @@ class SmartAgent:
             default_model=getattr(settings, "ollama_default_model", "llama3.1:8b"),
             coding_model=getattr(settings, "ollama_coding_model", "qwen2.5-coder:7b"),
         )
+        # Milestone LLM — GitHub Models provider.
+        # Only wires up when ACTIVE_PROVIDER=github is explicitly set so that
+        # all existing tests (which don't set that env var) continue to pass.
+        import os as _os
+        if _os.environ.get("ACTIVE_PROVIDER", "").strip().lower() == "github":
+            try:
+                from smartagent.llm.factory import wire_agent as _wire_agent
+                _wire_agent(self.model_manager)
+            except Exception as _exc:  # noqa: BLE001
+                _logger.warning("SmartAgent: GitHub provider wiring failed: %s", _exc)
 
         # Milestone 2 wires the previously-standalone planning/research/
         # voice/vision/automation packages into the agent so the Brain has

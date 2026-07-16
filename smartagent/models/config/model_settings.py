@@ -67,6 +67,11 @@ class ModelSettings:
     ollama_default_model: str = "llama3.1:8b"
     ollama_coding_model: str = "qwen2.5-coder:7b"
 
+    # GitHub Models integration
+    github_default_model: str = "gpt-4.1-mini"
+    github_coding_model: str = "gpt-4.1"
+    github_fallback_model: str = "gpt-4o-mini"
+
     # Milestone 10 — Streaming, Performance & Optimisation
     warmup_enabled: bool = True
     """Perform a tiny warmup generation when a model loads to keep it resident."""
