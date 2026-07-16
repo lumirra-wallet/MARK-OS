@@ -43,7 +43,7 @@ catalogs:
       specifier: ^0.45.2
       version: 0.45.2
     framer-motion:
-      specifier: ^12.23.24
+      specifier: 12.42.2
       version: 12.42.2
     lucide-react:
       specifier: ^0.545.0

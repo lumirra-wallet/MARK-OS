@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { markApi, PermissionInfo } from '@/lib/markApi';
+import { markApi, PermissionInfo, VoiceMode, VoiceSettings, VoiceStateValue } from '@/lib/markApi';
 
 export interface TimelineEvent {
   id: string;
@@ -27,6 +27,21 @@ export interface OpenFile {
   originalContent?: string;
 }
 
+// Voice state
+export interface VoiceState {
+  state: VoiceStateValue;
+  running: boolean;
+  mode: VoiceMode;
+  muted: boolean;
+  autoSubmit: boolean;
+  whisperModel: string;
+  ttsVoice: string;
+  ttsSpeed: number;
+  wakePhraseEnabled: boolean;
+  transcript: string;           // latest transcribed text
+  isBrowserTTSFallback: boolean; // use browser SpeechSynthesis instead of Piper
+}
+
 interface MarkState {
   serverUrl: string;
   connectionStatus: 'connecting' | 'connected' | 'disconnected';
@@ -49,6 +64,9 @@ interface MarkState {
   lastError: string | null;
   logs: string[];
 
+  // Voice
+  voice: VoiceState;
+
   // Actions
   setServerUrl: (url: string) => void;
   connectWebSocket: () => void;
@@ -59,6 +77,14 @@ interface MarkState {
   fetchFileContent: (path: string, isDiff?: boolean) => Promise<void>;
   closeFile: (path: string) => void;
   setActiveFileTab: (path: string | null) => void;
+
+  // Voice actions
+  startVoice: (mode: VoiceMode) => Promise<void>;
+  stopVoice: () => Promise<void>;
+  toggleMute: () => Promise<void>;
+  updateVoiceSettings: (s: Partial<VoiceSettings>) => Promise<void>;
+  transcribeAudio: (blob: Blob) => Promise<string>;
+  speak: (text: string) => Promise<void>;
 }
 
 const DEFAULT_WORKERS: WorkerState[] = [
@@ -72,6 +98,29 @@ const DEFAULT_WORKERS: WorkerState[] = [
 
 let ws: WebSocket | null = null;
 let reconnectTimer: any = null;
+
+const DEFAULT_VOICE_STATE: VoiceState = {
+  state: 'idle',
+  running: false,
+  mode: 'push_to_talk',
+  muted: false,
+  autoSubmit: true,
+  whisperModel: 'base',
+  ttsVoice: 'en_US-lessac-medium',
+  ttsSpeed: 1.0,
+  wakePhraseEnabled: false,
+  transcript: '',
+  isBrowserTTSFallback: false,
+};
+
+// Browser SpeechSynthesis fallback (used when Piper is unavailable)
+function browserSpeak(text: string, speed = 1.0): void {
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.rate = speed;
+  window.speechSynthesis.speak(utt);
+}
 
 export const useMarkStore = create<MarkState>((set, get) => ({
   serverUrl: localStorage.getItem('mark_server_url') || 'http://localhost:8000',
@@ -94,6 +143,8 @@ export const useMarkStore = create<MarkState>((set, get) => ({
   
   lastError: null,
   logs: [],
+
+  voice: { ...DEFAULT_VOICE_STATE },
 
   setServerUrl: (url) => {
     localStorage.setItem('mark_server_url', url);
@@ -276,6 +327,51 @@ export const useMarkStore = create<MarkState>((set, get) => ({
               set({ lastError: payload.error || payload.message });
               addTimeline(`Error: ${payload.error || payload.message}`);
               break;
+
+            // ── Voice events ─────────────────────────────────────────
+            case 'VoiceStateChanged':
+              set(state => ({ voice: { ...state.voice, state: payload.state as VoiceStateValue } }));
+              break;
+
+            case 'VoiceStarted':
+              set(state => ({ voice: { ...state.voice, running: true, mode: payload.mode as VoiceMode } }));
+              addTimeline(`Voice started (${payload.mode})`);
+              break;
+
+            case 'VoiceStopped':
+              set(state => ({ voice: { ...state.voice, running: false, state: 'idle' } }));
+              addTimeline('Voice stopped');
+              break;
+
+            case 'VoiceWakeWordDetected':
+              addTimeline('Wake word detected');
+              break;
+
+            case 'VoiceTranscribed':
+              set(state => ({ voice: { ...state.voice, transcript: payload.text } }));
+              addTimeline(`Transcribed: "${payload.text}"`);
+              break;
+
+            case 'VoiceSpeakingStarted':
+              set(state => ({ voice: { ...state.voice, state: 'speaking' } }));
+              break;
+
+            case 'VoiceSpeakingDone':
+              set(state => ({
+                voice: { ...state.voice, state: state.voice.running ? 'listening' : 'idle' }
+              }));
+              break;
+
+            case 'VoiceTTSFallback':
+              // Piper unavailable — use browser SpeechSynthesis
+              set(state => ({ voice: { ...state.voice, isBrowserTTSFallback: true } }));
+              browserSpeak(payload.text, get().voice.ttsSpeed);
+              break;
+
+            case 'VoiceError':
+              set(state => ({ voice: { ...state.voice, state: 'error' } }));
+              addTimeline(`Voice error: ${payload.error}`);
+              break;
           }
         } catch (err) {
           console.error("Failed to parse WS message", err);
@@ -356,5 +452,81 @@ export const useMarkStore = create<MarkState>((set, get) => ({
   
   setActiveFileTab: (path) => {
     set({ activeFileTab: path });
-  }
+  },
+
+  // ── Voice actions ─────────────────────────────────────────────────────────
+
+  startVoice: async (mode) => {
+    try {
+      await markApi.startVoice(get().serverUrl, mode);
+      set(state => ({ voice: { ...state.voice, running: true, mode } }));
+    } catch (err) {
+      console.error('startVoice failed', err);
+    }
+  },
+
+  stopVoice: async () => {
+    try {
+      await markApi.stopVoice(get().serverUrl);
+      set(state => ({ voice: { ...state.voice, running: false, state: 'idle' } }));
+    } catch (err) {
+      console.error('stopVoice failed', err);
+    }
+  },
+
+  toggleMute: async () => {
+    const muted = !get().voice.muted;
+    try {
+      await markApi.updateVoiceSettings(get().serverUrl, { muted });
+      set(state => ({ voice: { ...state.voice, muted } }));
+    } catch (err) {
+      console.error('toggleMute failed', err);
+    }
+  },
+
+  updateVoiceSettings: async (settings) => {
+    try {
+      const res = await markApi.updateVoiceSettings(get().serverUrl, settings);
+      set(state => ({
+        voice: {
+          ...state.voice,
+          mode:         (res.settings.mode           as VoiceMode) ?? state.voice.mode,
+          muted:        res.settings.muted            ?? state.voice.muted,
+          autoSubmit:   res.settings.auto_submit      ?? state.voice.autoSubmit,
+          whisperModel: res.settings.whisper_model    ?? state.voice.whisperModel,
+          ttsVoice:     res.settings.tts_voice        ?? state.voice.ttsVoice,
+          ttsSpeed:     res.settings.tts_speed        ?? state.voice.ttsSpeed,
+        }
+      }));
+    } catch (err) {
+      console.error('updateVoiceSettings failed', err);
+    }
+  },
+
+  transcribeAudio: async (blob) => {
+    try {
+      const text = await markApi.transcribeAudio(get().serverUrl, blob);
+      if (text) {
+        set(state => ({ voice: { ...state.voice, transcript: text } }));
+      }
+      return text;
+    } catch (err) {
+      console.error('transcribeAudio failed', err);
+      return '';
+    }
+  },
+
+  speak: async (text) => {
+    const { voice, serverUrl } = get();
+    if (voice.isBrowserTTSFallback) {
+      browserSpeak(text, voice.ttsSpeed);
+      return;
+    }
+    try {
+      await markApi.speak(serverUrl, text);
+    } catch (err) {
+      // Fallback to browser TTS
+      browserSpeak(text, voice.ttsSpeed);
+    }
+  },
 }));

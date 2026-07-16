@@ -24,18 +24,29 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from smartagent.server.api import router
+from smartagent.server.voice_manager import voice_manager
+from smartagent.server.websocket import connection_manager
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    import asyncio
     port = os.environ.get("PORT", "8000")
     logger.info("MARK server starting on port %s", port)
     print(f"  [server] MARK API ready  →  http://localhost:{port}")
     print(f"  [server] WebSocket stream →  ws://localhost:{port}/ws")
+
+    # Wire the VoiceManager to the live connection_manager so voice events
+    # can broadcast over WebSocket even between build runs.
+    loop = asyncio.get_running_loop()
+    voice_manager.install(None, connection_manager, loop)
+
     yield
     logger.info("MARK server shutting down")
+    if voice_manager.running:
+        voice_manager.stop()
 
 
 app = FastAPI(

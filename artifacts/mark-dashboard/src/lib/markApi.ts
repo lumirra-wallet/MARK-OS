@@ -99,4 +99,95 @@ export const markApi = {
     if (!res.ok) throw new Error('Network response was not ok');
     return res.json() as Promise<{ status: string }>;
   },
+
+  // ── Voice ─────────────────────────────────────────────────────────────────
+
+  getVoiceStatus: async (baseUrl: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/voice/status'));
+    if (!res.ok) throw new Error('Voice status failed');
+    return res.json() as Promise<{
+      state: string;
+      running: boolean;
+      settings: VoiceSettings;
+    }>;
+  },
+
+  startVoice: async (baseUrl: string, mode: VoiceMode) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/voice/start'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    if (!res.ok) throw new Error('Voice start failed');
+    return res.json() as Promise<{ success: boolean; state: string }>;
+  },
+
+  stopVoice: async (baseUrl: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/voice/stop'), {
+      method: 'POST',
+    });
+    if (!res.ok) throw new Error('Voice stop failed');
+    return res.json() as Promise<{ success: boolean; state: string }>;
+  },
+
+  speak: async (baseUrl: string, text: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/voice/speak'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) throw new Error('TTS speak failed');
+    return res.json() as Promise<{ success: boolean }>;
+  },
+
+  /**
+   * Send a raw audio blob to the backend for Whisper transcription.
+   * Returns the transcribed text.
+   */
+  transcribeAudio: async (baseUrl: string, audioBlob: Blob): Promise<string> => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/voice/transcribe'), {
+      method: 'POST',
+      headers: { 'Content-Type': audioBlob.type || 'audio/wav' },
+      body: audioBlob,
+    });
+    if (!res.ok) throw new Error('Transcription failed');
+    const data = await res.json() as { text: string; duration_ms: number };
+    return data.text;
+  },
+
+  updateVoiceSettings: async (baseUrl: string, settings: Partial<VoiceSettings>) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/voice/settings'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    if (!res.ok) throw new Error('Voice settings update failed');
+    return res.json() as Promise<{ success: boolean; settings: VoiceSettings }>;
+  },
 };
+
+// ── Voice types ──────────────────────────────────────────────────────────────
+
+export type VoiceMode = 'push_to_talk' | 'continuous' | 'wake_word';
+
+export type VoiceStateValue =
+  | 'idle'
+  | 'listening'
+  | 'transcribing'
+  | 'thinking'
+  | 'speaking'
+  | 'error';
+
+export interface VoiceSettings {
+  enabled:        boolean;
+  mode:           VoiceMode;
+  wake_phrase:    string;
+  whisper_model:  string;
+  language:       string;
+  tts_voice:      string;
+  tts_speed:      number;
+  muted:          boolean;
+  auto_submit:    boolean;
+  vad_threshold?: number;
+  silence_frames?: number;
+}

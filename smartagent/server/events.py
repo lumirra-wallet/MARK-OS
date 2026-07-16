@@ -91,6 +91,17 @@ class ServerEvents:
     RUN_CANCELLED = "RunCancelled"
     RUN_FAILED    = "RunFailed"
 
+    # Voice pipeline
+    VOICE_STARTED          = "VoiceStarted"
+    VOICE_STOPPED          = "VoiceStopped"
+    VOICE_STATE_CHANGED    = "VoiceStateChanged"
+    VOICE_WAKE_WORD        = "VoiceWakeWordDetected"
+    VOICE_TRANSCRIBED      = "VoiceTranscribed"
+    VOICE_SPEAKING_STARTED = "VoiceSpeakingStarted"
+    VOICE_SPEAKING_DONE    = "VoiceSpeakingDone"
+    VOICE_TTS_FALLBACK     = "VoiceTTSFallback"
+    VOICE_ERROR            = "VoiceError"
+
 
 # ---------------------------------------------------------------------------
 # WebSocket broadcaster
