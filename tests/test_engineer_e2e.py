@@ -14,6 +14,8 @@ Coverage:
   6. SoftwareEngineerReport tracks files_created / files_modified / project_dir
   7. LoopResult.as_display_lines shows files
   8. Generated test file that actually passes when run with pytest
+  9. Full pipeline E2E: SoftwareEngineer → DevLoop → Orchestrator → CodingWorker →
+     FileEditMixin → FileEditor → disk + report + "where is X?" intent routing
 """
 
 from __future__ import annotations
@@ -583,3 +585,337 @@ class TestGetFileEditor:
             current_context = None
 
         assert _get_file_editor(FakeExecutive) is None
+
+
+# ---------------------------------------------------------------------------
+# 9. Full pipeline E2E: real Orchestrator + mock LLM → files on disk
+# ---------------------------------------------------------------------------
+
+class _MockModelManager:
+    """
+    Minimal mock that replaces Ollama for pipeline E2E tests.
+
+    ``chat_stream()`` returns a single pre-canned response so the full
+    CodingWorker → FileEditMixin → FileEditor chain can run without Ollama.
+    """
+
+    def __init__(self, response: str) -> None:
+        self._response = response
+
+    def chat_stream(self, messages, **kwargs):  # noqa: ANN001
+        return [self._response]
+
+    def health(self) -> bool:
+        return True
+
+
+def _make_single_coding_task_planner(title: str = "Implement hello.py"):
+    """Return a Planner that emits exactly one CODING task."""
+    from smartagent.executive.planner import Planner
+    from smartagent.executive.task import Task, TaskType
+
+    class _SingleTaskPlanner(Planner):
+        def create_plan(self, goal: str) -> list:
+            return [Task(
+                title=title,
+                description=goal,
+                task_type=TaskType.CODING,
+            )]
+
+    return _SingleTaskPlanner()
+
+
+# Fenced response the mock LLM returns for all three workers
+_HELLO_RESPONSE = "```python hello.py\nprint('Hello World')\n```"
+
+
+class TestFullPipelineE2E:
+    """
+    End-to-end tests that wire the complete pipeline with a mock LLM.
+
+    What is verified:
+      - FileEditMixin.execute() IS reached (the MRO bug is fixed).
+      - hello.py physically exists on disk after build().
+      - FileEditor.list_edits() records hello.py with operation="create".
+      - SoftwareEngineerReport.files_created contains hello.py.
+      - SoftwareEngineerReport.project_dir equals the resolved tmp_path.
+      - 'Where is hello.py?' returns the absolute path, not a chat response.
+    """
+
+    def _make_ctrl(self, mock_mm):
+        from smartagent.executive.executive_controller import ExecutiveController
+        return ExecutiveController(
+            planner=_make_single_coding_task_planner(),
+            model_manager=mock_mm,
+        )
+
+    def _make_eng(self, ctrl):
+        from smartagent.engineer.software_engineer import SoftwareEngineer
+        from smartagent.dev_loop.dev_loop import DevLoop
+
+        dev_loop = DevLoop(executive=ctrl, max_iterations=1)
+        return SoftwareEngineer(dev_loop=dev_loop)
+
+    # ------------------------------------------------------------------
+    # 9a. hello.py exists on disk
+    # ------------------------------------------------------------------
+
+    def test_hello_py_exists_on_disk(self, tmp_path):
+        """The fundamental test: a file actually appears on disk."""
+        mock_mm = _MockModelManager(_HELLO_RESPONSE)
+        ctrl = self._make_ctrl(mock_mm)
+        eng = self._make_eng(ctrl)
+
+        eng.build(
+            goal="Create hello.py that prints Hello World",
+            test_cmd="echo no-tests",
+            run_quality=False,
+            project_dir=str(tmp_path),
+        )
+
+        assert (tmp_path / "hello.py").exists(), (
+            f"hello.py was not created in {tmp_path}"
+        )
+
+    # ------------------------------------------------------------------
+    # 9b. File content matches the LLM response
+    # ------------------------------------------------------------------
+
+    def test_hello_py_content(self, tmp_path):
+        """The written content must contain the code, not a wrapper."""
+        mock_mm = _MockModelManager(_HELLO_RESPONSE)
+        ctrl = self._make_ctrl(mock_mm)
+        eng = self._make_eng(ctrl)
+
+        eng.build(
+            goal="Create hello.py that prints Hello World",
+            test_cmd="echo no-tests",
+            run_quality=False,
+            project_dir=str(tmp_path),
+        )
+
+        content = (tmp_path / "hello.py").read_text()
+        assert "print" in content, f"Expected print() in hello.py, got:\n{content}"
+
+    # ------------------------------------------------------------------
+    # 9c. FileEditor.edit_log contains hello.py (operation="create")
+    # ------------------------------------------------------------------
+
+    def test_file_editor_edit_log_contains_hello(self, tmp_path):
+        """list_edits() must record the create operation for hello.py."""
+        mock_mm = _MockModelManager(_HELLO_RESPONSE)
+        ctrl = self._make_ctrl(mock_mm)
+        eng = self._make_eng(ctrl)
+
+        eng.build(
+            goal="Create hello.py",
+            test_cmd="echo no-tests",
+            run_quality=False,
+            project_dir=str(tmp_path),
+        )
+
+        ctx = ctrl.current_context
+        assert ctx is not None, "ExecutiveController.current_context is None after build"
+
+        editor = ctx.metadata.get("file_editor")
+        assert editor is not None, "file_editor not found in context.metadata"
+
+        edits = editor.list_edits()
+        created_paths = [e.path for e in edits if e.success and e.operation == "create"]
+        assert any("hello.py" in p for p in created_paths), (
+            f"hello.py not in created paths: {created_paths}"
+        )
+
+    # ------------------------------------------------------------------
+    # 9d. SoftwareEngineerReport.files_created == ["hello.py"]
+    # ------------------------------------------------------------------
+
+    def test_report_files_created_contains_hello(self, tmp_path):
+        """SoftwareEngineerReport.files_created must list hello.py."""
+        mock_mm = _MockModelManager(_HELLO_RESPONSE)
+        ctrl = self._make_ctrl(mock_mm)
+        eng = self._make_eng(ctrl)
+
+        report = eng.build(
+            goal="Create hello.py",
+            test_cmd="echo no-tests",
+            run_quality=False,
+            project_dir=str(tmp_path),
+        )
+
+        assert any("hello.py" in f for f in report.files_created), (
+            f"hello.py not in report.files_created: {report.files_created}"
+        )
+
+    # ------------------------------------------------------------------
+    # 9e. SoftwareEngineerReport.project_dir is the resolved absolute path
+    # ------------------------------------------------------------------
+
+    def test_report_project_dir(self, tmp_path):
+        """project_dir in the report must match the requested directory."""
+        mock_mm = _MockModelManager(_HELLO_RESPONSE)
+        ctrl = self._make_ctrl(mock_mm)
+        eng = self._make_eng(ctrl)
+
+        report = eng.build(
+            goal="Create hello.py",
+            test_cmd="echo no-tests",
+            run_quality=False,
+            project_dir=str(tmp_path),
+        )
+
+        assert report.project_dir == str(tmp_path), (
+            f"Expected project_dir={tmp_path!s}, got {report.project_dir!r}"
+        )
+
+    # ------------------------------------------------------------------
+    # 9f. "Where is hello.py?" returns the absolute path — NOT chat output
+    # ------------------------------------------------------------------
+
+    def test_where_is_file_returns_absolute_path(self, tmp_path, monkeypatch):
+        """
+        After a build, 'where is hello.py?' must return the absolute path.
+
+        The conversational model (fallback_chat) must never be reached.
+        We monkeypatch fallback_chat to a sentinel so a test failure is
+        immediately obvious if the chat fallback fires.
+        """
+        import types
+        from smartagent.ui.commands.intent_router import intent_aware_fallback
+
+        # Patch fallback_chat so any accidental chat routing is detectable
+        monkeypatch.setattr(
+            "smartagent.ui.commands.models.fallback_chat",
+            lambda a, r: "[CHAT-FALLBACK-SHOULD-NOT-REACH-HERE]",
+        )
+
+        mock_mm = _MockModelManager(_HELLO_RESPONSE)
+        ctrl = self._make_ctrl(mock_mm)
+        eng = self._make_eng(ctrl)
+
+        report = eng.build(
+            goal="Create hello.py",
+            test_cmd="echo no-tests",
+            run_quality=False,
+            project_dir=str(tmp_path),
+        )
+
+        # Simulate what engineer_cmd does: store report on agent
+        agent = types.SimpleNamespace(last_engineer_report=report)
+
+        answer = intent_aware_fallback(agent, "Where is hello.py?")
+
+        assert "[CHAT-FALLBACK" not in answer, (
+            "Request fell through to chat model — file-query handler did not fire"
+        )
+        assert str(tmp_path) in answer, (
+            f"Expected absolute path {tmp_path!s} in answer, got: {answer!r}"
+        )
+        assert "hello.py" in answer
+
+    def test_where_is_file_various_phrasings(self, tmp_path):
+        """'find hello.py' and 'path to hello.py' also resolve the path."""
+        import types
+        from smartagent.ui.commands.intent_router import intent_aware_fallback, _answer_last_build_file_query
+
+        mock_mm = _MockModelManager(_HELLO_RESPONSE)
+        ctrl = self._make_ctrl(mock_mm)
+        eng = self._make_eng(ctrl)
+
+        report = eng.build(
+            goal="Create hello.py",
+            test_cmd="echo no-tests",
+            run_quality=False,
+            project_dir=str(tmp_path),
+        )
+
+        agent = types.SimpleNamespace(last_engineer_report=report)
+
+        for query in [
+            "where is hello.py",
+            "where's hello.py",
+            "find hello.py",
+            "locate hello.py",
+            "path to hello.py",
+        ]:
+            answer = _answer_last_build_file_query(agent, query)
+            assert str(tmp_path) in answer, (
+                f"Query {query!r} did not return the path. Got: {answer!r}"
+            )
+
+    def test_unknown_file_returns_empty(self, tmp_path):
+        """Querying a file that was NOT created returns empty string (not an error)."""
+        import types
+        from smartagent.ui.commands.intent_router import _answer_last_build_file_query
+
+        mock_mm = _MockModelManager(_HELLO_RESPONSE)
+        ctrl = self._make_ctrl(mock_mm)
+        eng = self._make_eng(ctrl)
+
+        report = eng.build(
+            goal="Create hello.py",
+            test_cmd="echo no-tests",
+            run_quality=False,
+            project_dir=str(tmp_path),
+        )
+
+        agent = types.SimpleNamespace(last_engineer_report=report)
+        answer = _answer_last_build_file_query(agent, "where is nonexistent.py")
+        assert answer == "", f"Expected empty string for unknown file, got: {answer!r}"
+
+    def test_no_last_report_returns_empty(self):
+        """When agent has no last_engineer_report, query returns empty."""
+        import types
+        from smartagent.ui.commands.intent_router import _answer_last_build_file_query
+
+        agent = types.SimpleNamespace()  # no last_engineer_report attribute
+        assert _answer_last_build_file_query(agent, "where is hello.py") == ""
+
+    # ------------------------------------------------------------------
+    # 9g. FileEditMixin is now actually invoked (MRO bug is fixed)
+    # ------------------------------------------------------------------
+
+    def test_file_edit_mixin_execute_is_called(self, tmp_path):
+        """
+        Directly verify that FileEditMixin.execute() runs when CodingWorker
+        is invoked by the Scheduler.  If the MRO bug re-appears, this test
+        will detect it because no file will be written.
+        """
+        from smartagent.executive.execution_context import ExecutionContext
+        from smartagent.executive.task import Task, TaskType
+        from smartagent.executive.workers.coding_worker import CodingWorker
+        from smartagent.workspace.file_editor import FileEditor
+
+        editor = FileEditor(str(tmp_path))
+        ctx = ExecutionContext(goal="create hello.py")
+        ctx.metadata["file_editor"] = editor
+
+        # Inject mock model_manager so _execute_with_ollama returns the fence block
+        ctx.metadata["model_manager"] = _MockModelManager(_HELLO_RESPONSE)
+
+        task = Task(
+            title="Implement hello.py",
+            description="Create hello.py that prints Hello World",
+            task_type=TaskType.CODING,
+        )
+
+        worker = CodingWorker()
+        result_text = worker.execute(task, ctx)
+
+        # File must exist on disk
+        assert (tmp_path / "hello.py").exists(), (
+            "CodingWorker.execute() did not write hello.py — "
+            "FileEditMixin may have been bypassed"
+        )
+
+        # Edit log must record the create
+        edits = editor.list_edits()
+        created = [e.path for e in edits if e.operation == "create" and e.success]
+        assert any("hello.py" in p for p in created), (
+            f"hello.py not in create log: {created}"
+        )
+
+        # "Files written" footer must appear in the returned text
+        assert "Files written" in result_text, (
+            f"Expected 'Files written' footer in result, got:\n{result_text[:300]}"
+        )

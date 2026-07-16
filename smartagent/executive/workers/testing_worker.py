@@ -71,5 +71,10 @@ Rules:
     def description(self) -> str:
         return "Writes unit tests, validates behaviour, and identifies edge cases."
 
-    def execute(self, task: "Task", context: "ExecutionContext") -> str:
-        return self._execute_with_tools(task, context)
+    # execute() is intentionally NOT defined here — same reason as CodingWorker.
+    #
+    # MRO: TestingWorker → FileEditMixin → WorkerToolMixin → …
+    #
+    # FileEditMixin.execute() wraps WorkerToolMixin.execute() (_execute_with_tools)
+    # so that fenced test-code blocks in the LLM response are written to disk.
+    # Defining execute() here would bypass FileEditMixin and break file creation.

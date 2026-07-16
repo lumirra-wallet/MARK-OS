@@ -48,6 +48,35 @@ description: Root causes and fixes for the bug where `engineer` reports success 
   After those run, `_inject_file_editor` has already fired.
 - `DevLoop._run_test_phase` and `_run_debug_phase` pass `cwd=project_dir` to subprocess.
 
+## Bug 6 — MRO override: CodingWorker.execute() bypasses FileEditMixin (discovered post-v2.0)
+
+CodingWorker and TestingWorker both defined their own execute() that called
+`_execute_with_tools()` directly. Because CodingWorker comes before FileEditMixin
+in the MRO (FileEditMixin, WorkerToolMixin …), Python found CodingWorker.execute()
+first, FileEditMixin.execute() was never called, and files were NEVER written.
+
+**Fix:**
+1. Add `execute()` to `WorkerToolMixin` — calls `_execute_with_tools()`.
+2. Remove `execute()` from `CodingWorker` and `TestingWorker`.
+   The correct MRO chain is: FileEditMixin.execute() → super().execute()
+   → WorkerToolMixin.execute() → _execute_with_tools() → LLM → back to
+   FileEditMixin._write_output_files() → disk.
+
+## Bug 7 — "Where is hello.py?" routed to chat model
+
+Intent router's `_CHAT_STARTERS` includes "where", so "where is hello.py?" went
+to `fallback_chat()` which had no knowledge of what was just built.
+
+**Fix:**
+1. `engineer_cmd.handle_engineer()` now stores `agent.last_engineer_report = report`
+   after each build.
+2. `intent_aware_fallback()` calls `_answer_last_build_file_query(agent, raw)` BEFORE
+   `classify_intent()`. If the query mentions a file from `last_engineer_report`, the
+   absolute path is returned immediately — the chat model is never reached.
+3. `_FILE_LOC_RE` regex matches: "where is X", "where's X", "find X", "locate X",
+   "path to X", "path of X".
+
 ## Test file
 
-`tests/test_engineer_e2e.py` — 32 tests covering all five bugs. Total suite: 2311 tests.
+`tests/test_engineer_e2e.py` — 42 tests (32 original + 10 full-pipeline E2E).
+Total suite: 2321 tests.

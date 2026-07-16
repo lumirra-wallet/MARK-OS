@@ -415,3 +415,25 @@ Rules:
 
     def _print_continuing(self) -> None:
         print("      Continuing…", flush=True)
+
+    # ------------------------------------------------------------------
+    # execute() — satisfies BaseWorker's abstract requirement
+    # ------------------------------------------------------------------
+
+    def execute(self, task: "Task", context: "ExecutionContext") -> str:
+        """
+        Default ``execute()`` implementation for tool-enabled workers.
+
+        Workers that inherit :class:`~smartagent.executive.workers.file_edit_mixin.FileEditMixin`
+        **must NOT** override ``execute()`` themselves.  The MRO chain is:
+
+            FileEditMixin.execute()          ← called by Scheduler
+            └─ super().execute()             ← dispatches here
+               └─ _execute_with_tools()      ← ReAct loop → Ollama
+            └─ _write_output_files()         ← writes fenced code blocks to disk
+
+        Workers that do *not* use ``FileEditMixin`` (and currently define their
+        own ``execute()``) continue to work unchanged because their definition
+        takes precedence in the MRO.
+        """
+        return self._execute_with_tools(task, context)

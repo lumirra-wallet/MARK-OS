@@ -74,5 +74,14 @@ Rules:
     def description(self) -> str:
         return "Writes clean, production-quality implementation code."
 
-    def execute(self, task: "Task", context: "ExecutionContext") -> str:
-        return self._execute_with_tools(task, context)
+    # execute() is intentionally NOT defined here.
+    #
+    # The MRO is:  CodingWorker → FileEditMixin → WorkerToolMixin → …
+    #
+    # When the Scheduler calls worker.execute(task, context):
+    #   1. FileEditMixin.execute() runs first (leftmost mixin).
+    #   2. It calls super().execute() → WorkerToolMixin.execute() → _execute_with_tools()
+    #   3. The LLM response (containing fenced code blocks) is returned to step 1.
+    #   4. FileEditMixin._write_output_files() parses the blocks and writes them to disk.
+    #
+    # Defining execute() here would short-circuit step 1, skipping file creation.

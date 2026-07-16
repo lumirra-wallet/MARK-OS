@@ -25,6 +25,7 @@ unconditionally route to chat, regardless of later content, so phrases like
 
 from __future__ import annotations
 
+import os
 import re
 from typing import TYPE_CHECKING
 
@@ -166,6 +167,62 @@ def classify_intent(raw: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# File-location query handler
+# ---------------------------------------------------------------------------
+
+# Matches "where is hello.py?", "where's the file calculator.py",
+# "find utils.py", "path to auth.py", "locate db.py", etc.
+_FILE_LOC_RE: re.Pattern = re.compile(
+    r"(?:"
+    r"where(?:'s|\s+is|\s+can\s+i\s+find)?[\s\w]*?"
+    r"|find\s+"
+    r"|locate\s+"
+    r"|path\s+(?:to|of|for)\s+"
+    r")"
+    r"(?:the\s+)?(?:file\s+)?"
+    r"(?P<name>[\w][\w\-\.]*\.[a-zA-Z0-9]{1,5})\b",
+    re.I,
+)
+
+
+def _answer_last_build_file_query(agent: "SmartAgent", raw: str) -> str:
+    """
+    If *raw* asks where a file from the last engineer build lives, return its
+    absolute path.  Returns an empty string when no match or no prior build.
+
+    This is called *before* ``classify_intent`` so that questions beginning
+    with "where" (a chat-starter word) never fall through to the chat model
+    after a successful engineer run.
+    """
+    report = getattr(agent, "last_engineer_report", None)
+    if report is None:
+        return ""
+
+    m = _FILE_LOC_RE.search(raw)
+    if not m:
+        return ""
+
+    queried = m.group("name").lower()
+    all_files = (
+        list(getattr(report, "files_created", []))
+        + list(getattr(report, "files_modified", []))
+    )
+    project_dir: str = getattr(report, "project_dir", "") or ""
+
+    for f in all_files:
+        basename = os.path.basename(f).lower()
+        if basename == queried or f.lower() == queried:
+            abs_path = (
+                os.path.join(project_dir, f)
+                if project_dir and not os.path.isabs(f)
+                else f
+            )
+            return f"Created: {abs_path}"
+
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # Fallback handler — replaces models.fallback_chat as the router's fallback
 # ---------------------------------------------------------------------------
 
@@ -173,13 +230,23 @@ def intent_aware_fallback(agent: "SmartAgent", raw: str) -> str:
     """
     REPL fallback handler.
 
-    Classifies *raw* and either:
-    - delegates to the ``engineer`` command pipeline, or
-    - falls through to the active Ollama model chat.
+    Priority:
+    1. If the user asks where a recently-built file lives, return its absolute
+       path immediately — never route to the chat model which has no knowledge
+       of what the engineer pipeline created.
+    2. Classify the intent and either delegate to the engineer pipeline or fall
+       through to the active Ollama model.
 
     Registered by :class:`~smartagent.ui.console.Console` via
     ``router.set_fallback(intent_aware_fallback)``.
     """
+    # Priority 1 — answer file-location queries from the last engineer report.
+    # This runs BEFORE classify_intent so "where is hello.py?" never reaches
+    # the chat model even though "where" is a chat-starter word.
+    file_answer = _answer_last_build_file_query(agent, raw)
+    if file_answer:
+        return file_answer
+
     intent = classify_intent(raw)
 
     if intent == "engineer":

@@ -109,6 +109,14 @@ def handle_engineer(agent: "SmartAgent", args: list[str]) -> str:
     except Exception as exc:
         return f"[error] Engineer pipeline failed: {exc}"
 
+    # Persist the report on the agent so follow-up queries like
+    # "Where is hello.py?" can return the absolute path instead of
+    # falling through to the chat model which has no knowledge of the build.
+    try:
+        agent.last_engineer_report = report
+    except Exception:
+        pass
+
     return "\n" + "\n".join(report.as_display_lines())
 
 
