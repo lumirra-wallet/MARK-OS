@@ -75,6 +75,26 @@ _PROVIDER_CATALOGUE = [
         "capabilities": ["chat", "streaming"],
         "default_model": "llama3.1:8b",
     },
+    {
+        "id":          "openai",
+        "name":        "OpenAI",
+        "description": "OpenAI GPT-4o and GPT-4o-mini models",
+        "base_url":    os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        "requires_token": True,
+        "token_env":   "OPENAI_API_KEY",
+        "capabilities": ["chat", "streaming", "embeddings", "tool_calling"],
+        "default_model": "gpt-4o-mini",
+    },
+    {
+        "id":          "anthropic",
+        "name":        "Anthropic",
+        "description": "Anthropic Claude 3.5 and Claude 4 models",
+        "base_url":    "https://api.anthropic.com",
+        "requires_token": True,
+        "token_env":   "ANTHROPIC_API_KEY",
+        "capabilities": ["chat", "streaming"],
+        "default_model": "claude-3-5-haiku-20241022",
+    },
 ]
 
 # ---------------------------------------------------------------------------

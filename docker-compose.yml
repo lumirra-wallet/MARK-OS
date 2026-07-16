@@ -1,0 +1,89 @@
+# ── MARK AI OS — Docker Compose ───────────────────────────────────────────────
+#
+# Local full-stack (Ollama + ChromaDB + SQLite):
+#   docker compose up
+#
+# Cloud stack (GitHub Models + PostgreSQL + pgvector):
+#   ACTIVE_PROVIDER=github GITHUB_TOKEN=ghp_... \
+#   DATABASE_URL=postgresql://mark:mark@postgres/mark \
+#   docker compose --profile cloud up
+#
+# See docs/deployment.md for all options.
+# ──────────────────────────────────────────────────────────────────────────────
+
+name: mark-ai
+
+services:
+
+  # ── MARK backend + frontend ──────────────────────────────────────────────────
+  mark:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Provider (defaults to auto-detect: github if GITHUB_TOKEN set, else ollama)
+      ACTIVE_PROVIDER:      ${ACTIVE_PROVIDER:-}
+      GITHUB_TOKEN:         ${GITHUB_TOKEN:-}
+      OPENAI_API_KEY:       ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY:    ${ANTHROPIC_API_KEY:-}
+      OLLAMA_HOST:          ${OLLAMA_HOST:-http://ollama:11434}
+      # Database
+      DATABASE_PROVIDER:    ${DATABASE_PROVIDER:-sqlite}
+      DATABASE_URL:         ${DATABASE_URL:-}
+      # Vector store
+      VECTOR_PROVIDER:      ${VECTOR_PROVIDER:-chroma}
+      CHROMA_PATH:          /data/chroma
+      # Storage
+      STORAGE_DIR:          /data/storage
+      # Server
+      PORT:                 8000
+      SESSION_SECRET:       ${SESSION_SECRET:-changeme-in-production}
+      API_BASE_URL:         ${API_BASE_URL:-http://localhost:8000}
+    volumes:
+      - mark_data:/data
+    depends_on:
+      - ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Ollama (local LLM server) ────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # ── PostgreSQL (cloud profile) ───────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    profiles: ["cloud"]
+    environment:
+      POSTGRES_USER:     mark
+      POSTGRES_PASSWORD: mark
+      POSTGRES_DB:       mark
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mark"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mark_data:
+  ollama_models:
+  postgres_data:

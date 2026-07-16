@@ -47,8 +47,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     import asyncio
     port = os.environ.get("PORT", "8000")
     logger.info("MARK server starting on port %s", port)
-    print(f"  [server] MARK API ready  →  http://localhost:{port}")
-    print(f"  [server] WebSocket stream →  ws://localhost:{port}/ws")
+    # Use configurable URL for startup log — avoids localhost assumption in cloud deployments
+    base_url = os.environ.get("API_BASE_URL", f"http://localhost:{port}")
+    print(f"  [server] MARK API ready  →  {base_url}")
+    print(f"  [server] WebSocket stream →  {base_url.replace('http', 'ws')}/ws")
+
+    # Auto-detect workspace from git if not already set
+    try:
+        import subprocess
+        from smartagent.server import api as _api  # type: ignore[attr-defined]
+        if not getattr(_api, "_state", None):
+            result = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=3,
+            )
+            if result.returncode == 0:
+                detected = result.stdout.strip()
+                if detected:
+                    _api._state = type("_WS", (), {"workspace": detected, "cwd": detected})()
+                    logger.info("Auto-detected workspace: %s", detected)
+    except Exception:
+        pass  # workspace detection is best-effort
 
     # Wire the VoiceManager to the live connection_manager so voice events
     # can broadcast over WebSocket even between build runs.

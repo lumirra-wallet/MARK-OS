@@ -131,7 +131,7 @@ class SmartAgent:
         self.model_manager = ModelManager(
             settings=ModelSettings(
                 default_model_id=settings.default_model_id,
-                ollama_base_url=getattr(settings, "ollama_base_url", "http://127.0.0.1:11434"),
+                ollama_base_url=getattr(settings, "ollama_base_url", "") or __import__("os").environ.get("OLLAMA_HOST", "http://localhost:11434"),
                 ollama_default_model=getattr(settings, "ollama_default_model", "llama3.1:8b"),
                 ollama_coding_model=getattr(settings, "ollama_coding_model", "qwen2.5-coder:7b"),
             ),
@@ -142,7 +142,7 @@ class SmartAgent:
         # like ``model use llama3.1:8b`` work even if Ollama is offline.
         # Discovery runs quickly (3 s timeout) and never blocks startup.
         self.model_manager.load_ollama_models(
-            base_url=getattr(settings, "ollama_base_url", "http://127.0.0.1:11434"),
+            base_url=getattr(settings, "ollama_base_url", "") or __import__("os").environ.get("OLLAMA_HOST", "http://localhost:11434"),
             default_model=getattr(settings, "ollama_default_model", "llama3.1:8b"),
             coding_model=getattr(settings, "ollama_coding_model", "qwen2.5-coder:7b"),
         )

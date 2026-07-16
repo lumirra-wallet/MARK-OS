@@ -77,7 +77,8 @@ class Settings:
     knowledge_path: str = "knowledge"
     workspaces_path: str = "workspaces"   # Milestone 15 — workspace root directory
     # Ollama integration (Milestone 9)
-    ollama_base_url: str = "http://127.0.0.1:11434"
+    # Reads OLLAMA_HOST so the same codebase works locally and in cloud deployments.
+    ollama_base_url: str = ""  # resolved in __post_init__
     ollama_default_model: str = "llama3.1:8b"
     ollama_coding_model: str = "qwen2.5-coder:7b"
 
@@ -86,6 +87,11 @@ class Settings:
     github_default_model: str = "gpt-4.1-mini"
     github_coding_model: str = "gpt-4.1"
     github_fallback_model: str = "gpt-4o-mini"
+
+    def __post_init__(self) -> None:
+        import os
+        if not self.ollama_base_url:
+            self.ollama_base_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
     voice_enabled: bool = False
     automation_enabled: bool = False

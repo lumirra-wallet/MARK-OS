@@ -961,9 +961,10 @@ class TestFreeTextFallback:
 
 
 class TestOllamaSettings:
-    def test_ollama_base_url_default(self):
+    def test_ollama_base_url_default(self, monkeypatch):
+        monkeypatch.delenv("OLLAMA_HOST", raising=False)
         s = Settings()
-        assert s.ollama_base_url == "http://127.0.0.1:11434"
+        assert s.ollama_base_url == "http://localhost:11434"
 
     def test_ollama_default_model(self):
         s = Settings()

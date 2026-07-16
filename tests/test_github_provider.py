@@ -531,7 +531,7 @@ class TestProviderFactory:
         import smartagent.llm.factory as _fac
         monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / ".state.json")
         with pytest.raises(ValueError, match="Unknown provider"):
-            _fac.switch_provider("anthropic")
+            _fac.switch_provider("gemini")
 
     def test_get_llm_settings_returns_dict(self, monkeypatch, tmp_path):
         monkeypatch.delenv("ACTIVE_PROVIDER", raising=False)

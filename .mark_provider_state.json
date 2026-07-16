@@ -1,0 +1,10 @@
+{
+  "provider": "github",
+  "github_model": "gpt-4o-mini",
+  "github_coding_model": "gpt-4.1",
+  "ollama_model": "llama3.1:8b",
+  "ollama_coding_model": "qwen2.5-coder:7b",
+  "temperature": 0.7,
+  "max_tokens": 4096,
+  "streaming": true
+}

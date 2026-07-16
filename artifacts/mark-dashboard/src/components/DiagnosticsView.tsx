@@ -2,8 +2,8 @@
  * DiagnosticsView — full system health dashboard.
  *
  * Shows a green/amber/red status indicator for every major MARK subsystem:
- *   Backend · LLM Provider · Embeddings · Git · Workspace ·
- *   Vector DB · Memory · WebSocket
+ *   Backend · Database · LLM Provider · Embeddings · Vector DB ·
+ *   Git · Workspace · Memory · WebSocket · System (CPU/RAM)
  *
  * Polls /diagnostics every 30 s and supports a manual refresh button.
  */
@@ -12,7 +12,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   CheckCircle2, XCircle, AlertTriangle, RefreshCw, Stethoscope,
   Server, Brain, Database, GitBranch, FolderOpen, Layers, MemoryStick,
-  Wifi, Activity, Info,
+  Wifi, Activity, Info, Cpu, HardDrive, Zap,
 } from 'lucide-react';
 import { useMarkStore } from '@/store/markStore';
 import { Button } from '@/components/ui/button';
@@ -27,6 +27,12 @@ interface DiagCheck {
   provider?:   string;
   model?:      string;
   latency_ms?: number;
+  cpu_pct?:    number;
+  ram_pct?:    number;
+  ram_used_gb?:  number;
+  ram_total_gb?: number;
+  count?:      number;
+  dir?:        string;
 }
 
 interface DiagResponse {
@@ -52,35 +58,56 @@ const StatusIcon = ({ status }: { status: 'ok' | 'warn' | 'error' }) => {
   return                        <XCircle       className="w-4 h-4 text-red-400    shrink-0" />;
 };
 
-// ── Icon per subsystem ─────────────────────────────────────────────────────────
+// ── Icon + label per subsystem ─────────────────────────────────────────────────
 
 const subsystemIcon: Record<string, React.ElementType> = {
   backend:      Server,
+  database:     Database,
   llm_provider: Brain,
   embeddings:   Layers,
+  vector_db:    Zap,
   git:          GitBranch,
   workspace:    FolderOpen,
-  vector_db:    Database,
   memory:       MemoryStick,
   websocket:    Wifi,
+  system:       Cpu,
 };
 
 const subsystemLabel: Record<string, string> = {
   backend:      'Backend',
+  database:     'Database',
   llm_provider: 'LLM Provider',
-  embeddings:   'Embedding Provider',
+  embeddings:   'Embeddings',
+  vector_db:    'Vector DB',
   git:          'Git',
   workspace:    'Workspace',
-  vector_db:    'Vector DB',
   memory:       'Memory',
   websocket:    'WebSocket',
+  system:       'CPU / RAM',
 };
+
+// ── Mini usage bar ─────────────────────────────────────────────────────────────
+
+function UsageBar({ pct, color }: { pct: number; color: string }) {
+  return (
+    <div className="w-20 h-1.5 rounded-full bg-muted/40 overflow-hidden shrink-0">
+      <div
+        className={cn('h-full rounded-full transition-all', color)}
+        style={{ width: `${Math.min(pct, 100)}%` }}
+      />
+    </div>
+  );
+}
 
 // ── Individual check card ──────────────────────────────────────────────────────
 
 function CheckCard({ check, index }: { check: DiagCheck; index: number }) {
-  const Icon = subsystemIcon[check.name] ?? Info;
+  const Icon  = subsystemIcon[check.name] ?? Info;
   const label = subsystemLabel[check.name] ?? check.name;
+
+  const isSystem = check.name === 'system';
+  const cpuColor = (check.cpu_pct ?? 0) > 80 ? 'bg-amber-400' : 'bg-emerald-400';
+  const ramColor = (check.ram_pct ?? 0) > 85 ? 'bg-red-400'   : (check.ram_pct ?? 0) > 70 ? 'bg-amber-400' : 'bg-emerald-400';
 
   return (
     <motion.div
@@ -92,27 +119,50 @@ function CheckCard({ check, index }: { check: DiagCheck; index: number }) {
         statusBg[check.status],
       )}
     >
-      <div className="flex items-center gap-2.5 min-w-[160px] shrink-0">
+      {/* Subsystem label */}
+      <div className="flex items-center gap-2.5 min-w-[148px] shrink-0">
         <Icon className={cn('w-4 h-4 shrink-0', statusColor[check.status])} />
         <span className="text-sm font-medium">{label}</span>
       </div>
 
+      {/* Message + status */}
       <div className="flex items-center gap-2 flex-1 min-w-0">
         <StatusIcon status={check.status} />
         <p className="text-sm text-muted-foreground truncate">{check.message}</p>
       </div>
 
-      <div className="flex items-center gap-2 shrink-0">
+      {/* Right-side badges */}
+      <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+        {/* CPU bar */}
+        {isSystem && check.cpu_pct != null && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-muted-foreground/60 font-mono">CPU</span>
+            <UsageBar pct={check.cpu_pct} color={cpuColor} />
+            <span className="text-[10px] font-mono text-muted-foreground w-8">{check.cpu_pct?.toFixed(0)}%</span>
+          </div>
+        )}
+        {/* RAM bar */}
+        {isSystem && check.ram_pct != null && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-muted-foreground/60 font-mono">RAM</span>
+            <UsageBar pct={check.ram_pct} color={ramColor} />
+            <span className="text-[10px] font-mono text-muted-foreground w-8">{check.ram_pct?.toFixed(0)}%</span>
+          </div>
+        )}
+
+        {/* Provider badge */}
         {check.provider && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/40 text-muted-foreground font-mono">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/40 text-muted-foreground font-mono capitalize">
             {check.provider}
           </span>
         )}
+        {/* Model badge */}
         {check.model && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/40 text-muted-foreground font-mono truncate max-w-[120px]">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 font-mono truncate max-w-[130px]">
             {check.model}
           </span>
         )}
+        {/* Latency */}
         {check.latency_ms != null && (
           <span className="text-[10px] text-muted-foreground/60 font-mono w-14 text-right">
             {check.latency_ms}ms
@@ -120,6 +170,61 @@ function CheckCard({ check, index }: { check: DiagCheck; index: number }) {
         )}
       </div>
     </motion.div>
+  );
+}
+
+// ── Summary cards ──────────────────────────────────────────────────────────────
+
+function SummaryCards({ checks }: { checks: DiagCheck[] }) {
+  const llm    = checks.find(c => c.name === 'llm_provider');
+  const sys    = checks.find(c => c.name === 'system');
+  const db     = checks.find(c => c.name === 'database');
+  const vdb    = checks.find(c => c.name === 'vector_db');
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* Active provider/model */}
+      <div className="p-3 rounded-xl border border-border/40 bg-muted/10 space-y-1">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Provider</p>
+        <p className="text-sm font-semibold capitalize">{llm?.provider ?? '—'}</p>
+        <p className="text-[10px] text-muted-foreground font-mono truncate">{llm?.model ?? '—'}</p>
+      </div>
+
+      {/* CPU */}
+      <div className="p-3 rounded-xl border border-border/40 bg-muted/10 space-y-1">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">CPU</p>
+        <p className="text-sm font-semibold">{sys?.cpu_pct != null ? `${sys.cpu_pct.toFixed(0)}%` : '—'}</p>
+        <div className="h-1 rounded-full bg-muted/40 overflow-hidden">
+          <div
+            className={cn('h-full rounded-full', (sys?.cpu_pct ?? 0) > 80 ? 'bg-amber-400' : 'bg-emerald-400')}
+            style={{ width: `${Math.min(sys?.cpu_pct ?? 0, 100)}%` }}
+          />
+        </div>
+      </div>
+
+      {/* RAM */}
+      <div className="p-3 rounded-xl border border-border/40 bg-muted/10 space-y-1">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">RAM</p>
+        <p className="text-sm font-semibold">
+          {sys?.ram_used_gb != null ? `${sys.ram_used_gb} / ${sys.ram_total_gb} GB` : '—'}
+        </p>
+        <div className="h-1 rounded-full bg-muted/40 overflow-hidden">
+          <div
+            className={cn('h-full rounded-full', (sys?.ram_pct ?? 0) > 85 ? 'bg-red-400' : (sys?.ram_pct ?? 0) > 70 ? 'bg-amber-400' : 'bg-emerald-400')}
+            style={{ width: `${Math.min(sys?.ram_pct ?? 0, 100)}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Storage */}
+      <div className="p-3 rounded-xl border border-border/40 bg-muted/10 space-y-1">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Storage</p>
+        <p className="text-sm font-semibold capitalize">{db?.provider ?? 'local'}</p>
+        <p className="text-[10px] text-muted-foreground">
+          {db?.status === 'ok' ? 'Connected' : db?.message?.slice(0, 24) ?? '—'}
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -156,9 +261,8 @@ export function DiagnosticsView() {
     setLoading(true);
     setError('');
     try {
-      // Build the URL from serverUrl (respects VITE_API_URL / same-origin)
       const base = serverUrl.replace(/\/$/, '');
-      const res = await fetch(`${base}/diagnostics`);
+      const res  = await fetch(`${base}/diagnostics`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json: DiagResponse = await res.json();
       setData(json);
@@ -170,7 +274,6 @@ export function DiagnosticsView() {
     }
   }, [serverUrl]);
 
-  // Run on mount and every 30 s
   useEffect(() => {
     run();
     const id = setInterval(run, 30_000);
@@ -229,7 +332,12 @@ export function DiagnosticsView() {
         {/* Loading skeleton */}
         {loading && !data && (
           <div className="space-y-3">
-            {Array.from({ length: 8 }).map((_, i) => (
+            <div className="grid grid-cols-4 gap-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-20 rounded-xl bg-muted/30 animate-pulse" />
+              ))}
+            </div>
+            {Array.from({ length: 10 }).map((_, i) => (
               <div key={i} className="h-14 rounded-xl bg-muted/30 animate-pulse" />
             ))}
           </div>
@@ -242,10 +350,15 @@ export function DiagnosticsView() {
               key="results"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="space-y-3"
+              className="space-y-4"
             >
+              {/* Summary row */}
+              <SummaryCards checks={data.checks} />
+
+              {/* Overall banner */}
               <OverallBanner status={data.status} checkCount={data.checks.length} />
 
+              {/* Check cards */}
               <div className="space-y-2 pt-1">
                 {data.checks.map((check, i) => (
                   <CheckCard key={check.name} check={check} index={i} />
@@ -256,9 +369,9 @@ export function DiagnosticsView() {
         </AnimatePresence>
 
         {/* Legend */}
-        <div className="flex items-center gap-5 pt-2 text-xs text-muted-foreground border-t border-border/40 pt-4">
-          <span className="flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> OK</span>
-          <span className="flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> Warning — degraded but functional</span>
+        <div className="flex flex-wrap items-center gap-5 text-xs text-muted-foreground border-t border-border/40 pt-4">
+          <span className="flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Healthy</span>
+          <span className="flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> Warning — degraded</span>
           <span className="flex items-center gap-1.5"><XCircle className="w-3.5 h-3.5 text-red-400" /> Error — action required</span>
           <span className="ml-auto">Auto-refreshes every 30 s</span>
         </div>

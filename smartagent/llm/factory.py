@@ -49,19 +49,28 @@ _STATE_FILE = Path(".mark_provider_state.json")
 # State helpers
 # ---------------------------------------------------------------------------
 
+_VALID_PROVIDERS = {"github", "ollama", "openai", "anthropic"}
+
+
 def _auto_default_provider() -> str:
     """Detect the best default provider without requiring explicit configuration.
 
     Selection order:
       1. ACTIVE_PROVIDER env var (explicit override)
-      2. GITHUB_TOKEN present → "github" (works on Replit out of the box)
-      3. Fallback → "ollama" (local dev without credentials)
+      2. GITHUB_TOKEN present  → "github"
+      3. OPENAI_API_KEY present → "openai"
+      4. ANTHROPIC_API_KEY present → "anthropic"
+      5. Fallback               → "ollama"
     """
     explicit = os.environ.get("ACTIVE_PROVIDER", "").strip().lower()
-    if explicit in ("github", "ollama"):
+    if explicit in _VALID_PROVIDERS:
         return explicit
     if os.environ.get("GITHUB_TOKEN"):
         return "github"
+    if os.environ.get("OPENAI_API_KEY"):
+        return "openai"
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic"
     return "ollama"
 
 
@@ -122,18 +131,33 @@ def get_model_for_role(role: str = "default") -> str | None:
 
 def get_llm_settings() -> dict[str, Any]:
     """Return current LLM settings (provider, model, temperature, etc.)."""
-    state = _load_state()
+    state    = _load_state()
+    provider = state["provider"]
+
+    if provider == "github":
+        model        = state.get("github_model",        GITHUB_DEFAULT_MODEL)
+        coding_model = state.get("github_coding_model", GITHUB_CODING_MODEL)
+    elif provider == "openai":
+        model        = state.get("openai_model",        os.environ.get("OPENAI_DEFAULT_MODEL", "gpt-4o-mini"))
+        coding_model = state.get("openai_coding_model", "gpt-4o")
+    elif provider == "anthropic":
+        model        = state.get("anthropic_model",        os.environ.get("ANTHROPIC_DEFAULT_MODEL", "claude-3-5-haiku-20241022"))
+        coding_model = state.get("anthropic_coding_model", "claude-3-5-sonnet-20241022")
+    else:
+        model        = state.get("ollama_model",        OLLAMA_DEFAULT_MODEL)
+        coding_model = state.get("ollama_coding_model", OLLAMA_CODING_MODEL)
+
     return {
-        "provider":       state["provider"],
-        "model":          state.get("github_model" if state["provider"] == "github" else "ollama_model",
-                                    GITHUB_DEFAULT_MODEL),
-        "coding_model":   state.get("github_coding_model" if state["provider"] == "github"
-                                    else "ollama_coding_model", GITHUB_CODING_MODEL),
-        "temperature":    state.get("temperature", 0.7),
-        "max_tokens":     state.get("max_tokens", 4096),
-        "streaming":      state.get("streaming", True),
-        "github_available": bool(os.environ.get("GITHUB_TOKEN")),
-        "ollama_url":     os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
+        "provider":           provider,
+        "model":              model,
+        "coding_model":       coding_model,
+        "temperature":        state.get("temperature", 0.7),
+        "max_tokens":         state.get("max_tokens", 4096),
+        "streaming":          state.get("streaming", True),
+        "github_available":   bool(os.environ.get("GITHUB_TOKEN")),
+        "openai_available":   bool(os.environ.get("OPENAI_API_KEY")),
+        "anthropic_available": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "ollama_url":         os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
     }
 
 
@@ -158,13 +182,14 @@ def switch_provider(
 
     Returns the new settings dict.
     """
-    if provider not in ("github", "ollama"):
-        raise ValueError(f"Unknown provider {provider!r}. Must be 'github' or 'ollama'.")
+    if provider not in _VALID_PROVIDERS:
+        raise ValueError(f"Unknown provider {provider!r}. Must be one of: {', '.join(sorted(_VALID_PROVIDERS))}.")
 
     state = _load_state()
     state["provider"] = provider
     if model:
-        key = "github_model" if provider == "github" else "ollama_model"
+        key = {"github": "github_model", "openai": "openai_model",
+               "anthropic": "anthropic_model"}.get(provider, "ollama_model")
         state[key] = model
     _save_state(state)
 
@@ -190,6 +215,10 @@ def wire_agent(model_manager: Any) -> None:
 def _default_model(provider: str, state: dict[str, Any]) -> str:
     if provider == "github":
         return state.get("github_model", GITHUB_DEFAULT_MODEL)
+    if provider == "openai":
+        return state.get("openai_model", os.environ.get("OPENAI_DEFAULT_MODEL", "gpt-4o-mini"))
+    if provider == "anthropic":
+        return state.get("anthropic_model", os.environ.get("ANTHROPIC_DEFAULT_MODEL", "claude-3-5-haiku-20241022"))
     return state.get("ollama_model", OLLAMA_DEFAULT_MODEL)
 
 
@@ -197,6 +226,10 @@ def _wire_provider(provider: str, model: str, model_manager: Any) -> None:
     """Register provider models in model_manager and switch to *model*."""
     if provider == "github":
         _load_github(model, model_manager)
+    elif provider in ("openai", "anthropic"):
+        # OpenAI / Anthropic don't register models with ModelManager yet —
+        # they operate through the REST API layer directly. No-op here.
+        logger.info("ProviderFactory: %s provider selected (REST API layer only)", provider)
     else:
         _load_ollama(model, model_manager)
 

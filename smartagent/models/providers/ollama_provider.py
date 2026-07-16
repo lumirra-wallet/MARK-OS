@@ -105,7 +105,10 @@ class OllamaModelDiscovery:
     Equivalent to running ``ollama list`` locally — reads ``GET /api/tags``.
     """
 
-    def __init__(self, base_url: str = "http://127.0.0.1:11434") -> None:
+    def __init__(self, base_url: str = "") -> None:
+        import os as _os
+        if not base_url:
+            base_url = _os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         self._base_url = base_url.rstrip("/")
 
     def list_models(self, timeout: float = 5.0) -> list[OllamaModelInfo]:
