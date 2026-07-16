@@ -109,12 +109,13 @@ class Console:
         benchmark_cmd.register(self._router)   # v2.0 — Phase 7 Benchmarks
         performance_cmd.register(self._router) # v2.0 — Phase 12 Performance Metrics
 
-        # Milestone 9: free-text fallback — when the user types something that
-        # isn't a recognised command AND a model is active, route the raw input
-        # to the model.  When no model is active the fallback returns the
-        # standard "Unknown command" message so all pre-M9 behaviour is preserved.
-        from smartagent.ui.commands.models import fallback_chat
-        self._router.set_fallback(fallback_chat)
+        # v2.0 intent router — classifies free-text as an engineering task or
+        # general conversation.  Engineering tasks are automatically delegated
+        # to the SoftwareEngineer pipeline (same as typing "engineer <goal>").
+        # General conversation still routes to the active Ollama model.
+        # When no model is active the original "Unknown command" message is shown.
+        from smartagent.ui.commands.intent_router import intent_aware_fallback
+        self._router.set_fallback(intent_aware_fallback)
 
     # ------------------------------------------------------------------
     # Expose internals for testing

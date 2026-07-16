@@ -115,7 +115,8 @@ def _clear_cache(_agent: Any) -> str:
         return f"Could not clear cache: {exc}"
 
 
-def handle_performance(args: list[str], agent: Any) -> str:
+def handle_performance(agent: Any, args: list[str]) -> str:
+    """Display per-worker timing, prompt audit, and cache stats."""
     if not args:
         return _show_last_run(agent)
     sub = args[0].lower()
