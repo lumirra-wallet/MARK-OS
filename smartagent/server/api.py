@@ -195,9 +195,10 @@ async def project(file: str | None = None) -> ProjectResponse:
 
 
 # ---------------------------------------------------------------------------
-# Execute
+# Execute  (also aliased as /run for dashboard compatibility)
 # ---------------------------------------------------------------------------
 
+@router.post("/run")
 @router.post("/execute")
 async def execute(req: ExecuteRequest) -> dict:
     """

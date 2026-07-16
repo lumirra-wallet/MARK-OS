@@ -35,11 +35,22 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+_TEMP_PREFIXES = ("/tmp/", "/var/folders/", "\\Temp\\", "\\AppData\\Local\\Temp\\")
+
+
+def _is_test_job(job: dict) -> bool:
+    """Return True for jobs created by pytest temp workspaces — never show these."""
+    ws = job.get("workspace", "")
+    return any(ws.startswith(p) for p in _TEMP_PREFIXES)
+
+
 def _load_jobs() -> None:
     global _jobs
     if _JOBS_FILE.exists():
         try:
-            _jobs = json.loads(_JOBS_FILE.read_text())
+            raw = json.loads(_JOBS_FILE.read_text())
+            # Strip any jobs that landed in /tmp (pytest artefacts)
+            _jobs = {k: v for k, v in raw.items() if not _is_test_job(v)}
         except Exception:
             _jobs = {}
 
