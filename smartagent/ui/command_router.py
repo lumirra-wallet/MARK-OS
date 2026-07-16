@@ -148,3 +148,7 @@ class CommandRouter:
     def commands(self) -> list[CommandEntry]:
         """Return all registered :class:`CommandEntry` objects."""
         return list(self._entries.values())
+
+    def has_command(self, name: str) -> bool:
+        """Return True when *name* is a registered command."""
+        return name.lower() in self._entries

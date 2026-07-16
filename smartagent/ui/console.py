@@ -42,7 +42,9 @@ from smartagent.ui.commands import project_cmd    # Milestone 22 — Project Mem
 from smartagent.ui.commands import long_run_cmd   # Milestone 23 — Long Running Execution
 from smartagent.ui.commands import dev_loop_cmd   # Milestone 24 — Autonomous Dev Loop
 from smartagent.ui.commands import engineer_cmd   # Milestone 25 — Full Software Engineer
-from smartagent.ui.commands import validate_cmd   # v2.0 — Phase 9 Validation Suite
+from smartagent.ui.commands import validate_cmd      # v2.0 — Phase 9 Validation Suite
+from smartagent.ui.commands import benchmark_cmd    # v2.0 — Phase 7 Benchmarks
+from smartagent.ui.commands import performance_cmd  # v2.0 — Phase 12 Performance Metrics
 from smartagent.ui.repl import Repl
 
 _logger = get_logger(__name__)
@@ -103,7 +105,9 @@ class Console:
         long_run_cmd.register(self._router) # Milestone 23 — Long Running Execution
         dev_loop_cmd.register(self._router) # Milestone 24 — Autonomous Dev Loop
         engineer_cmd.register(self._router) # Milestone 25 — Full Software Engineer
-        validate_cmd.register(self._router) # v2.0 — Phase 9 Validation Suite
+        validate_cmd.register(self._router)    # v2.0 — Phase 9 Validation Suite
+        benchmark_cmd.register(self._router)   # v2.0 — Phase 7 Benchmarks
+        performance_cmd.register(self._router) # v2.0 — Phase 12 Performance Metrics
 
         # Milestone 9: free-text fallback — when the user types something that
         # isn't a recognised command AND a model is active, route the raw input

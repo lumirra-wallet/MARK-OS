@@ -150,28 +150,18 @@ class Planner:
         if not goal or not goal.strip():
             raise ValueError("Goal must be a non-empty string.")
 
-        # v2.0 — auto-detect complexity when not provided or when "medium"
-        if complexity in ("medium", ""):
-            try:
-                from smartagent.performance.complexity import classify_complexity
-                detected = classify_complexity(goal.strip())
-                complexity = detected.value
-                logger.info("Planner: detected complexity=%r for goal=%r", complexity, goal[:60])
-            except ImportError:
-                pass
-
-        # trivial/small → always use the 2-task trivial template
-        if complexity in ("trivial", "small"):
+        # v2.0 — fast-path: explicit "trivial" complexity → 2-task plan.
+        # Auto-detection is the caller's responsibility (DevLoop, SoftwareEngineer).
+        # When complexity is "medium" (the default), keyword matching decides the
+        # template — this preserves full backward compatibility with all pre-v2.0 tests.
+        if complexity == "trivial":
             specs = _TEMPLATES["trivial"]
             template_name = "trivial"
         else:
             template_name = self._infer_template(goal.strip())
             specs = _TEMPLATES[template_name]
-            # medium → filter to 4 tasks max (drop Design / Documentation)
-            if complexity == "medium":
-                allowed = _COMPLEXITY_TASK_FILTER.get("medium")
-                if allowed:
-                    specs = [s for s in specs if s.task_type in allowed]
+            # All other complexity values (small/medium/large/enterprise) use
+            # the full keyword-matched template unchanged — backward compatible.
 
         logger.info(
             "Planner: goal=%r complexity=%r template=%r (%d tasks)",

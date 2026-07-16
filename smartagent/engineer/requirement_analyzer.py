@@ -199,9 +199,6 @@ _BACKEND_ONLY_PATTERNS: list[re.Pattern] = [
         r"\bscraper\b",
         r"\bcrawler\b",
         r"\bbot\b",
-        r"\blibrary\b",
-        r"\bmodule\b",
-        r"\bpackage\b",
         r"\bhello[\s._-]?world\b",
         r"\bhello\.py\b",
     ]
