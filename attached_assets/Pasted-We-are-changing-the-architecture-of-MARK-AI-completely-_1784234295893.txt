@@ -1,0 +1,470 @@
+We are changing the architecture of MARK AI completely.
+
+DO NOT modify the existing engineering logic, workers, memory system, orchestration, DevLoop, planning system, scheduler, model manager, or tools unless absolutely necessary.
+
+The goal is NOT to rewrite MARK.
+
+The goal is to replace the terminal UI with a modern local web application while keeping the existing backend architecture.
+
+==================================================
+NEW ARCHITECTURE
+==================================================
+
+MARK Core (existing Python backend)
+            │
+            │
+      Event Bus
+      (publish/subscribe)
+            │
+    ┌───────────────┐
+    │               │
+ CLI Client     Web Dashboard
+                    │
+              React + Vite
+                    │
+          WebSocket Connection
+                    │
+            FastAPI Backend
+                    │
+             Existing MARK Core
+
+The CLI becomes only another client.
+
+The browser dashboard becomes the primary interface.
+
+==================================================
+BACKEND
+==================================================
+
+Create a FastAPI server.
+
+Suggested layout
+
+smartagent/server/
+
+    app.py
+    websocket.py
+    api.py
+    permissions.py
+    events.py
+    models.py
+
+The backend should expose
+
+GET /health
+
+GET /status
+
+GET /workers
+
+GET /project
+
+POST /execute
+
+POST /cancel
+
+POST /approve
+
+POST /deny
+
+WebSocket
+
+/ws
+
+The websocket should stream every event immediately.
+
+Never poll.
+
+==================================================
+EVENT BUS
+==================================================
+
+Create an internal event system.
+
+Every subsystem should publish events instead of printing directly.
+
+Examples
+
+WorkerStarted
+
+WorkerFinished
+
+WorkerThinking
+
+PlanningStarted
+
+PlanningFinished
+
+ToolStarted
+
+ToolFinished
+
+FileCreated
+
+FileModified
+
+FileDeleted
+
+GitCommit
+
+TestsStarted
+
+TestsPassed
+
+TestsFailed
+
+QualityStarted
+
+QualityFinished
+
+ModelStarted
+
+ModelFinished
+
+StreamingToken
+
+Error
+
+StatusChanged
+
+PermissionRequested
+
+PermissionGranted
+
+PermissionDenied
+
+Dashboard clients subscribe to these events through WebSockets.
+
+The CLI should also subscribe to the exact same events.
+
+==================================================
+PERMISSION SYSTEM
+==================================================
+
+Replace automatic file writing with an approval system.
+
+When MARK wants to
+
+Create file
+
+Modify file
+
+Delete file
+
+Run shell command
+
+Execute git
+
+Run external tools
+
+Emit
+
+PermissionRequested
+
+The dashboard should display
+
+File
+
+Location
+
+Operation
+
+Diff Preview
+
+Buttons
+
+Approve Once
+
+Always Approve
+
+Reject
+
+Once approved, continue execution automatically.
+
+==================================================
+PROJECT WORKSPACE
+==================================================
+
+The dashboard lets the user choose
+
+Workspace Folder
+
+MARK writes ONLY inside that workspace.
+
+Never write outside it.
+
+The workspace path must propagate through
+
+SoftwareEngineer
+
+DevLoop
+
+Orchestrator
+
+DebugLoop
+
+FileEditor
+
+All tools
+
+No hardcoded output folder.
+
+==================================================
+REACT DASHBOARD
+==================================================
+
+Use
+
+React
+
+Vite
+
+TypeScript
+
+TailwindCSS
+
+Framer Motion
+
+Zustand
+
+Monaco Editor
+
+xterm.js
+
+React Query
+
+React Router
+
+The UI should feel like Cursor or VSCode.
+
+==================================================
+LAYOUT
+==================================================
+
+----------------------------------------------------
+Top Navigation
+----------------------------------------------------
+
+MARK Logo
+
+Current Model
+
+Workspace
+
+Connection Status
+
+CPU
+
+RAM
+
+Elapsed Time
+
+----------------------------------------------------
+Left Sidebar
+----------------------------------------------------
+
+Projects
+
+Workers
+
+Memory
+
+Knowledge
+
+Logs
+
+Performance
+
+Settings
+
+----------------------------------------------------
+Center
+----------------------------------------------------
+
+Live execution timeline
+
+Animated worker graph
+
+Current task
+
+Current worker
+
+Current model
+
+Current token count
+
+Files created
+
+Files modified
+
+Planning tree
+
+----------------------------------------------------
+Right Sidebar
+----------------------------------------------------
+
+Approvals
+
+Errors
+
+Warnings
+
+Git
+
+Tool Calls
+
+----------------------------------------------------
+Bottom
+----------------------------------------------------
+
+Terminal (xterm.js)
+
+Streaming logs
+
+==================================================
+ANIMATIONS
+==================================================
+
+Use Framer Motion.
+
+Workers should animate.
+
+Research
+
+Planning
+
+Coding
+
+Testing
+
+Documentation
+
+Review
+
+Each stage should smoothly transition.
+
+Progress bars should animate.
+
+Timeline should animate.
+
+File creation should animate.
+
+Diff viewer should animate.
+
+Completion should animate.
+
+==================================================
+MONACO EDITOR
+==================================================
+
+Include Monaco Editor.
+
+When a file is created
+
+Open it automatically.
+
+Show syntax highlighting.
+
+Show live diffs.
+
+Highlight modified lines.
+
+==================================================
+TERMINAL
+==================================================
+
+Embed xterm.js.
+
+The terminal is only another client.
+
+Anything printed by MARK should appear in the terminal through websocket events.
+
+No duplicated execution.
+
+==================================================
+STREAMING
+==================================================
+
+LLM output should stream token-by-token.
+
+Never wait for full completion.
+
+The dashboard should display
+
+MARK is thinking...
+
+then stream text live.
+
+==================================================
+PERFORMANCE
+==================================================
+
+Never block the UI.
+
+Use asyncio.
+
+Background tasks.
+
+WebSockets.
+
+No polling.
+
+Lazy load heavy components.
+
+Keep dashboard responsive.
+
+==================================================
+GOAL
+==================================================
+
+The finished application should feel like a professional AI IDE similar to Cursor, Claude Code, or Replit Agent while preserving MARK's existing backend intelligence.
+
+The dashboard is ONLY a presentation layer.
+
+Business logic stays in the existing MARK backend.
+
+==================================================
+IMPORTANT
+==================================================
+
+Do NOT rewrite MARK.
+
+Do NOT replace existing workers.
+
+Do NOT replace orchestration.
+
+Do NOT replace memory.
+
+Do NOT replace the planning engine.
+
+Do NOT replace DevLoop.
+
+Wrap the existing architecture with a modern web interface.
+
+Build this incrementally in phases.
+
+Phase 1:
+FastAPI server + WebSocket + Event Bus.
+
+Phase 2:
+React dashboard shell.
+
+Phase 3:
+Live execution timeline.
+
+Phase 4:
+Permission system.
+
+Phase 5:
+Monaco editor.
+
+Phase 6:
+xterm.js terminal.
+
+Phase 7:
+Animations.
+
+Phase 8:
+Performance optimization.
+
+After each phase, run the full test suite to ensure zero regressions before proceeding.
