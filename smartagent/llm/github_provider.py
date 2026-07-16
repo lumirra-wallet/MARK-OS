@@ -250,8 +250,14 @@ class GitHubProvider(BaseModel):
         t0 = time.monotonic()
         try:
             client = self._get_client()
-            # Tiny probe: list models (fast, no generation cost)
-            client.models.list()
+            # Probe with a minimal 1-token generation (models.list is not
+            # supported at the GitHub inference endpoint).
+            client.chat.completions.create(
+                model=self._model_name,
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
+                stream=False,
+            )
             latency_ms = round((time.monotonic() - t0) * 1000)
             return ModelHealth(
                 healthy=True,

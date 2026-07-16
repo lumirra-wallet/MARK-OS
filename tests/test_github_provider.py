@@ -341,7 +341,7 @@ class TestGitHubProviderHealth:
     def test_health_returns_model_health_type(self):
         p = _loaded_provider()
         client = MagicMock()
-        client.models.list.return_value = _fake_models_list(["gpt-4.1-mini"])
+        client.chat.completions.create.return_value = _fake_completion("hi")
         p._client = client
         health = p.health()
         assert isinstance(health, ModelHealth)
@@ -349,7 +349,7 @@ class TestGitHubProviderHealth:
     def test_health_reachable_returns_healthy(self):
         p = _loaded_provider()
         client = MagicMock()
-        client.models.list.return_value = _fake_models_list(["gpt-4.1-mini"])
+        client.chat.completions.create.return_value = _fake_completion("hi")
         p._client = client
         health = p.health()
         assert health.healthy is True
@@ -358,7 +358,7 @@ class TestGitHubProviderHealth:
     def test_health_api_error_returns_unhealthy(self):
         p = _loaded_provider()
         client = MagicMock()
-        client.models.list.side_effect = Exception("unreachable")
+        client.chat.completions.create.side_effect = Exception("unreachable")
         p._client = client
         health = p.health()
         assert health.healthy is False
