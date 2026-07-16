@@ -1,8 +1,14 @@
 """
-FileEditor — Milestone 19: File Editing Engine.
+FileEditor — Milestone 19 + v2.0 upgrade.
 
-Provides a tracked, scoped API for workers to create, edit, patch, and delete
-files within a base directory (typically a workspace's ``output/`` directory).
+Provides a tracked, scoped API for workers to create, edit, patch, delete,
+move, and rename files within a base directory.  v2.0 adds:
+
+  - ``preview()`` / ``diff()``    — show a unified diff without writing.
+  - ``snapshot()``                — capture current state for rollback.
+  - ``restore(snapshot)``         — revert to a captured snapshot.
+  - ``move()`` / ``rename()``     — move/rename files within the base dir.
+  - ``export_audit_log()``        — dump the edit history as JSON.
 
 All operations are recorded in ``list_edits()`` so the console can report
 exactly which files were created or modified during a run.
@@ -15,13 +21,23 @@ Usage::
     editor.create("routes/api.py", "from fastapi import ...")
     editor.patch("auth.py", "def login():", "def login(username: str, password: str):")
 
+    # Preview before committing a change
+    print(editor.preview("auth.py", new_full_content))
+
+    # Rollback support
+    snap = editor.snapshot()
+    editor.edit("auth.py", dangerous_change)
+    editor.restore(snap)  # undone
+
     print(editor.summary())
-    # → 2 file(s) written: auth.py, routes/api.py
 """
 
 from __future__ import annotations
 
+import difflib
+import json
 import os
+import shutil
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -29,7 +45,7 @@ from smartagent.logs.logger import get_logger
 
 logger = get_logger(__name__)
 
-OperationType = Literal["create", "edit", "patch", "delete", "read"]
+OperationType = Literal["create", "edit", "patch", "delete", "read", "move"]
 
 
 @dataclass
@@ -40,7 +56,8 @@ class EditResult:
     Attributes:
         success:       Whether the operation completed without error.
         path:          The relative path within the editor's base directory.
-        operation:     One of ``"create"``, ``"edit"``, ``"patch"``, ``"delete"``, ``"read"``.
+        operation:     One of ``"create"``, ``"edit"``, ``"patch"``,
+                       ``"delete"``, ``"read"``, ``"move"``.
         message:       Human-readable outcome or error description.
         bytes_written: Bytes written (0 for reads and deletes).
     """
@@ -55,14 +72,31 @@ class EditResult:
         icon = "✓" if self.success else "✗"
         return f"{icon} [{self.operation}] {self.path} — {self.message}"
 
+    def to_dict(self) -> dict:
+        return {
+            "success": self.success,
+            "path": self.path,
+            "operation": self.operation,
+            "message": self.message,
+            "bytes_written": self.bytes_written,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Snapshot type alias
+# ---------------------------------------------------------------------------
+
+Snapshot = dict[str, str]  # relative_path → file_content
+
 
 class FileEditor:
     """
-    Scoped, tracked file editor.
+    Scoped, tracked file editor with rollback and diff support.
 
-    All paths passed to :meth:`create`, :meth:`edit`, :meth:`patch`, and
-    :meth:`delete` are resolved relative to *base_dir*.  Attempts to escape
-    the base directory (via ``../``) raise :exc:`ValueError`.
+    All paths passed to :meth:`create`, :meth:`edit`, :meth:`patch`,
+    :meth:`delete`, :meth:`move`, and :meth:`rename` are resolved relative
+    to *base_dir*.  Attempts to escape the base directory (via ``../``)
+    raise :exc:`ValueError`.
 
     Args:
         base_dir: Root directory for all file operations.  Created if it
@@ -148,7 +182,7 @@ class FileEditor:
 
     def edit(self, path: str, content: str) -> EditResult:
         """
-        Overwrite the entire content of an existing file at *path*.
+        Overwrite the entire content of a file at *path*.
 
         Parent directories are created if they do not exist.
 
@@ -191,10 +225,6 @@ class FileEditor:
 
         Returns:
             :class:`EditResult` with ``operation="patch"``.
-
-        Raises (captured in result):
-            FileNotFoundError: If the file does not exist.
-            ValueError:        If *old_text* is not found in the file.
         """
         try:
             full = self._resolve(path)
@@ -255,6 +285,50 @@ class FileEditor:
                 message=str(exc),
             ))
 
+    def move(self, src: str, dst: str) -> EditResult:
+        """
+        Move (or rename) *src* to *dst* within :attr:`base_dir`.
+
+        Both paths are resolved relative to the base directory.  Parent
+        directories of *dst* are created automatically.
+
+        Returns:
+            :class:`EditResult` with ``operation="move"``.
+        """
+        try:
+            full_src = self._resolve(src)
+            full_dst = self._resolve(dst)
+            if not os.path.exists(full_src):
+                raise FileNotFoundError(f"Source not found: {src!r}")
+            parent_dst = os.path.dirname(full_dst)
+            if parent_dst:
+                os.makedirs(parent_dst, exist_ok=True)
+            shutil.move(full_src, full_dst)
+            logger.info("FileEditor.move: %s → %s", full_src, full_dst)
+            return self._record(EditResult(
+                success=True,
+                path=dst,
+                operation="move",
+                message=f"moved from {src!r} to {dst!r}",
+            ))
+        except (ValueError, OSError) as exc:
+            logger.warning("FileEditor.move failed: %s → %s — %s", src, dst, exc)
+            return self._record(EditResult(
+                success=False,
+                path=src,
+                operation="move",
+                message=str(exc),
+            ))
+
+    def rename(self, src: str, dst: str) -> EditResult:
+        """
+        Rename *src* to *dst* — alias for :meth:`move`.
+
+        Returns:
+            :class:`EditResult` with ``operation="move"``.
+        """
+        return self.move(src, dst)
+
     # ------------------------------------------------------------------
     # Read operations
     # ------------------------------------------------------------------
@@ -278,6 +352,103 @@ class FileEditor:
             return os.path.isfile(full)
         except ValueError:
             return False
+
+    # ------------------------------------------------------------------
+    # Preview and diff (non-destructive)
+    # ------------------------------------------------------------------
+
+    def preview(self, path: str, new_content: str) -> str:
+        """
+        Return a unified-diff string showing what :meth:`edit` would change
+        *without* modifying the file.
+
+        If *path* does not exist yet the diff shows the full new content as
+        additions (``+`` lines).
+
+        Args:
+            path:        Relative path to the file.
+            new_content: Proposed new content.
+
+        Returns:
+            Unified diff as a single string (empty if no changes).
+        """
+        try:
+            current = self.read(path)
+        except (FileNotFoundError, OSError):
+            current = ""
+        return _unified_diff(path, current, new_content)
+
+    def diff(self, path: str, new_content: str) -> str:
+        """Alias for :meth:`preview` — returns a unified diff."""
+        return self.preview(path, new_content)
+
+    # ------------------------------------------------------------------
+    # Snapshot / rollback
+    # ------------------------------------------------------------------
+
+    def snapshot(self) -> Snapshot:
+        """
+        Capture the current state of all files in :attr:`base_dir`.
+
+        Returns:
+            A ``{relative_path: content}`` dict.  Paths use forward slashes.
+        """
+        snap: Snapshot = {}
+        for rel in self.list_files():
+            try:
+                snap[rel] = self.read(rel)
+            except OSError:
+                pass
+        logger.info("FileEditor.snapshot: captured %d file(s)", len(snap))
+        return snap
+
+    def restore(self, snapshot: Snapshot) -> list[EditResult]:
+        """
+        Restore the editor's base directory to the state captured by
+        :meth:`snapshot`.
+
+        Files that existed in the snapshot are re-written with their captured
+        content.  Files that exist now but were absent from the snapshot are
+        deleted.  Failures are recorded but do not abort the restore.
+
+        Args:
+            snapshot: A dict returned by :meth:`snapshot`.
+
+        Returns:
+            List of :class:`EditResult` objects for every write/delete.
+        """
+        results: list[EditResult] = []
+
+        # Re-write files from the snapshot
+        for rel, content in snapshot.items():
+            r = self.edit(rel, content)
+            results.append(r)
+
+        # Delete files that weren't in the snapshot
+        for current_file in self.list_files():
+            if current_file not in snapshot:
+                r = self.delete(current_file)
+                results.append(r)
+
+        logger.info(
+            "FileEditor.restore: %d write(s), %d delete(s)",
+            len(snapshot),
+            len(results) - len(snapshot),
+        )
+        return results
+
+    # ------------------------------------------------------------------
+    # Audit log export
+    # ------------------------------------------------------------------
+
+    def export_audit_log(self) -> str:
+        """
+        Return the full edit history as a JSON string.
+
+        Each entry is a dict with keys:
+        ``success``, ``path``, ``operation``, ``message``, ``bytes_written``.
+        """
+        return json.dumps([e.to_dict() for e in self._edits], indent=2)
 
     # ------------------------------------------------------------------
     # Inspection
@@ -338,3 +509,20 @@ class FileEditor:
             f"FileEditor(base_dir={self._base_dir!r}, "
             f"edits={len(self._edits)}, files={len(self.list_files())})"
         )
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
+def _unified_diff(path: str, original: str, new: str) -> str:
+    """Return a unified diff string between *original* and *new*."""
+    a_lines = original.splitlines(keepends=True)
+    b_lines = new.splitlines(keepends=True)
+    diff_lines = list(difflib.unified_diff(
+        a_lines, b_lines,
+        fromfile=f"a/{path}",
+        tofile=f"b/{path}",
+        lineterm="",
+    ))
+    return "\n".join(diff_lines)

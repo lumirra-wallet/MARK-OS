@@ -1,23 +1,21 @@
 """
 REPL — the read-eval-print loop for the MARK console.
 
-This module owns only the I/O loop itself: reading a line from the user,
-calling the :class:`~smartagent.ui.command_router.CommandRouter` to
-dispatch it, and printing the response.  All business logic lives in the
-command modules under ``smartagent/ui/commands/``.
+v2.0 improvements (Phase 8 — Reliability):
+  - Global exception handler wraps every ``router.dispatch()`` call so that
+    unexpected exceptions are caught, logged, and reported to the user as a
+    friendly error rather than terminating MARK.
+  - Keyboard-interrupt and EOF handling remain unchanged.
 
 Exit paths:
-    - The user types ``exit`` or ``quit`` → handler raises
-      :class:`~smartagent.ui.command_router.ExitConsole`.
-    - The user presses Ctrl+C → :exc:`KeyboardInterrupt` is caught and
-      triggers a clean shutdown.
-    - EOF (Ctrl+D or piped input ends) → :exc:`EOFError` triggers
-      a clean shutdown.  This also allows the REPL to be driven by
-      piped input in tests.
+    - The user types ``exit`` or ``quit`` → handler raises ExitConsole.
+    - The user presses Ctrl+C → caught, loop continues.
+    - EOF (Ctrl+D or piped input ends) → clean shutdown.
 """
 
 from __future__ import annotations
 
+import traceback
 from typing import TYPE_CHECKING
 
 from smartagent.ui.command_router import CommandRouter, ExitConsole
@@ -71,7 +69,6 @@ class Repl:
                 _logger.info("REPL: KeyboardInterrupt received")
                 continue
             except EOFError:
-                # Piped input has ended — exit cleanly (important for tests).
                 print()
                 break
 
@@ -88,6 +85,29 @@ class Repl:
                 _logger.info("REPL: exit requested")
                 self._running = False
                 break
+            except KeyboardInterrupt:
+                # User Ctrl+C during a long command — cancel, stay in REPL.
+                print("\n[interrupted]")
+                _logger.info("REPL: command interrupted by user")
+                continue
+            except Exception as exc:  # noqa: BLE001
+                # Phase 8: graceful recovery — never let an uncaught exception
+                # terminate MARK.
+                _logger.error(
+                    "REPL: unhandled exception for %r: %s",
+                    raw,
+                    exc,
+                    exc_info=True,
+                )
+                tb_lines = traceback.format_exc().splitlines()
+                # Show a concise error; include last 3 traceback lines for context.
+                tail = "\n  ".join(tb_lines[-3:])
+                print(
+                    f"[error] An unexpected error occurred:\n  {exc}\n\n"
+                    f"  {tail}\n\n"
+                    "MARK continues — type 'help' to see available commands."
+                )
+                continue
 
             if response:
                 print(response)
