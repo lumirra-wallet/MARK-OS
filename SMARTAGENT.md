@@ -170,19 +170,28 @@ up. See `README.md` for the current package layout and status.
   observes and represents MARK's own state; it never drives Brain routing
   and changes no other subsystem's behavior. See `smartagent/mind/`,
   `ARCHITECTURE.md`, and `CHANGELOG.md v0.7`.
-- `executive` — **implemented (Milestone 11 Phase 1 — Executive Framework).**
+- `executive` — **implemented (Milestone 11 Phases 1–3).**
   `smartagent/executive/` gives MARK an "executive brain": a goal-driven
   orchestration layer that decomposes goals into task plans, manages a
   dependency-aware ``TaskGraph``, queues tasks via ``TaskQueue``, and
-  executes them through a synchronous ``Scheduler``.  The ``Planner``
-  uses rule-based keyword matching to select from five plan templates (api,
-  script, research, algorithm, database, default) — no AI is invoked.
-  The ``ExecutiveController`` (at ``agent.executive``, distinct from the
-  Mind OS controller at ``agent.mind``) exposes three clean operations:
-  ``plan(goal)``, ``receive_goal(goal)``, and ``run()``.  Console commands:
-  ``plan <goal>`` (display the task graph) and ``tasks`` (show task details).
-  Phase 2 will add real ``BaseWorker`` subclasses; Phase 4 will connect
-  workers to the Ollama model with specialist system prompts.
+  executes them through a synchronous ``Scheduler``.
+
+  *Phase 1* — framework: ``ExecutiveController``, ``Planner`` (6 rule-based
+  templates), ``TaskGraph``, ``TaskQueue``, ``Orchestrator``, ``Scheduler``.
+  Console: ``plan``, ``tasks``.
+
+  *Phase 2* — workers: ``BaseWorker`` + 9 specialist subclasses
+  (``ResearchWorker``, ``PlanningWorker``, ``DesignWorker``, ``CodingWorker``,
+  ``TestingWorker``, ``ReviewWorker``, ``DocumentationWorker``,
+  ``ReportWorker``, ``KnowledgeWorker``).  All wired into ``WorkerRegistry``
+  with real class dispatch; stub output in Phase 2 (connected to Ollama
+  in Phase 4).  Console: ``workers``, ``worker info <type>``.
+
+  *Phase 3* — scheduler upgrade: cancellation (``cancel()`` on context and
+  controller), clean stop on mid-run cancel, ``is_cancelled`` property.
+  Console: ``queue``, ``run``, ``cancel``.
+
+  Phase 4 will connect each worker to Ollama with a specialist system prompt.
 - `models` streaming — **implemented (Streaming Upgrade v1.1).** The Ollama
   integration now streams tokens in real time. `OllamaProvider` gains
   `generate_stream()` and `chat_stream()` (using `stream: true` on

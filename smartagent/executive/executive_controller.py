@@ -1,42 +1,27 @@
 """
 ExecutiveController — top-level interface for the Executive Framework.
 
-This is the single entry point that the ``SmartAgent`` (and console
-commands) interact with.  All internal wiring (Planner, Orchestrator,
-Scheduler, WorkerRegistry) is hidden behind this clean API:
+Phase 2/3 upgrade: real workers, cancellation, run/cancel support.
 
-    controller = ExecutiveController()
+Public API (unchanged from Phase 1):
+    controller.plan(goal)          → ExecutionContext (READY, not executed)
+    controller.receive_goal(goal)  → ExecutionContext (COMPLETED/FAILED)
+    controller.run()               → ExecutionContext (execute current plan)
+    controller.cancel()            → cancels current plan mid-run
 
-    # Display a plan without executing it:
-    context = controller.plan(goal)
+Phase 2 change:
+    ``build_default_registry()`` now registers real ``BaseWorker`` classes.
+    The pipeline and interface are identical — only execution output changes.
 
-    # Execute a plan end-to-end:
-    context = controller.receive_goal(goal)
-
-    # Inspect the last context:
-    context = controller.current_context
-
-The four-step pipeline (for documentation / mental model):
-
-    receive_goal()
-        ↓
-    create_plan()          — Planner decomposes the goal
-        ↓
-    build_task_graph()     — TaskGraph validates and arranges tasks
-        ↓
-    submit_to_queue()      — TaskQueue seeds with ready tasks
-        ↓
-    scheduler executes     — each task runs (stub in Phase 1)
-        ↓
-    return results         — ExecutionContext with final state
+Phase 3 change:
+    ``cancel()`` method added.  ``run()`` returns the updated context even
+    when cancelled.  Console commands ``run`` and ``cancel`` call these.
 
 Note on naming:
-    The ``smartagent.mind.executive.executive_controller.ExecutiveController``
-    (Milestone 6) controls MARK's internal mental processes.  This class
-    (``smartagent.executive.executive_controller.ExecutiveController``) is
-    the *planning and task orchestration* controller — a separate concern.
-    On ``SmartAgent`` the mind controller lives at ``agent.mind``; this
-    one lives at ``agent.executive``.
+    ``smartagent.mind.executive.executive_controller.ExecutiveController``
+    (Milestone 6) controls MARK's internal mental processes.
+    This class is the *planning and task orchestration* controller.
+    On ``SmartAgent``: ``agent.mind`` = Mind OS; ``agent.executive`` = this.
 """
 
 from __future__ import annotations
@@ -60,13 +45,8 @@ class ExecutiveController:
     """
     Top-level coordinator for the MARK Executive Framework (Milestone 11).
 
-    Owns the Orchestrator (which owns Planner + Scheduler + WorkerRegistry)
-    and keeps track of the most recent ``ExecutionContext`` so console
-    commands (``tasks``, ``queue``) can inspect it between calls.
-
     Attributes:
-        current_context: The most recently created ``ExecutionContext``, or
-                         ``None`` if no goal has been received yet.
+        current_context: Most recent ``ExecutionContext``, or ``None``.
     """
 
     def __init__(
@@ -77,7 +57,9 @@ class ExecutiveController:
     ) -> None:
         self._worker_registry = worker_registry or build_default_registry()
         self._planner = planner or Planner()
-        self._scheduler = scheduler or Scheduler(worker_registry=self._worker_registry)
+        self._scheduler = scheduler or Scheduler(
+            worker_registry=self._worker_registry
+        )
         self._orchestrator = Orchestrator(
             planner=self._planner,
             scheduler=self._scheduler,
@@ -91,16 +73,7 @@ class ExecutiveController:
 
     def receive_goal(self, goal: str) -> ExecutionContext:
         """
-        Accept *goal*, create a full plan, execute it, and return results.
-
-        This is the full pipeline: plan + execute.  Use ``plan()`` instead
-        to preview the task breakdown without running it.
-
-        Args:
-            goal: Free-form goal string (e.g. "Build a REST API for tasks").
-
-        Returns:
-            A completed ``ExecutionContext`` (state = COMPLETED or FAILED).
+        Full pipeline: plan + execute.  Returns the completed context.
         """
         logger.info("ExecutiveController: received goal=%r", goal)
         context = self._orchestrator.execute_goal(goal)
@@ -109,19 +82,11 @@ class ExecutiveController:
 
     def plan(self, goal: str) -> ExecutionContext:
         """
-        Create and return a plan for *goal* WITHOUT executing it.
+        Build a plan for *goal* WITHOUT executing it (READY state).
 
-        The returned context is in READY state — tasks are built and
-        validated but the Scheduler has not run.  Subsequent calls to
-        ``run()`` will execute this plan.
-
-        Args:
-            goal: Free-form goal string.
-
-        Returns:
-            An ``ExecutionContext`` in READY state.
+        Stores the context so ``run()`` / ``tasks`` / ``queue`` can use it.
         """
-        logger.info("ExecutiveController: planning goal=%r (preview only)", goal)
+        logger.info("ExecutiveController: planning goal=%r (preview)", goal)
         context = self._orchestrator.preview_plan(goal)
         self.current_context = context
         return context
@@ -130,48 +95,57 @@ class ExecutiveController:
         """
         Execute the current plan (from the last ``plan()`` call).
 
+        Phase 3: respects cancellation — if ``cancel()`` was called on the
+        context before ``run()`` finishes, execution stops cleanly.
+
         Raises:
             RuntimeError: If no plan has been created yet.
-
-        Returns:
-            The updated ``ExecutionContext`` (state = COMPLETED or FAILED).
         """
         if self.current_context is None:
             raise RuntimeError(
                 "No plan to run.  Call plan(<goal>) or receive_goal(<goal>) first."
             )
-        logger.info("ExecutiveController: running current plan for goal=%r", self.current_context.goal)
+        logger.info(
+            "ExecutiveController: running plan for goal=%r",
+            self.current_context.goal,
+        )
         context = self._scheduler.run(self.current_context)
         self.current_context = context
         return context
 
+    def cancel(self) -> bool:
+        """
+        Cancel the current plan.
+
+        Marks all non-terminal tasks as BLOCKED and sets the context state
+        to CANCELLED.  Returns ``True`` if there was a plan to cancel,
+        ``False`` otherwise.
+        """
+        if self.current_context is None:
+            return False
+        if self.current_context.state.is_terminal:
+            return False
+        logger.info(
+            "ExecutiveController: cancelling goal=%r",
+            self.current_context.goal,
+        )
+        self.current_context.cancel()
+        return True
+
     # ------------------------------------------------------------------
-    # Expose pipeline steps individually (for testing and console commands)
+    # Expose pipeline steps individually
     # ------------------------------------------------------------------
 
     def create_plan(self, goal: str) -> list[Task]:
-        """
-        Step 1: Use the Planner to decompose *goal* into a list of Tasks.
-
-        Does not modify ``current_context``.  Useful for displaying the
-        raw task list before building the graph.
-        """
+        """Step 1: decompose *goal* into a list of Tasks."""
         return self._planner.create_plan(goal)
 
     def build_task_graph(self, tasks: list[Task]) -> TaskGraph:
-        """
-        Step 2: Arrange *tasks* into a validated TaskGraph.
-
-        Does not modify ``current_context``.
-        """
+        """Step 2: arrange *tasks* into a validated TaskGraph."""
         return self._orchestrator.build_task_graph(tasks)
 
     def submit_to_queue(self, graph: TaskGraph) -> TaskQueue:
-        """
-        Step 3: Seed a TaskQueue with the initially-ready tasks from *graph*.
-
-        Does not modify ``current_context``.
-        """
+        """Step 3: seed a TaskQueue with initially-ready tasks."""
         return self._orchestrator.submit_to_queue(graph)
 
     # ------------------------------------------------------------------
@@ -180,16 +154,13 @@ class ExecutiveController:
 
     @property
     def worker_registry(self) -> WorkerRegistry:
-        """The WorkerRegistry used by this controller."""
         return self._worker_registry
 
     @property
     def planner(self) -> Planner:
-        """The Planner used for goal decomposition."""
         return self._planner
 
     def has_plan(self) -> bool:
-        """True when a plan (ExecutionContext) has been created."""
         return self.current_context is not None
 
     def __repr__(self) -> str:
@@ -197,7 +168,6 @@ class ExecutiveController:
         if ctx:
             return (
                 f"ExecutiveController(goal={ctx.goal!r}, "
-                f"state={ctx.state.value}, "
-                f"tasks={ctx.task_count})"
+                f"state={ctx.state.value}, tasks={ctx.task_count})"
             )
         return "ExecutiveController(no plan)"

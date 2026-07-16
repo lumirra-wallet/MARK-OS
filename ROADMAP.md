@@ -474,8 +474,8 @@ Planned systems, once their prerequisite milestones land:
 | 9 — Ollama Integration | ✅ Done | 100% | OllamaProvider, ModelDiscovery, coding auto-routing, fallback chat, 763 tests |
 | 10 — Streaming Upgrade | ✅ Done | 100% | generate_stream/chat_stream, spinner, metrics, prompt cache, warmup, lazy loading, ~60 new tests |
 | 11 Phase 1 — Executive Framework | ✅ Done | 100% | ExecutiveController, Planner (5 templates), TaskGraph, TaskQueue, Scheduler (stub), Orchestrator, plan/tasks commands, 142 new tests |
-| 11 Phase 2 — Worker Agents | ⏳ Planned | 0% | BaseWorker, 9 specialist workers, WorkerRegistry wired to real classes, workers/worker info commands |
-| 11 Phase 3 — Scheduler v2 | ⏳ Planned | 0% | Dependency unlocking, queue/run/cancel commands, full state machine |
+| 11 Phase 2 — Worker Agents | ✅ Done | 100% | BaseWorker + 9 specialists (Research/Planning/Design/Coding/Testing/Review/Docs/Report/Knowledge/Memory), real WorkerRegistry, workers/worker info commands |
+| 11 Phase 3 — Scheduler v2 | ✅ Done | 100% | Cancellation, queue/run/cancel commands, is_cancelled guard in Scheduler |
 | 11 Phase 4 — Ollama Workers | ⏳ Planned | 0% | Workers connected to Ollama; each with specialist system prompt |
 | 11 Phase 5 — Executive Loop | ⏳ Planned | 0% | User → Executive → Workers → Merge → Response; trace/history commands |
 | Research Engine | ⏳ Planned | 0% | Blocked on a real Model Framework provider for summarization |

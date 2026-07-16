@@ -113,6 +113,25 @@ class ExecutionContext:
         if new_state.is_terminal:
             self.ended_at = _now_iso()
 
+    def cancel(self) -> None:
+        """
+        Cancel this execution run immediately.
+
+        Marks all non-terminal tasks as BLOCKED and transitions the
+        context to CANCELLED.  The Scheduler checks ``is_cancelled``
+        at the top of each iteration and stops cleanly.
+        """
+        from smartagent.executive.task import TaskStatus
+        for task in self.task_graph.all_tasks():
+            if not task.is_terminal:
+                task.status = TaskStatus.BLOCKED
+        self.transition_to(ExecutionState.CANCELLED)
+
+    @property
+    def is_cancelled(self) -> bool:
+        """True when this run has been cancelled."""
+        return self.state == ExecutionState.CANCELLED
+
     # ------------------------------------------------------------------
     # Result helpers
     # ------------------------------------------------------------------

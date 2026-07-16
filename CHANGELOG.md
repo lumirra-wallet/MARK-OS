@@ -7,6 +7,74 @@ the architecture is still settling.
 
 ## [Unreleased]
 
+## Milestone 11 Phase 3 — Scheduler v2 + queue/run/cancel
+
+### Overview
+Full synchronous scheduler with cancellation support and three new console
+commands (`queue`, `run`, `cancel`).  No new packages — all enhancements
+are inside the existing `smartagent/executive/` layer.
+
+### Changes
+- **Cancellation** — `ExecutionContext.cancel()` marks all non-terminal tasks
+  BLOCKED and transitions state to CANCELLED.  `is_cancelled` property added.
+  `ExecutiveController.cancel()` returns `True`/`False` based on whether there
+  was a cancellable plan.
+- **Scheduler** — checks `context.is_cancelled` at each iteration and stops
+  cleanly.  Running a cancelled context returns immediately with zero execution.
+- **Console commands** — `queue`, `run`, `cancel` all registered.
+
+### New console commands (Phase 3)
+
+| Command | Description |
+| --- | --- |
+| `queue` | Show task queue state (depth, status breakdown, next-up list) |
+| `run` | Execute the current plan; prints task-by-task results summary |
+| `cancel` | Cancel the current plan; blocks all pending/ready tasks |
+
+---
+
+## Milestone 11 Phase 2 — Worker Agents
+
+### Overview
+Nine specialist worker classes wired into the ``WorkerRegistry``.  The
+scheduler now calls real workers instead of stubs.  Workers are still
+Phase 2 stubs (no Ollama yet) but return descriptive, structured output
+and can read prior task results from `ExecutionContext`.
+
+### New package: `smartagent/executive/workers/`
+
+| Class | Task types | Description |
+| --- | --- | --- |
+| `ResearchWorker` | RESEARCH | Gathers background, prior art, best practices |
+| `PlanningWorker` | PLANNING | Creates sub-plans and milestones |
+| `DesignWorker` | DESIGN, ARCHITECTURE | System design, interfaces, contracts |
+| `CodingWorker` | CODING, IMPLEMENTATION | Writes implementation code |
+| `TestingWorker` | TESTING | Writes tests, validates behaviour |
+| `ReviewWorker` | REVIEW | Code review, quality gates, sign-off |
+| `DocumentationWorker` | DOCUMENTATION | README, API docs, inline comments |
+| `ReportWorker` | REPORT | Synthesises findings into reports |
+| `KnowledgeWorker` | ANALYSIS | Retrieves knowledge concepts |
+| `MemoryWorker` | (none — cross-cutting) | Persists findings to memory vault |
+
+### `build_default_registry()` now uses real classes
+Multi-type workers (e.g. `CodingWorker` handles CODING + IMPLEMENTATION;
+`DesignWorker` handles DESIGN + ARCHITECTURE) are registered for each type;
+`list_workers()` deduplicates by class identity.
+
+### New console commands (Phase 2)
+
+| Command | Description |
+| --- | --- |
+| `workers` | List all registered worker types with phase badge ([stub]/[AI]) |
+| `worker info <type>` | Detailed info: class, task types, description, phase |
+
+### Tests
+`tests/test_executive_phase2.py` — **~130 new tests** covering all workers,
+registry, scheduler with real workers, cancellation, and all new commands.
+All Phase 1 tests (`tests/test_executive.py`) continue to pass.
+
+---
+
 ## Milestone 11 Phase 1 — Executive Framework
 
 ### Overview

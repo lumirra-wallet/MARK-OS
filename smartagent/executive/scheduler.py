@@ -1,26 +1,27 @@
 """
-Scheduler — executes a TaskGraph in dependency order (Phase 1/3).
+Scheduler — executes a TaskGraph in dependency order (Phase 2/3 upgrade).
 
-The Scheduler is the "operating system kernel" of MARK's executive layer.
-It knows which tasks can run (READY), runs them through the appropriate
-worker, and unlocks downstream tasks as each one completes.
-
-Phase 1 behaviour:
-    No real workers yet.  The Scheduler calls ``_execute_stub()`` which
-    marks every task COMPLETED with "Completed" as the result.  This
-    gives the framework a runnable state so ``run`` and ``plan`` commands
-    work end-to-end before Phase 2 adds real workers.
-
-Phase 2 upgrade:
-    Replace ``_execute_stub()`` with ``worker_registry.get(task.task_type)``
-    and call ``worker.execute(task, context)``.  Everything else stays the
-    same.
+Phase 1: stub workers, no real execution.
+Phase 2: real ``BaseWorker`` subclasses dispatched via ``WorkerRegistry``.
+Phase 3: full state machine, cancellation support, ``run``/``cancel`` commands.
 
 Task lifecycle inside the Scheduler:
-    PENDING  → READY    (graph unlocks it)
-    READY    → RUNNING  (scheduler picks it up)
-    RUNNING  → COMPLETED / FAILED  (worker finishes)
-    PENDING  → BLOCKED  (upstream failed)
+    PENDING  → READY    (graph unlocks it when all deps complete)
+    READY    → RUNNING  (scheduler dequeues and dispatches it)
+    RUNNING  → COMPLETED / FAILED  (worker finishes / raises)
+    PENDING  → BLOCKED  (upstream task failed)
+
+Cancellation (Phase 3):
+    ``ExecutionContext.cancel()`` is called externally (e.g. from the
+    ``cancel`` console command).  The Scheduler checks
+    ``context.is_cancelled`` at the top of every iteration and stops
+    cleanly without leaving tasks in RUNNING state.
+
+Phase 3 notes on the console ``run`` command:
+    The Scheduler is synchronous — ``run()`` blocks until complete.
+    Phase 5 will replace this with an async runner for long-running goals.
+    For Phase 3, synchronous is correct: ``run`` prints results after the
+    call returns and the console stays responsive.
 """
 
 from __future__ import annotations
@@ -37,29 +38,19 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Guard against infinite loops in degenerate graphs.
 _MAX_ITERATIONS = 1_000
 
 
 class Scheduler:
     """
-    Synchronous, single-threaded task scheduler.
+    Synchronous, dependency-aware task scheduler.
 
     Accepts an ``ExecutionContext`` whose ``task_graph`` and ``task_queue``
-    have been populated by ``ExecutiveController``, then runs all tasks to
-    completion (or failure) before returning the updated context.
-
-    Phase 3 will replace this with an async / threaded scheduler that
-    supports parallel task execution.  The interface (``run(context)``)
-    remains identical.
+    have been populated by ``ExecutiveController``, runs all tasks to
+    completion (or failure/cancellation), and returns the updated context.
     """
 
     def __init__(self, worker_registry: Optional["WorkerRegistry"] = None) -> None:
-        """
-        Args:
-            worker_registry: Registry of worker classes used for task dispatch.
-                             ``None`` in Phase 1 — stub execution is used instead.
-        """
         self._worker_registry = worker_registry
 
     # ------------------------------------------------------------------
@@ -70,46 +61,70 @@ class Scheduler:
         """
         Execute all tasks in *context* in dependency order.
 
-        Modifies *context* in-place (updates task statuses, results, errors,
-        and execution state) and returns it for convenience.
+        Handles:
+            - Seeding the queue with initially-ready tasks.
+            - Dispatching each ready task to its worker.
+            - Unlocking downstream tasks as tasks complete.
+            - Blocking downstream tasks when a task fails.
+            - Stopping cleanly when ``context.is_cancelled`` is True.
 
-        Returns:
-            The updated ``ExecutionContext``.
+        Returns the updated ``ExecutionContext``.
         """
-        context.transition_to(ExecutionState.RUNNING)
-        logger.info("Scheduler: starting execution for goal=%r (%d tasks)", context.goal, context.task_count)
+        # Phase 3: if the context was cancelled before run() was called,
+        # return immediately without overwriting the CANCELLED state.
+        if context.is_cancelled:
+            logger.info("Scheduler: context already cancelled — skipping execution")
+            return context
 
-        # Seed the queue with initial READY tasks (tasks with no dependencies).
+        context.transition_to(ExecutionState.RUNNING)
+        logger.info(
+            "Scheduler: starting execution  goal=%r  tasks=%d",
+            context.goal, context.task_count,
+        )
+
         self._seed_queue(context)
 
         iteration = 0
         while not context.task_queue.is_empty() and iteration < _MAX_ITERATIONS:
+            # Phase 3: honour cancellation at each loop iteration.
+            if context.is_cancelled:
+                logger.info("Scheduler: execution cancelled after %d iterations", iteration)
+                return context
+
             iteration += 1
             task = context.task_queue.dequeue()
             if task is None:
                 break
+
             self._run_task(task, context)
 
-            # After a task completes/fails, check if new tasks became ready.
-            if not context.task_queue.is_empty():
-                continue  # more tasks already queued — keep going
-            # Queue drained — ask graph for newly-unlocked tasks.
-            newly_ready = context.task_graph.get_ready_tasks()
-            for t in newly_ready:
-                t.mark_ready()
-                context.task_queue.enqueue(t)
+            if context.is_cancelled:
+                logger.info("Scheduler: execution cancelled mid-run")
+                return context
+
+            # Unlock newly-ready tasks after each completion.
+            if context.task_queue.is_empty():
+                for t in context.task_graph.get_ready_tasks():
+                    t.mark_ready()
+                    context.task_queue.enqueue(t)
 
         # Determine final state.
-        if context.task_graph.all_completed():
-            failed = any(t.status == TaskStatus.FAILED for t in context.task_graph.all_tasks())
-            final = ExecutionState.FAILED if failed else ExecutionState.COMPLETED
-        else:
-            # Leftover BLOCKED or PENDING tasks — treat as partial failure.
-            final = ExecutionState.FAILED
+        if context.is_cancelled:
+            return context  # already transitioned by cancel()
 
+        all_tasks = context.task_graph.all_tasks()
+        failed = any(t.status == TaskStatus.FAILED for t in all_tasks)
+        # Treat any non-terminal task (BLOCKED, PENDING) as a failure —
+        # they indicate unfinished work, e.g. because an upstream task failed.
+        non_terminal = any(not t.is_terminal for t in all_tasks)
+        final = (
+            ExecutionState.FAILED if (failed or non_terminal)
+            else ExecutionState.COMPLETED
+        )
         context.transition_to(final)
+
         logger.info(
-            "Scheduler: finished.  state=%s  completed=%d/%d",
+            "Scheduler: finished  state=%s  completed=%d/%d",
             final.value, context.completed_count, context.task_count,
         )
         return context
@@ -119,55 +134,55 @@ class Scheduler:
     # ------------------------------------------------------------------
 
     def _seed_queue(self, context: ExecutionContext) -> None:
-        """
-        Move the initial wave of PENDING tasks (no dependencies) to READY
-        and enqueue them so the run-loop has something to start with.
-        """
+        """Move initially-ready tasks (no deps) to READY and enqueue them."""
         for task in context.task_graph.all_tasks():
             if task.status == TaskStatus.PENDING and not task.dependencies:
                 task.mark_ready()
                 context.task_queue.enqueue(task)
-        logger.debug("Scheduler: seeded queue with %d initial tasks", context.task_queue.size())
+        logger.debug("Scheduler: seeded %d initial tasks", context.task_queue.size())
 
     def _run_task(self, task: Task, context: ExecutionContext) -> None:
-        """
-        Dispatch *task* to a worker (or stub), record the outcome, and
-        notify the ``TaskGraph`` so it can unlock dependents.
-        """
+        """Dispatch *task*, record outcome, notify graph to unlock dependents."""
         task.mark_running()
-        logger.info("Scheduler: running task %r (%s)", task.title, task.task_type.value)
-
+        logger.info(
+            "Scheduler: running %r  type=%s", task.title, task.task_type.value
+        )
         try:
             result = self._execute(task, context)
             newly_ready = context.task_graph.mark_completed(task.id, result)
             context.record_result(task.id, result)
             for t in newly_ready:
                 context.task_queue.enqueue(t)
-            logger.debug("Scheduler: task %r completed; unlocked %d tasks", task.title, len(newly_ready))
+            logger.debug(
+                "Scheduler: %r completed — unlocked %d tasks",
+                task.title, len(newly_ready),
+            )
         except Exception as exc:  # noqa: BLE001
             error = str(exc)
             blocked = context.task_graph.mark_failed(task.id, error)
             context.record_error(task.id, error)
-            logger.warning("Scheduler: task %r failed (%s); blocked %d tasks", task.title, error, len(blocked))
+            logger.warning(
+                "Scheduler: %r failed (%s) — blocked %d tasks",
+                task.title, error, len(blocked),
+            )
 
     def _execute(self, task: Task, context: ExecutionContext) -> str:
         """
-        Execute *task* and return its result string.
+        Dispatch *task* to its registered worker and return the result.
 
-        Phase 1: returns a stub result so the framework is end-to-end
-        runnable without real workers.
-
-        Phase 2 upgrade: look up the worker in ``_worker_registry`` and
-        call ``worker.execute(task, context)`` instead.
+        Phase 2: looks up the real worker class via ``_worker_registry``.
+        Phase 1 fallback: returns a stub result when no registry is set.
         """
         if self._worker_registry is not None:
             worker_class = self._worker_registry.get(task.task_type)
             if worker_class is not None and callable(worker_class):
                 try:
                     worker = worker_class()
-                    return worker.execute(task, context)
+                    return str(worker.execute(task, context))
                 except Exception as exc:  # noqa: BLE001
-                    raise RuntimeError(f"Worker {worker_class} failed: {exc}") from exc
+                    raise RuntimeError(
+                        f"Worker {worker_class.__name__} failed: {exc}"
+                    ) from exc
 
         # Phase 1 stub — mark every task done immediately.
         return f"Completed: {task.title}"

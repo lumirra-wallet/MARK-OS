@@ -1,38 +1,33 @@
 """
-WorkerRegistry — maps task types to worker classes.
+WorkerRegistry — maps task types to worker classes (Phase 2 upgrade).
 
-In Phase 1 the registry is populated with stub entries (strings) so the
-``Planner`` can display which worker *would* handle each task.
+In Phase 1 the registry stored string labels.
+In Phase 2 it stores real ``BaseWorker`` subclasses — the ``Scheduler``
+instantiates them and calls ``worker.execute(task, context)``.
 
-In Phase 2 real ``BaseWorker`` subclasses are registered here, and the
-``Scheduler`` queries the registry to instantiate the right worker for
-each task before calling ``worker.execute(task, context)``.
-
-Design rules:
-- Registration is by ``TaskType`` value (string) for JSON-serialisability.
-- ``get()`` returns ``None`` on miss — callers decide whether to fall back
-  to a generic worker or raise.
-- ``list_workers()`` is what the ``workers`` console command reads (Phase 2).
+``build_default_registry()`` is the single place that wires all workers.
+The console ``workers`` command reads ``list_workers()`` directly from here.
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 from smartagent.executive.task import TaskType
 from smartagent.logs.logger import get_logger
+
+if TYPE_CHECKING:
+    from smartagent.executive.workers.base_worker import BaseWorker
 
 logger = get_logger(__name__)
 
 
 class WorkerRegistry:
     """
-    Registry mapping ``TaskType`` values to worker classes (or stub names).
+    Registry mapping ``TaskType`` values to ``BaseWorker`` subclasses.
 
-    Phase 1: stores human-readable string labels so the console can list
-             "registered" workers without any real implementation.
     Phase 2: stores actual ``BaseWorker`` subclasses; ``get()`` returns a
-             class that can be instantiated and called.
+             class that the Scheduler instantiates per-dispatch.
     """
 
     def __init__(self) -> None:
@@ -49,7 +44,7 @@ class WorkerRegistry:
 
         Args:
             task_type: A ``TaskType`` enum member or its string value.
-            worker:    The worker class (Phase 2+) or a label string (Phase 1).
+            worker:    A ``BaseWorker`` subclass (Phase 2+) or a label (Phase 1).
         """
         key = task_type.value if isinstance(task_type, TaskType) else str(task_type)
         self._workers[key] = worker
@@ -69,8 +64,8 @@ class WorkerRegistry:
         """
         Return the worker registered for *task_type*, or ``None``.
 
-        Falls back to the ``TaskType.GENERIC`` worker if the specific type
-        is not registered.
+        Falls back to the ``TaskType.GENERIC`` worker when the specific
+        type is not explicitly registered.
         """
         key = task_type.value if isinstance(task_type, TaskType) else str(task_type)
         return self._workers.get(key) or self._workers.get(TaskType.GENERIC.value)
@@ -86,47 +81,106 @@ class WorkerRegistry:
 
     def list_workers(self) -> list[dict[str, str]]:
         """
-        Return a list of ``{task_type, worker}`` dicts — one per registration.
+        Return one dict per registered worker with keys:
+          ``task_type``, ``worker``, ``name``, ``description``, ``phase``.
 
-        Used by the ``workers`` console command (Phase 2).
+        ``name`` / ``description`` / ``phase`` come from the worker instance
+        when *worker* is a real class; fall back to the class name / "—" / "—"
+        otherwise.
         """
         rows: list[dict[str, str]] = []
+        seen_classes: set[int] = set()
         for task_type_key, worker in self._workers.items():
-            label = getattr(worker, "__name__", str(worker))
-            rows.append({"task_type": task_type_key, "worker": label})
+            # Deduplicate by identity so multi-type workers (CodingWorker handles
+            # CODING + IMPLEMENTATION) appear only once in the listing.
+            worker_id = id(worker)
+            if worker_id in seen_classes:
+                continue
+            seen_classes.add(worker_id)
+
+            class_name = getattr(worker, "__name__", str(worker))
+            # Instantiate temporarily to read descriptive properties.
+            try:
+                instance = worker()
+                display_name = instance.name
+                desc = instance.description
+                phase = instance.phase
+            except Exception:
+                display_name = class_name
+                desc = "—"
+                phase = "—"
+
+            rows.append({
+                "task_type": task_type_key,
+                "worker": class_name,
+                "name": display_name,
+                "description": desc,
+                "phase": phase,
+            })
         return rows
 
     def count(self) -> int:
-        """Number of registered worker types."""
+        """Number of registered task-type → worker mappings."""
         return len(self._workers)
 
+    def unique_worker_count(self) -> int:
+        """Number of unique worker classes registered (deduplicated)."""
+        return len({id(w) for w in self._workers.values()})
+
     def __repr__(self) -> str:
-        return f"WorkerRegistry({len(self._workers)} workers)"
+        return f"WorkerRegistry({self.count()} mappings, {self.unique_worker_count()} workers)"
 
 
 def build_default_registry() -> WorkerRegistry:
     """
-    Build the default ``WorkerRegistry`` with Phase 1 stub labels.
+    Build the default ``WorkerRegistry`` with real Phase 2 worker classes.
 
-    In Phase 2 this function will be updated to import and register real
-    ``BaseWorker`` subclasses.  The label strings here are the names that
-    will become class names in Phase 2.
+    Each worker class is registered once per ``TaskType`` it handles.
+    Multi-type workers (e.g. CodingWorker handles CODING + IMPLEMENTATION)
+    are registered for each type individually; ``list_workers()`` deduplicates
+    by class identity for display.
+
+    Phase 4: replace stub workers with Ollama-connected implementations by
+    changing the import — the registry wiring stays identical.
     """
+    from smartagent.executive.workers.research_worker import ResearchWorker
+    from smartagent.executive.workers.planning_worker import PlanningWorker
+    from smartagent.executive.workers.design_worker import DesignWorker
+    from smartagent.executive.workers.coding_worker import CodingWorker
+    from smartagent.executive.workers.testing_worker import TestingWorker
+    from smartagent.executive.workers.review_worker import ReviewWorker
+    from smartagent.executive.workers.documentation_worker import DocumentationWorker
+    from smartagent.executive.workers.report_worker import ReportWorker
+    from smartagent.executive.workers.knowledge_worker import KnowledgeWorker
+
+    # GenericWorker — used as fallback for unrecognised task types.
+    class _GenericWorker:
+        name = "Generic Worker"
+        task_types = [TaskType.GENERIC]
+        description = "Fallback handler for unrecognised task types."
+        phase = "stub"
+
+        def execute(self, task, context):
+            return f"[Generic] Completed: {task.title}"
+
     reg = WorkerRegistry()
-    stubs = [
-        (TaskType.RESEARCH,       "ResearchWorker"),
-        (TaskType.PLANNING,       "PlanningWorker"),
-        (TaskType.DESIGN,         "DesignWorker"),
-        (TaskType.ARCHITECTURE,   "ArchitectureWorker"),
-        (TaskType.CODING,         "CodingWorker"),
-        (TaskType.IMPLEMENTATION, "ImplementationWorker"),
-        (TaskType.TESTING,        "TestingWorker"),
-        (TaskType.REVIEW,         "ReviewWorker"),
-        (TaskType.DOCUMENTATION,  "DocumentationWorker"),
-        (TaskType.ANALYSIS,       "AnalysisWorker"),
-        (TaskType.REPORT,         "ReportWorker"),
-        (TaskType.GENERIC,        "GenericWorker"),
+
+    mappings: list[tuple[TaskType, Any]] = [
+        (TaskType.RESEARCH,       ResearchWorker),
+        (TaskType.PLANNING,       PlanningWorker),
+        (TaskType.DESIGN,         DesignWorker),
+        (TaskType.ARCHITECTURE,   DesignWorker),       # DesignWorker handles both
+        (TaskType.CODING,         CodingWorker),
+        (TaskType.IMPLEMENTATION, CodingWorker),       # CodingWorker handles both
+        (TaskType.TESTING,        TestingWorker),
+        (TaskType.REVIEW,         ReviewWorker),
+        (TaskType.DOCUMENTATION,  DocumentationWorker),
+        (TaskType.REPORT,         ReportWorker),
+        (TaskType.ANALYSIS,       KnowledgeWorker),
+        (TaskType.GENERIC,        _GenericWorker),
     ]
-    for task_type, label in stubs:
-        reg.register(task_type, label)
+
+    for task_type, worker_class in mappings:
+        reg.register(task_type, worker_class)
+
     return reg
