@@ -232,6 +232,19 @@ up. See `README.md` for the current package layout and status.
   history. Brain integration via `KnowledgeManager` — the Brain's
   `knowledge_handler` calls `agent.knowledge` only. See
   `smartagent/knowledge/` and `CHANGELOG.md v0.8`.
+- `reflection` — **implemented (Milestone 14: Autonomous Learning & Self-Improvement).**
+  After every completed execution MARK reviews its own performance and
+  continuously improves. `ReflectionEngine` orchestrates a full post-execution
+  cycle: `ExecutionAnalyzer` converts the context into a structured report;
+  `Critic` scores what worked and what failed; `ImprovementPlanner` produces
+  concrete improvements (prompt addenda, knowledge proposals, memory lessons);
+  `ConfidenceEngine` tracks per-worker and per-tool accuracy with EMA;
+  `PromptRegistry` stores versioned worker prompts that `OllamaWorkerMixin`
+  picks up automatically on the next run; `LearningStore` accumulates analytics
+  and answers self-evaluation queries. Console commands: `learning`,
+  `analytics`, `reflection`, `history`, `improvements`, `evaluate`. Exposed as
+  `agent.reflection_engine`, `agent.prompt_registry`, `agent.learning_store`.
+  See `smartagent/reflection/` and `CHANGELOG.md Milestone 14`.
 - `voice`, `vision`, `automation` — registered as Brain v2 modules (via
   `smartagent/brain/module_bindings.py`) but still placeholder behavior
   underneath: each honestly reports it cannot yet handle arbitrary free text.

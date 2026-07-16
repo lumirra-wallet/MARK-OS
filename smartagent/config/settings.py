@@ -83,6 +83,8 @@ class Settings:
     voice_enabled: bool = False
     automation_enabled: bool = False
     granted_permissions: list[str] = field(default_factory=lambda: ["read_memory", "write_memory"])
+    # Milestone 13 — Parallel Executive Engine
+    max_parallel_workers: int = 4
 
     @classmethod
     def load(cls) -> "Settings":

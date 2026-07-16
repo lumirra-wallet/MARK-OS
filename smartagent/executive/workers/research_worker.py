@@ -16,22 +16,25 @@ from typing import TYPE_CHECKING
 from smartagent.executive.task import TaskType
 from smartagent.executive.workers.base_worker import BaseWorker
 from smartagent.executive.workers.ollama_mixin import OllamaWorkerMixin
+from smartagent.executive.workers.tool_mixin import WorkerToolMixin
 
 if TYPE_CHECKING:
     from smartagent.executive.execution_context import ExecutionContext
     from smartagent.executive.task import Task
 
 
-class ResearchWorker(OllamaWorkerMixin, BaseWorker):
+class ResearchWorker(WorkerToolMixin, OllamaWorkerMixin, BaseWorker):
     """
     Specialist for research and information gathering.
 
     Handles: RESEARCH tasks.
 
-    System prompt: research specialist focused on structured, actionable
-    findings with clear sections for background, best practices, key
-    technologies, risks, and recommendations.
+    Phase 12: uses WorkerToolMixin for ReAct-style tool access.
+    Allowed tools: date_time (temporal context), system_info (environment),
+    read_markdown (existing documentation).
     """
+
+    _allowed_tools: tuple[str, ...] = ("date_time", "system_info", "read_markdown")
 
     _system_prompt = """\
 You are a research specialist for MARK, an advanced AI assistant system.
@@ -79,4 +82,4 @@ repeating it.
         return "Gathers background information, prior art, and best practices for a goal."
 
     def execute(self, task: "Task", context: "ExecutionContext") -> str:
-        return self._execute_with_ollama(task, context)
+        return self._execute_with_tools(task, context)

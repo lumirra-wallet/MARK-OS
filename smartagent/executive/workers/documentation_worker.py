@@ -12,18 +12,30 @@ from typing import TYPE_CHECKING
 from smartagent.executive.task import TaskType
 from smartagent.executive.workers.base_worker import BaseWorker
 from smartagent.executive.workers.ollama_mixin import OllamaWorkerMixin
+from smartagent.executive.workers.tool_mixin import WorkerToolMixin
 
 if TYPE_CHECKING:
     from smartagent.executive.execution_context import ExecutionContext
     from smartagent.executive.task import Task
 
 
-class DocumentationWorker(OllamaWorkerMixin, BaseWorker):
+class DocumentationWorker(WorkerToolMixin, OllamaWorkerMixin, BaseWorker):
     """
     Specialist for generating technical documentation.
 
     Handles: DOCUMENTATION tasks.
+
+    Phase 12: uses WorkerToolMixin for ReAct-style tool access.
+    Allowed tools: file_read (read source code), directory_list,
+    read_markdown (inspect existing docs), search_files.
     """
+
+    _allowed_tools: tuple[str, ...] = (
+        "file_read",
+        "directory_list",
+        "read_markdown",
+        "search_files",
+    )
 
     _system_prompt = """\
 You are a technical writer for MARK, an advanced AI assistant.
@@ -82,4 +94,4 @@ inline code documentation.
         return "Generates README files, API docs, inline comments, and user guides."
 
     def execute(self, task: "Task", context: "ExecutionContext") -> str:
-        return self._execute_with_ollama(task, context)
+        return self._execute_with_tools(task, context)

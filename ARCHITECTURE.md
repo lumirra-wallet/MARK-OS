@@ -505,12 +505,56 @@ If Ollama is unreachable:
 
 ---
 
-## 10. What's still design-only
+## 10. Autonomous Learning pipeline (Milestone 14)
+
+Every successful execution now feeds a self-improvement cycle:
+
+```
+Orchestrator.execute_goal(goal)
+  └─ Scheduler.run(context)           ← workers execute tasks
+       └─ Orchestrator._run_reflection(result)
+            └─ ReflectionEngine.reflect(context)
+                 ├─ ExecutionAnalyzer.analyze()  → ExecutionReport
+                 ├─ Critic.evaluate()            → CriticReport (score + hints)
+                 ├─ ImprovementPlanner.plan()    → ImprovementPlan
+                 │     ├─ prompt improvements
+                 │     ├─ knowledge proposals
+                 │     └─ memory lessons
+                 ├─ LearningStore.record_execution()   (analytics)
+                 ├─ MemoryManager.remember()           (lessons)
+                 ├─ KnowledgeManager.propose_concept() (inbox — never bypasses approval)
+                 └─ PromptRegistry.add_version()       (evolved prompts)
+                       └─ context.metadata["system_prompts"] ← injected for next run
+```
+
+### Prompt evolution hook
+
+```
+OllamaWorkerMixin._stream_response()
+  └─ _resolve_system_prompt(context)
+       ├─ check context.metadata["system_prompts"][worker.name]  ← evolved prompt
+       └─ fallback: self._system_prompt                          ← class-level default
+```
+
+Workers automatically use improved prompts after each reflection cycle,
+with no per-worker code changes.
+
+### Shared state on SmartAgent
+
+```python
+agent.prompt_registry    # PromptRegistry — versioned prompt store
+agent.learning_store     # LearningStore  — analytics accumulator
+agent.reflection_engine  # ReflectionEngine — exposed for console commands
+agent.executive          # ExecutiveController.with_agent(self) — all services wired
+```
+
+---
+
+## 11. What's still design-only
 
 Per milestone specs, these are intentionally **not** implemented:
 
-- Learning Engine, Curiosity Engine, Discovery Engine, Wisdom Engine,
-  Cybersecurity Engine
+- Curiosity Engine, Discovery Engine, Wisdom Engine, Cybersecurity Engine
 - Voice, Vision, Browser, and Automation integration *into the Mind*
 - Internet access, vector databases, embeddings, AI reasoning in Knowledge
 

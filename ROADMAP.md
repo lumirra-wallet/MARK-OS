@@ -314,6 +314,22 @@ features" beyond what a milestone explicitly asks for.
    - 105 new tests; full suite 763 passing, 0 regressions.
    - Uses stdlib only (urllib) — no new dependencies.
 
+✅ Milestone 14 — Autonomous Learning & Self-Improvement
+   - `smartagent/reflection/` package: 7 modules for post-execution learning.
+   - Post-execution pipeline: ExecutionAnalyzer → Critic → ImprovementPlanner
+     → LearningStore → MemoryManager → KnowledgeManager → PromptRegistry.
+   - PromptRegistry: versioned worker system prompts; OllamaWorkerMixin picks
+     up evolved prompts automatically via `_resolve_system_prompt()`.
+   - LearningStore: analytics accumulator with worker/tool accuracy tracking,
+     success rate, confidence trend, history table, and self-evaluation report.
+   - ConfidenceEngine: per-worker and per-tool EMA tracking across runs.
+   - New console commands: `learning`, `analytics`, `reflection`, `history`,
+     `improvements`, `evaluate`.
+   - SmartAgent wired: `agent.reflection_engine`, `agent.prompt_registry`,
+     `agent.learning_store`; `agent.executive = ExecutiveController.with_agent(self)`.
+   - Orchestrator and ExecutiveController accept `reflection_engine` parameter.
+   - 58 new tests; full suite 1163 passing, 0 regressions.
+
 Future milestones (order indicative — see Build Order below):
    - Research Engine (real trusted-source search + summarization)
    - Plugin System (third-party module registration)
@@ -321,7 +337,6 @@ Future milestones (order indicative — see Build Order below):
    - Computer Control
    - Voice (real speech-to-text / text-to-speech backend)
    - Vision (real image understanding backend)
-   - Learning Engine (continuous learning with owner approval)
    - Planning Engine (real goal decomposition via TaskPlanner)
    - Task Scheduler (real automation loop)
    - Desktop UI

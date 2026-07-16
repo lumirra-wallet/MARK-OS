@@ -25,6 +25,7 @@ from smartagent.ui.commands import (
     events,
     executive,
     knowledge,
+    learning,
     memory,
     mind,
     models,
@@ -82,6 +83,7 @@ class Console:
         models.register(self._router)
         events.register(self._router)
         executive.register(self._router)   # Milestone 11 — plan, tasks
+        learning.register(self._router)    # Milestone 14 — learning analytics
 
         # Milestone 9: free-text fallback — when the user types something that
         # isn't a recognised command AND a model is active, route the raw input

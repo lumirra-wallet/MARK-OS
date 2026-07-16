@@ -12,20 +12,31 @@ from typing import TYPE_CHECKING
 from smartagent.executive.task import TaskType
 from smartagent.executive.workers.base_worker import BaseWorker
 from smartagent.executive.workers.ollama_mixin import OllamaWorkerMixin
+from smartagent.executive.workers.tool_mixin import WorkerToolMixin
 
 if TYPE_CHECKING:
     from smartagent.executive.execution_context import ExecutionContext
     from smartagent.executive.task import Task
 
 
-class TestingWorker(OllamaWorkerMixin, BaseWorker):
+class TestingWorker(WorkerToolMixin, OllamaWorkerMixin, BaseWorker):
     """
     Specialist for testing and quality assurance.
 
     Handles: TESTING tasks.
 
-    Uses the coding model for generating test code.
+    Phase 12: uses WorkerToolMixin for ReAct-style tool access.
+    Allowed tools: file_read (read implementation code), file_write (save tests),
+    directory_list, search_files (find related files).
+    Uses the coding model for test code generation.
     """
+
+    _allowed_tools: tuple[str, ...] = (
+        "file_read",
+        "file_write",
+        "directory_list",
+        "search_files",
+    )
 
     _system_prompt = """\
 You are a senior QA engineer for MARK, an advanced AI assistant.
@@ -78,4 +89,4 @@ directly.
         return "Writes unit tests, validates behaviour, and identifies edge cases."
 
     def execute(self, task: "Task", context: "ExecutionContext") -> str:
-        return self._execute_with_ollama(task, context)
+        return self._execute_with_tools(task, context)

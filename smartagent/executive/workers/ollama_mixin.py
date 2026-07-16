@@ -212,6 +212,62 @@ class OllamaWorkerMixin:
     # Ollama call
     # ------------------------------------------------------------------
 
+    def _stream_full(
+        self,
+        context: "ExecutionContext",
+        full_messages: list[dict[str, str]],
+    ) -> str | None:
+        """
+        Stream a response for a caller-assembled full message list.
+
+        Unlike ``_stream_response()``, this method does **not** prepend the
+        ``_system_prompt`` — the caller is responsible for including a system
+        message if needed.  Used by ``WorkerToolMixin`` to manage the ReAct
+        message thread directly.
+        """
+        mm = self._get_model_manager(context)
+        if mm is None:
+            return None
+        model_id = self._resolve_model_id(context)
+        kwargs: dict = {}
+        if model_id:
+            kwargs["model_id"] = model_id
+        try:
+            tokens = list(mm.chat_stream(full_messages, **kwargs))
+            text = "".join(tokens).strip()
+            return text if text else None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "OllamaWorkerMixin [%s]: stream_full failed: %s",
+                getattr(self, "name", "worker"), exc,
+            )
+            return None
+
+    def _resolve_system_prompt(self, context: "ExecutionContext") -> str:
+        """
+        Return the best available system prompt for this worker.
+
+        Priority:
+          1. Evolved prompt from the PromptRegistry (stored in
+             ``context.metadata["system_prompts"]`` by the ReflectionEngine
+             after the previous run).
+          2. The worker's class-level ``_system_prompt``.
+
+        This is the Milestone 14 prompt-evolution hook: every worker
+        automatically picks up improvements that the ReflectionEngine wrote
+        after the previous execution, with zero per-worker code changes.
+        """
+        worker_name = getattr(self, "name", type(self).__name__)
+        system_prompts: dict = context.metadata.get("system_prompts", {})
+        evolved = system_prompts.get(worker_name)
+        if evolved:
+            logger.debug(
+                "OllamaWorkerMixin [%s]: using evolved prompt from registry",
+                worker_name,
+            )
+            return evolved
+        return self._system_prompt
+
     def _stream_response(
         self,
         context: "ExecutionContext",
@@ -228,8 +284,10 @@ class OllamaWorkerMixin:
             return None
 
         model_id = self._resolve_model_id(context)
+        # Milestone 14: use evolved prompt if one exists for this worker
+        system_prompt = self._resolve_system_prompt(context)
         full_messages = [
-            {"role": "system", "content": self._system_prompt}
+            {"role": "system", "content": system_prompt}
         ] + messages
 
         kwargs: dict = {}

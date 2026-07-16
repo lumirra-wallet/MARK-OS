@@ -55,16 +55,39 @@ class Orchestrator:
         memory_manager: Any | None = None,
         knowledge_manager: Any | None = None,
         settings: Any | None = None,
+        tool_engine: Any | None = None,
+        event_bus: Any | None = None,
+        use_parallel: bool = False,
+        max_workers: int = 4,
+        reflection_engine: Any | None = None,
     ) -> None:
         self._planner = planner or Planner()
         self._worker_registry = worker_registry or build_default_registry()
-        self._scheduler = scheduler or Scheduler(worker_registry=self._worker_registry)
+
+        if scheduler is not None:
+            self._scheduler = scheduler
+        elif use_parallel:
+            from smartagent.executive.parallel_scheduler import ParallelScheduler
+            _w = max_workers
+            if settings is not None:
+                _w = getattr(settings, "max_parallel_workers", max_workers)
+            self._scheduler = ParallelScheduler(
+                worker_registry=self._worker_registry,
+                max_workers=_w,
+            )
+        else:
+            self._scheduler = Scheduler(worker_registry=self._worker_registry)
 
         # Phase 11.4 services — injected into ExecutionContext.metadata
         self._model_manager = model_manager
         self._memory_manager = memory_manager
         self._knowledge_manager = knowledge_manager
         self._settings = settings
+        # Phase 12 services
+        self._tool_engine = tool_engine
+        self._event_bus = event_bus
+        # Milestone 14 — reflection engine (optional)
+        self._reflection_engine = reflection_engine
 
     # ------------------------------------------------------------------
     # Main pipeline
@@ -106,6 +129,8 @@ class Orchestrator:
         if result.state == ExecutionState.COMPLETED:
             self._save_to_memory(result)
             self._propose_to_knowledge(result)
+            # Milestone 14 — reflection and autonomous learning
+            self._run_reflection(result)
 
         return result
 
@@ -174,12 +199,18 @@ class Orchestrator:
             context.metadata["knowledge_manager"] = self._knowledge_manager
         if self._settings is not None:
             context.metadata["settings"] = self._settings
+        # Phase 12 — tool access
+        if self._tool_engine is not None:
+            context.metadata["tool_engine"] = self._tool_engine
+        if self._event_bus is not None:
+            context.metadata["event_bus"] = self._event_bus
 
-        if self._model_manager is not None:
-            logger.info(
-                "Orchestrator: AI services injected (model=%s)",
-                getattr(self._model_manager, "active_model_id", "?"),
-            )
+        injected = [
+            k for k in ("model_manager", "memory_manager", "knowledge_manager",
+                        "settings", "tool_engine", "event_bus")
+            if context.metadata.get(k) is not None
+        ]
+        logger.info("Orchestrator: injected services: %s", injected)
 
     # ------------------------------------------------------------------
     # Phase 11.5 — result persistence
@@ -219,18 +250,40 @@ class Orchestrator:
             return
         try:
             summary = self._build_result_summary(context)
-            # KnowledgeManager.propose_concept expects name + description + source_id
             self._knowledge_manager.propose_concept(
-                name=context.goal[:80],
+                title=context.goal[:80],
                 description=summary[:1000],
-                source_id="executive",
-                confidence=self._average_confidence(context),
+                category="Projects",
+                tags=["executive", "goal-execution"],
             )
             logger.info("Orchestrator: proposed knowledge concept for goal")
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Orchestrator: could not propose knowledge concept: %s", exc
             )
+
+    def _run_reflection(self, context: ExecutionContext) -> None:
+        """
+        Milestone 14: run post-execution reflection using the ReflectionEngine.
+
+        Best-effort: any failure is logged and never surfaces to callers.
+        """
+        reflection_engine = getattr(self, "_reflection_engine", None)
+        if reflection_engine is None:
+            return
+        try:
+            result = reflection_engine.reflect(context)
+            context.metadata["last_reflection"] = result
+            logger.info(
+                "Orchestrator: reflection complete  score=%.0f%%  "
+                "memory=%d  knowledge=%d  prompts=%d",
+                result.critic.overall_score * 100,
+                result.memory_entries_added,
+                result.knowledge_proposals_added,
+                result.prompt_versions_added,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Orchestrator: reflection failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Summary helpers

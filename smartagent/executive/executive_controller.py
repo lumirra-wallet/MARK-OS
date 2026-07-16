@@ -56,6 +56,12 @@ class ExecutiveController:
         memory_manager: Any | None = None,
         knowledge_manager: Any | None = None,
         settings: Any | None = None,
+        tool_engine: Any | None = None,
+        event_bus: Any | None = None,
+        use_parallel: bool = False,
+        max_workers: int = 4,
+        show_progress: bool = True,
+        reflection_engine: Any | None = None,
     ) -> None:
         self._worker_registry = worker_registry or build_default_registry()
         self._planner = planner or Planner()
@@ -63,10 +69,29 @@ class ExecutiveController:
         self._memory_manager = memory_manager
         self._knowledge_manager = knowledge_manager
         self._settings = settings
+        self._tool_engine = tool_engine
+        self._event_bus = event_bus
+        self._use_parallel = use_parallel
+        self._max_workers = max_workers
+        self._show_progress = show_progress
+        self._reflection_engine = reflection_engine
 
-        self._scheduler = scheduler or Scheduler(
-            worker_registry=self._worker_registry
-        )
+        if scheduler is not None:
+            self._scheduler = scheduler
+        elif use_parallel:
+            from smartagent.executive.parallel_scheduler import ParallelScheduler
+            _w = getattr(settings, "max_parallel_workers", max_workers) if settings else max_workers
+            self._scheduler = ParallelScheduler(
+                worker_registry=self._worker_registry,
+                max_workers=_w,
+                show_progress=show_progress,
+            )
+        else:
+            self._scheduler = Scheduler(
+                worker_registry=self._worker_registry,
+                show_progress=show_progress,
+            )
+
         self._orchestrator = Orchestrator(
             planner=self._planner,
             scheduler=self._scheduler,
@@ -75,6 +100,9 @@ class ExecutiveController:
             memory_manager=memory_manager,
             knowledge_manager=knowledge_manager,
             settings=settings,
+            tool_engine=tool_engine,
+            event_bus=event_bus,
+            reflection_engine=reflection_engine,
         )
         self.current_context: Optional[ExecutionContext] = None
 
@@ -95,15 +123,21 @@ class ExecutiveController:
             ctrl = ExecutiveController.with_agent(agent)
             ctx  = ctrl.receive_goal("Build a REST API for task management")
         """
-        mm   = getattr(agent, "model_manager",   None)
-        mem  = getattr(agent, "memory",           None)
-        km   = getattr(agent, "knowledge",        None)
-        cfg  = getattr(agent, "settings",         None)
+        mm   = getattr(agent, "model_manager",    None)
+        mem  = getattr(agent, "memory",            None)
+        km   = getattr(agent, "knowledge",         None)
+        cfg  = getattr(agent, "settings",          None)
+        te   = getattr(agent, "tool_engine",       None)
+        eb   = getattr(agent, "events",            None)
+        re_  = getattr(agent, "reflection_engine", None)
         return cls(
             model_manager=mm,
             memory_manager=mem,
             knowledge_manager=km,
             settings=cfg,
+            tool_engine=te,
+            event_bus=eb,
+            reflection_engine=re_,
         )
 
     # ------------------------------------------------------------------

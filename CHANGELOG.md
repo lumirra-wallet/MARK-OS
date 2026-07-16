@@ -7,6 +7,86 @@ the architecture is still settling.
 
 ## [Unreleased]
 
+## Milestone 14 — Autonomous Learning & Self-Improvement
+
+### Overview
+MARK now reflects on every completed execution and continuously improves
+future runs.  No architecture redesign: all new logic hooks into the
+existing Memory, Knowledge, Mind, and Executive layers.
+
+### New package: `smartagent/reflection/`
+
+| Module | Role |
+| --- | --- |
+| `execution_analyzer.py` | Converts `ExecutionContext` → structured `ExecutionReport` |
+| `critic.py` | Heuristic + optional LLM evaluation of what worked / failed |
+| `improvement_planner.py` | Turns critic output into prompt, knowledge, and memory improvements |
+| `confidence_engine.py` | Tracks per-worker and per-tool accuracy with EMA |
+| `prompt_registry.py` | Versioned storage for evolving worker system prompts |
+| `learning_store.py` | Persistent analytics accumulator and formatted reports |
+| `reflection_engine.py` | Orchestrates all of the above post-execution (best-effort) |
+
+### Post-execution reflection pipeline
+
+```
+Execution
+  ↓  ExecutionAnalyzer  → ExecutionReport
+  ↓  Critic             → CriticReport (score, what worked, what failed)
+  ↓  ImprovementPlanner → ImprovementPlan (prompts / knowledge / memory)
+  ↓  LearningStore      → analytics record persisted
+  ↓  MemoryManager      → lessons and execution summaries stored
+  ↓  KnowledgeManager   → new concepts proposed to inbox (never bypasses approval)
+  ↓  PromptRegistry     → evolved prompt versions stored for next run
+  ↓  context.metadata   → system_prompts injected for OllamaWorkerMixin
+```
+
+### Prompt evolution (Milestone 14 hook)
+
+`OllamaWorkerMixin._resolve_system_prompt()` now checks
+`context.metadata["system_prompts"]` before using the class-level
+`_system_prompt`.  The reflection engine writes improved prompts there
+after every run, so workers pick them up automatically on the next
+execution — zero per-worker code changes required.
+
+### SmartAgent wiring
+
+`SmartAgent.__init__` now creates shared `PromptRegistry`,
+`LearningStore`, and `ReflectionEngine` instances on `agent.reflection_engine`.
+`agent.executive` is now built via `ExecutiveController.with_agent(self)`,
+threading all services (model, memory, knowledge, tools, reflection)
+through to workers automatically.
+
+### New console commands
+
+| Command | Description |
+| --- | --- |
+| `learning` | High-level learning analytics dashboard |
+| `analytics` | Detailed worker accuracy and tool reliability tables |
+| `reflection` | Last reflection report for the current execution |
+| `history [n]` | Table of the *n* most recent executions (default 10) |
+| `improvements [worker]` | Prompt version history for all or one worker |
+| `evaluate [worker\|tools\|knowledge\|learn]` | MARK's structured self-assessment |
+
+### Self-evaluation questions MARK can now answer
+
+- *What did I learn today?* → `evaluate learn`
+- *What should I improve?* → `evaluate`
+- *Which worker performs best?* → `evaluate worker`
+- *Which tools fail most often?* → `evaluate tools`
+- *What knowledge is missing?* → `evaluate knowledge`
+
+### Changes
+
+- `smartagent/reflection/` — new package (7 modules + `__init__.py`)
+- `smartagent/executive/orchestrator.py` — `__init__` accepts `reflection_engine`; `_reflection_engine` stored; `_run_reflection()` now wired (was `getattr` fallback only)
+- `smartagent/executive/executive_controller.py` — `__init__` accepts `reflection_engine`; `with_agent()` extracts it from agent; passed to `Orchestrator`
+- `smartagent/brain/agent.py` — creates `PromptRegistry`, `LearningStore`, `ReflectionEngine`; uses `ExecutiveController.with_agent(self)` so all services are wired
+- `smartagent/executive/workers/ollama_mixin.py` — adds `_resolve_system_prompt()` (Milestone 14 prompt-evolution hook); `_stream_response()` uses it
+- `smartagent/ui/console.py` — imports and registers `learning` commands module
+- `tests/test_reflection.py` — 58 new tests covering all M14 modules
+
+---
+
 ## Milestone 11 Phase 3 — Scheduler v2 + queue/run/cancel
 
 ### Overview

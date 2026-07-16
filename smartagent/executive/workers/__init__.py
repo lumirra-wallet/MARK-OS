@@ -26,6 +26,7 @@ always maps every ``TaskType`` to the right class.
 
 from smartagent.executive.workers.base_worker import BaseWorker, WorkerResult
 from smartagent.executive.workers.ollama_mixin import OllamaWorkerMixin
+from smartagent.executive.workers.tool_mixin import WorkerToolMixin
 from smartagent.executive.workers.research_worker import ResearchWorker
 from smartagent.executive.workers.planning_worker import PlanningWorker
 from smartagent.executive.workers.design_worker import DesignWorker
@@ -41,6 +42,7 @@ __all__ = [
     "BaseWorker",
     "WorkerResult",
     "OllamaWorkerMixin",
+    "WorkerToolMixin",
     "ResearchWorker",
     "PlanningWorker",
     "DesignWorker",

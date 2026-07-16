@@ -30,6 +30,9 @@ from smartagent.models.manager.model_manager import ModelManager
 from smartagent.models.model_client import ModelClient
 from smartagent.planning.goal_manager import GoalManager
 from smartagent.planning.task_planner import TaskPlanner
+from smartagent.reflection.learning_store import LearningStore
+from smartagent.reflection.prompt_registry import PromptRegistry
+from smartagent.reflection.reflection_engine import ReflectionEngine
 from smartagent.research.research_manager import ResearchManager
 from smartagent.skills.permissions import Permission, PermissionManager
 from smartagent.skills.skill_engine import SkillEngine
@@ -186,10 +189,27 @@ class SmartAgent:
             event_bus=self.events,
         )
 
+        # Milestone 14 — Autonomous Learning & Self-Improvement.
+        # A shared PromptRegistry and LearningStore live on the agent so they
+        # accumulate state across multiple executions within a session.  The
+        # ReflectionEngine is exposed as `agent.reflection_engine` so console
+        # commands can query it directly.
+        self.prompt_registry = PromptRegistry()
+        self.learning_store = LearningStore(memory_manager=self.memory)
+        self.reflection_engine = ReflectionEngine(
+            memory_manager=self.memory,
+            knowledge_manager=self.knowledge,
+            model_manager=self.model_manager,
+            prompt_registry=self.prompt_registry,
+            learning_store=self.learning_store,
+        )
+
         # Milestone 11 — Executive Framework (planning & task orchestration).
         # Distinct from `self.mind` (which is the Mind OS executive controller).
         # `agent.executive` is the goal-decomposition and task-scheduling layer.
-        self.executive = PlanningController()
+        # Use with_agent() so all services (model, memory, knowledge, tools,
+        # reflection) are threaded through to workers automatically.
+        self.executive = PlanningController.with_agent(self)
 
     def handle_message(self, message: str) -> str:
         """

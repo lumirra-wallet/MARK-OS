@@ -12,21 +12,32 @@ from typing import TYPE_CHECKING
 from smartagent.executive.task import TaskType
 from smartagent.executive.workers.base_worker import BaseWorker
 from smartagent.executive.workers.ollama_mixin import OllamaWorkerMixin
+from smartagent.executive.workers.tool_mixin import WorkerToolMixin
 
 if TYPE_CHECKING:
     from smartagent.executive.execution_context import ExecutionContext
     from smartagent.executive.task import Task
 
 
-class CodingWorker(OllamaWorkerMixin, BaseWorker):
+class CodingWorker(WorkerToolMixin, OllamaWorkerMixin, BaseWorker):
     """
     Specialist for code implementation.
 
     Handles: CODING and IMPLEMENTATION tasks.
 
-    Uses the coding model (qwen2.5-coder:7b by default) for better
-    code generation quality.
+    Phase 12: uses WorkerToolMixin for ReAct-style tool access.
+    Allowed tools: file_read, file_write, directory_list, directory_create,
+    search_files (full filesystem access to read existing code and write output).
+    Uses the coding-optimised model (qwen2.5-coder by default).
     """
+
+    _allowed_tools: tuple[str, ...] = (
+        "file_read",
+        "file_write",
+        "directory_list",
+        "directory_create",
+        "search_files",
+    )
 
     _system_prompt = """\
 You are an expert software engineer for MARK, an advanced AI assistant. \
@@ -76,4 +87,4 @@ or design specifies one.
         return "Writes clean, production-quality implementation code."
 
     def execute(self, task: "Task", context: "ExecutionContext") -> str:
-        return self._execute_with_ollama(task, context)
+        return self._execute_with_tools(task, context)
