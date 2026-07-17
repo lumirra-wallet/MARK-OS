@@ -6,6 +6,7 @@ import {
   Mic, AudioWaveform, Volume2, Square,
   GitBranch, Brain, Box, Workflow,
   Bookmark, Terminal, Briefcase, Wrench, Code2, Award, Stethoscope,
+  Globe,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChatView }          from './components/ChatView';
@@ -30,6 +31,7 @@ import { LiveTerminal }      from './components/LiveTerminal';
 import { JobsPanel }         from './components/JobsPanel';
 import { TaskGraphView }     from './components/TaskGraphView';
 import { CodeIndexPanel }    from './components/CodeIndexPanel';
+import { PreviewWorkspace }  from './components/PreviewWorkspace';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { markApi, SystemMetrics } from '@/lib/markApi';
@@ -261,6 +263,11 @@ export default function Dashboard() {
 
           <Divider />
 
+          {/* Preview */}
+          <NavIcon icon={Globe}        active={activeTab === 'preview'}      onClick={() => setActiveTab('preview')}      tooltip="Live Preview" />
+
+          <Divider />
+
           {/* Observability group */}
           <NavIcon icon={Clock}        active={activeTab === 'timeline'}     onClick={() => setActiveTab('timeline')}     tooltip="Agent Timeline" />
           <NavIcon icon={Award}        active={activeTab === 'evaluation'}   onClick={() => setActiveTab('evaluation')}   tooltip="Run Evaluations" />
@@ -314,6 +321,7 @@ export default function Dashboard() {
                   {activeTab === 'evaluation'  && <EvaluationPanel />}
                   {activeTab === 'performance'  && <PerformanceView />}
                   {activeTab === 'diagnostics'  && <DiagnosticsView />}
+                  {activeTab === 'preview'       && <PreviewWorkspace />}
                   {activeTab === 'voice'        && <VoicePanel />}
                   {activeTab === 'settings'     && <SettingsView />}
                 </motion.div>

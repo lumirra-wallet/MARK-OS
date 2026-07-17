@@ -68,6 +68,22 @@ export interface VoiceState {
   openaiVoice: string;
 }
 
+// ── Preview types ─────────────────────────────────────────────────────────────
+
+export type PreviewStatus = 'starting' | 'ready' | 'error' | 'stopped';
+export type DeviceMode    = 'desktop' | 'tablet' | 'mobile' | 'landscape';
+export type ThemeMode     = 'dark' | 'light';
+
+export interface PreviewInfo {
+  id:        string;
+  url:       string;
+  title:     string;
+  framework: string;
+  status:    PreviewStatus;
+  port?:     number;
+  registeredAt: string;
+}
+
 // ── Live Engineer panel types ─────────────────────────────────────────────────
 
 export interface ActivityEntry {
@@ -167,6 +183,18 @@ interface MarkState {
   workspaceContext:    WorkspaceContext | null;
   idleSuggestions:     IdleSuggestion[];
   engineeringMemory:   EngineeringMemoryState;
+
+  // Preview Workspace
+  previews:        PreviewInfo[];
+  activePreviewId: string | null;
+  deviceMode:      DeviceMode;
+  themeMode:       ThemeMode;
+
+  // Preview actions
+  setActivePreviewId: (id: string | null) => void;
+  setDeviceMode:      (mode: DeviceMode) => void;
+  setThemeMode:       (mode: ThemeMode) => void;
+  removePreview:      (id: string) => void;
 
   // Actions
   setServerUrl:      (url: string) => void;
@@ -426,6 +454,12 @@ export const useMarkStore = create<MarkState>((set, get) => {
       sessionElapsed:      0,
     },
 
+    // Preview Workspace defaults
+    previews:        [],
+    activePreviewId: null,
+    deviceMode:      'desktop',
+    themeMode:       'dark',
+
     // ── Branch actions (Feature 9) ────────────────────────────────────────────
 
     createBranch: (name) => set(state => ({
@@ -455,6 +489,19 @@ export const useMarkStore = create<MarkState>((set, get) => {
         return { branches, activeBranch: 'main', messages: branches['main'] ?? [], currentMarkMsgId: null };
       }
       return { branches };
+    }),
+
+    // ── Preview actions ───────────────────────────────────────────────────────
+
+    setActivePreviewId: (id) => set({ activePreviewId: id }),
+    setDeviceMode:      (mode) => set({ deviceMode: mode }),
+    setThemeMode:       (mode) => set({ themeMode: mode }),
+    removePreview: (id) => set(state => {
+      const remaining = state.previews.filter(p => p.id !== id);
+      return {
+        previews: remaining,
+        activePreviewId: state.activePreviewId === id ? (remaining[0]?.id ?? null) : state.activePreviewId,
+      };
     }),
 
     // ── Actions ───────────────────────────────────────────────────────────────
@@ -854,6 +901,70 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   _addNarration(text, (payload.narration_type ?? 'action') as NarrationEntry['type']);
                   _narrate(text);
                 }
+                break;
+              }
+
+              // ── Preview Workspace events ───────────────────────────────────
+              case 'PreviewRegistered': {
+                const preview: PreviewInfo = {
+                  id:           payload.id    ?? payload.url ?? Math.random().toString(36).slice(2),
+                  url:          payload.url   ?? '',
+                  title:        payload.title ?? payload.framework ?? 'Preview',
+                  framework:    payload.framework ?? 'unknown',
+                  status:       (payload.status ?? 'ready') as PreviewStatus,
+                  port:         payload.port,
+                  registeredAt: timestamp,
+                };
+                set(state => {
+                  const exists = state.previews.find(p => p.id === preview.id);
+                  return {
+                    previews: exists
+                      ? state.previews.map(p => p.id === preview.id ? preview : p)
+                      : [...state.previews, preview],
+                    activePreviewId: state.activePreviewId ?? preview.id,
+                  };
+                });
+                addTimeline(`Preview registered: ${preview.title} → ${preview.url}`);
+                const feedEntry: ActivityEntry = {
+                  id: _id(), timestamp,
+                  type: 'preview',
+                  text: `Preview ready: ${preview.title}`,
+                  detail: preview.url,
+                  success: true,
+                };
+                set(state => ({ activityFeed: [feedEntry, ...state.activityFeed].slice(0, 300) }));
+                _narrate(`Your app is now live in the preview — ${preview.title}`);
+                break;
+              }
+
+              case 'PreviewUpdated': {
+                set(state => ({
+                  previews: state.previews.map(p =>
+                    p.id === payload.id
+                      ? { ...p, url: payload.url ?? p.url, status: (payload.status ?? p.status) as PreviewStatus, title: payload.title ?? p.title }
+                      : p
+                  ),
+                }));
+                addTimeline(`Preview updated: ${payload.id}`);
+                const updateEntry: ActivityEntry = {
+                  id: _id(), timestamp,
+                  type: 'preview',
+                  text: `Preview updated: ${payload.title ?? payload.id}`,
+                  detail: payload.url,
+                  success: true,
+                };
+                set(state => ({ activityFeed: [updateEntry, ...state.activityFeed].slice(0, 300) }));
+                _narrate('Preview has been updated — hot-reloading now.');
+                break;
+              }
+
+              case 'PreviewStopped': {
+                set(state => ({
+                  previews: state.previews.map(p =>
+                    p.id === payload.id ? { ...p, status: 'stopped' as PreviewStatus } : p
+                  ),
+                }));
+                addTimeline(`Preview stopped: ${payload.id}`);
                 break;
               }
             }
