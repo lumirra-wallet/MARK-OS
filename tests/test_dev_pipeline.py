@@ -16,6 +16,7 @@ from smartagent.engineer.dev_pipeline import (
     PipelineResult,
     MilestoneResult,
     is_complex_goal,
+    extract_file_targets,
 )
 
 
@@ -215,6 +216,96 @@ class TestReviewer:
         lr = self._loop_result(files=["x.py"])
         review = dp._review("Create x.py", lr, "")
         assert review.startswith("PASS")
+
+
+# ── File-target extraction (permission scoping) ───────────────────────────────
+
+class TestExtractFileTargets:
+    def test_extracts_single_filename(self):
+        assert extract_file_targets("Create app.py with a Flask app") == ["app.py"]
+
+    def test_extracts_multiple_filenames(self):
+        targets = extract_file_targets(
+            "Create test_app.py with pytest tests and update requirements.txt"
+        )
+        assert targets == ["test_app.py", "requirements.txt"]
+
+    def test_no_filenames_returns_empty(self):
+        assert extract_file_targets("Refactor the authentication module") == []
+
+    def test_dedupes_repeated_filenames(self):
+        assert extract_file_targets("Update app.py, then re-check app.py") == ["app.py"]
+
+    def test_extracts_nested_path(self):
+        assert extract_file_targets("Add src/utils/helpers.py") == ["src/utils/helpers.py"]
+
+
+# ── Executive synthesis ────────────────────────────────────────────────────────
+
+class TestExecutiveSynthesis:
+    def test_synthesize_uses_llm_output(self, ws):
+        mm = make_model_manager(chat_stream_chunks=["I had the team ship this cleanly."])
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        text = dp._synthesize("some context", fallback="fallback text")
+        assert text == "I had the team ship this cleanly."
+
+    def test_synthesize_falls_back_on_llm_error(self, ws):
+        mm = make_model_manager()
+        mm.chat_stream.side_effect = RuntimeError("LLM down")
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        text = dp._synthesize("some context", fallback="fallback text")
+        assert text == "fallback text"
+
+    def test_synthesize_falls_back_on_empty_response(self, ws):
+        mm = make_model_manager(chat_stream_chunks=[""])
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        text = dp._synthesize("some context", fallback="fallback text")
+        assert text == "fallback text"
+
+    def test_milestone_summary_never_raises(self, ws):
+        mm = make_model_manager()
+        mm.chat_stream.side_effect = RuntimeError("down")
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        mr = MilestoneResult(milestone="Create app.py", success=True, attempts=1)
+        text = dp._synthesize_milestone_summary(1, 1, mr)
+        assert "app.py" in text or "1/1" in text
+
+    def test_internal_phase_text_goes_to_activity_not_chat(self, ws):
+        """Raw phase banners must publish ACTIVITY_FEED_ENTRY, not StreamingToken —
+        chat only sees the one executive-composed message per milestone."""
+        done_msg = MagicMock()
+        done_msg.tool_calls = []
+        done_msg.content    = "Done."
+
+        eb = make_event_bus()
+        mm = MagicMock()
+        mm.chat_stream.side_effect = [
+            iter(["1. Create app.py"]),        # planner
+            iter(["PASS: looks good."]),        # reviewer
+            iter(["I shipped app.py cleanly."]),# milestone synthesis
+            iter(["All done — one file shipped."]),  # final synthesis
+        ]
+        mm.chat_with_tools.return_value = done_msg
+
+        dp = DevPipeline(mm, eb, ws)
+        dp.run("Create app.py")
+
+        calls = eb.publish.call_args_list
+        streamed_texts = [
+            c.kwargs.get("text", "") for c in calls
+            if c.args and c.args[0] == "StreamingToken"
+        ]
+        activity_texts = [
+            c.kwargs.get("text", "") for c in calls
+            if c.args and c.args[0] == "ActivityFeedEntry"
+        ]
+        # The raw internal banner text must NOT appear in chat.
+        assert not any("Planning:" in t for t in streamed_texts)
+        assert not any("Milestone 1/1" in t for t in streamed_texts)
+        # But it must still be recorded for the Timeline/Activity Feed.
+        assert any("Planning" in t for t in activity_texts)
+        # And the executive-composed text is what reaches chat.
+        assert any("shipped app.py cleanly" in t for t in streamed_texts)
 
 
 # ── Fixer goal builder ─────────────────────────────────────────────────────────

@@ -91,6 +91,63 @@ class TestSafePath:
         p = _safe_path(ws, "src/utils.py")
         assert str(p) == os.path.join(ws, "src", "utils.py")
 
+    def test_sibling_directory_with_shared_prefix_is_blocked(self, tmp_path):
+        """A string startswith() check would wrongly allow this; resolve()
+        + is_relative_to() must not."""
+        workspace = tmp_path / "project"
+        workspace.mkdir()
+        sibling = tmp_path / "project-evil"
+        sibling.mkdir()
+        (sibling / "secret.txt").write_text("nope")
+        with pytest.raises(ValueError, match="traversal"):
+            _safe_path(str(workspace), "../project-evil/secret.txt")
+
+
+# ── Per-task permission scoping ────────────────────────────────────────────────
+
+class TestPermissionScoping:
+    def test_unrestricted_when_no_allowed_paths(self, ws):
+        result = execute_tool("write_file", {"path": "new.py", "content": "x"}, ws)
+        assert "Written" in result
+
+    def test_write_denied_outside_scope(self, ws):
+        result = execute_tool(
+            "write_file", {"path": "other.py", "content": "x"}, ws,
+            allowed_paths=["app.py"],
+        )
+        assert "Permission denied" in result
+        assert not Path(ws, "other.py").exists()
+
+    def test_write_allowed_inside_scope(self, ws):
+        result = execute_tool(
+            "write_file", {"path": "app.py", "content": "x = 1\n"}, ws,
+            allowed_paths=["app.py"],
+        )
+        assert "Written" in result
+        assert Path(ws, "app.py").read_text() == "x = 1\n"
+
+    def test_rename_denied_outside_scope(self, ws):
+        result = execute_tool(
+            "rename_file", {"src": "hello.txt", "dst": "renamed.txt"}, ws,
+            allowed_paths=["app.py"],
+        )
+        assert "Permission denied" in result
+
+    def test_reads_never_restricted(self, ws):
+        """Scoping only limits writes — MARK can still read broadly for context."""
+        result = execute_tool(
+            "read_file", {"path": "hello.txt"}, ws,
+            allowed_paths=["app.py"],
+        )
+        assert "Hello, World!" in result
+
+    def test_empty_allowed_paths_is_unrestricted(self, ws):
+        result = execute_tool(
+            "write_file", {"path": "anything.py", "content": "x"}, ws,
+            allowed_paths=[],
+        )
+        assert "Written" in result
+
 
 # ── read_file ──────────────────────────────────────────────────────────────────
 
