@@ -84,7 +84,7 @@ class Settings:
 
     # LLM provider abstraction (GitHub Models / Ollama)
     active_provider: str = ""   # read from ACTIVE_PROVIDER env var at runtime
-    github_default_model: str = "gpt-4.1-mini"
+    github_default_model: str = "gpt-4.1"
     github_coding_model: str = "gpt-4.1"
     github_fallback_model: str = "gpt-4o-mini"
 

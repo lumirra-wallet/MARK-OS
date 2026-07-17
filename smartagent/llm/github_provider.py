@@ -186,7 +186,7 @@ class GitHubProvider(BaseModel):
     ``ModelManager``.  ``ModelManager.load_github_models()`` creates them.
 
     Args:
-        model_name:       GitHub Models model id (e.g. ``"gpt-4.1-mini"``).
+        model_name:       GitHub Models model id (e.g. ``"gpt-4.1"``).
         token:            GitHub PAT. Defaults to ``GITHUB_TOKEN`` env var.
         timeout:          HTTP timeout in seconds.
         embedding_model:  Model to use for ``embed()``.
@@ -197,7 +197,7 @@ class GitHubProvider(BaseModel):
 
     def __init__(
         self,
-        model_name: str = "gpt-4.1-mini",
+        model_name: str = "gpt-4.1",
         token: str | None = None,
         timeout: float = 60.0,
         embedding_model: str = DEFAULT_EMBEDDING_MODEL,

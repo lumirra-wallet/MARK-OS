@@ -63,7 +63,7 @@ _PROVIDER_CATALOGUE = [
         "requires_token": True,
         "token_env":   "GITHUB_TOKEN",
         "capabilities": ["chat", "streaming", "embeddings", "tool_calling"],
-        "default_model": "gpt-4.1-mini",
+        "default_model": "gpt-4.1",
     },
     {
         "id":          "ollama",

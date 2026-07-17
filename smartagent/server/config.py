@@ -26,7 +26,7 @@ class ServerConfig:
     # ── LLM provider ──────────────────────────────────────────────────────────
     active_provider: str        # "github" | "ollama"
     github_token: str           # GitHub PAT with Models access
-    github_default_model: str   # e.g. "gpt-4.1-mini"
+    github_default_model: str   # e.g. "gpt-4.1"
     github_coding_model: str    # e.g. "gpt-4.1"
 
     # ── Ollama ────────────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ def _load() -> ServerConfig:
             or ("github" if os.environ.get("GITHUB_TOKEN") else "ollama")
         ),
         github_token         = os.environ.get("GITHUB_TOKEN", ""),
-        github_default_model = os.environ.get("GITHUB_DEFAULT_MODEL", "gpt-4.1-mini"),
+        github_default_model = os.environ.get("GITHUB_DEFAULT_MODEL", "gpt-4.1"),
         github_coding_model  = os.environ.get("GITHUB_CODING_MODEL", "gpt-4.1"),
         ollama_base_url      = os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
         ollama_default_model = os.environ.get("OLLAMA_DEFAULT_MODEL", "llama3.1:8b"),

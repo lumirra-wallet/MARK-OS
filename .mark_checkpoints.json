@@ -88,5 +88,167 @@
       }
     ],
     "pipeline": []
+  },
+  "6f3d6a21": {
+    "id": "6f3d6a21",
+    "label": "Checkpoint 1:01:40 PM",
+    "created_at": "2026-07-17T17:05:20+00:00",
+    "workspace": "/home/smart/Documents/Smart-Agent-Core",
+    "goal": "HI",
+    "git_hash": "2c5fcc0ae381c055eeada13072ba5a350fb37568",
+    "git_branch": "main",
+    "git_tag": "mark-ckpt-6f3d6a21",
+    "git_diff": "diff --git a/.mark_provider_state.json b/.mark_provider_state.json\nindex cd8e4ba..d6f0bfd 100644\n--- a/.mark_provider_state.json\n+++ b/.mark_provider_state.json\n@@ -1,6 +1,6 @@\n {\n   \"provider\": \"github\",\n-  \"github_model\": \"my-model\",\n+  \"github_model\": \"gpt-4.1-mini\",\n   \"github_coding_model\": \"gpt-4.1\",\n   \"ollama_model\": \"llama3.1:8b\",\n   \"ollama_coding_model\": \"qwen2.5-coder:7b\",",
+    "messages": [
+      {
+        "id": "otmc5mhq",
+        "role": "mark",
+        "timestamp": "2026-07-17T16:21:39.267Z",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "Good morning. I'm MARK \u2014 the executive director of your engineering team.\n\nTell me what you want built, and I'll plan the work, delegate it to the right specialists, supervise execution, and report back."
+          }
+        ],
+        "isActive": false
+      },
+      {
+        "id": "vh5muk7r",
+        "role": "mark",
+        "timestamp": "2026-07-17T16:22:29+00:00",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "GitHub Models error: Too many requests. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service)."
+          }
+        ],
+        "isActive": false
+      },
+      {
+        "id": "0r724w7l",
+        "role": "mark",
+        "timestamp": "2026-07-17T16:31:44+00:00",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "GitHub Models error: Too many requests. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service)."
+          }
+        ],
+        "isActive": false
+      },
+      {
+        "id": "lv5qsokj",
+        "role": "mark",
+        "timestamp": "2026-07-17T16:35:41+00:00",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "I'll get started on that right away.\n"
+          },
+          {
+            "type": "text",
+            "text": "\n[MARK] LLM call failed: Too many requests. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).\n"
+          },
+          {
+            "type": "summary",
+            "text": "Finished: Task complete in 2.8s.",
+            "success": false,
+            "filesCreated": [],
+            "filesModified": [],
+            "elapsed": 2.7537768379988847
+          }
+        ],
+        "isActive": false
+      },
+      {
+        "id": "9fqg4jur",
+        "role": "mark",
+        "timestamp": "2026-07-17T16:35:41+00:00",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "GitHub Models error: Too many requests. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service)."
+          }
+        ],
+        "isActive": false
+      },
+      {
+        "id": "kbbpoc2r",
+        "role": "mark",
+        "timestamp": "2026-07-17T16:41:48+00:00",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "GitHub Models error: Too many requests. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service)."
+          }
+        ],
+        "isActive": false
+      },
+      {
+        "id": "ckhh4np4",
+        "role": "mark",
+        "timestamp": "2026-07-17T16:42:56+00:00",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "GitHub Models error: Too many requests. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service)."
+          }
+        ],
+        "isActive": false
+      },
+      {
+        "id": "esds41va",
+        "role": "mark",
+        "timestamp": "2026-07-17T16:55:45+00:00",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "GitHub Models error: Too many requests. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service)."
+          }
+        ],
+        "isActive": false
+      },
+      {
+        "id": "cnh28izd",
+        "role": "user",
+        "timestamp": "2026-07-17T16:58:34.082Z",
+        "text": "HI",
+        "blocks": [],
+        "isActive": false
+      },
+      {
+        "id": "b556u4pf",
+        "role": "user",
+        "timestamp": "2026-07-17T16:58:56.396Z",
+        "text": "HELLO",
+        "blocks": [],
+        "isActive": false
+      },
+      {
+        "id": "4piymy0i",
+        "role": "mark",
+        "timestamp": "2026-07-17T16:59:48+00:00",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "GitHub Models error: Too many requests. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service)."
+          }
+        ],
+        "isActive": false
+      },
+      {
+        "id": "kroz6dg3",
+        "role": "mark",
+        "timestamp": "2026-07-17T17:01:18+00:00",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "I'll get started on that right away.\n"
+          }
+        ],
+        "isActive": true
+      }
+    ],
+    "pipeline": []
   }
 }

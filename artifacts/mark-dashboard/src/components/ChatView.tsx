@@ -33,6 +33,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useMarkStore, ChatMessage, ContentBlock } from '@/store/markStore';
+import { MarkAvatar } from './MarkAvatar';
 import { markApi } from '@/lib/markApi';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -381,29 +382,11 @@ function MarkBubble({ msg }: { msg: ChatMessage }) {
       className="flex flex-col items-start gap-1 max-w-[85%]"
     >
       <div className="flex items-center gap-2 px-1 mb-1">
-        <div className="w-6 h-6 rounded-full bg-accent/20 border border-accent/30 flex items-center justify-center">
-          <Zap className="w-3 h-3 text-accent" />
-        </div>
+        <MarkAvatar state={msg.isActive ? 'speaking' : 'idle'} size={24} />
         <span className="text-[11px] font-semibold text-accent">MARK</span>
         <span className="text-[10px] text-muted-foreground">
           {format(new Date(msg.timestamp), 'HH:mm')}
         </span>
-        {msg.isActive && (
-          <motion.div
-            className="flex items-center gap-1 ml-1"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-          >
-            {[0, 1, 2].map(i => (
-              <motion.div
-                key={i}
-                className="w-1 h-1 rounded-full bg-accent"
-                animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1.1, 0.8] }}
-                transition={{ duration: 1, delay: i * 0.15, repeat: Infinity }}
-              />
-            ))}
-          </motion.div>
-        )}
       </div>
 
       <div className="bg-card/80 border border-border/50 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm w-full space-y-1">

@@ -479,7 +479,7 @@ class ModelManager:
 
     def load_github_models(
         self,
-        default_model: str = "gpt-4.1-mini",
+        default_model: str = "gpt-4.1",
         coding_model: str = "gpt-4.1",
         fallback_model: str = "gpt-4o-mini",
         token: str | None = None,

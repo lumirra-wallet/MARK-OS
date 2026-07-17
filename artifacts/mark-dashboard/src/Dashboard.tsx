@@ -2,12 +2,13 @@ import React, { useEffect, useCallback, useState } from 'react';
 import { useMarkStore } from '@/store/markStore';
 import {
   Activity, FolderGit2,
-  LineChart, Settings, Clock, Plug, Unplug, Zap,
+  LineChart, Settings, Clock, Plug, Unplug,
   Square, GitBranch, Brain, Box, Workflow,
   Bookmark, Terminal, Briefcase, Wrench, Code2, Award, Stethoscope,
   Folder, FileText, Share2, MoreHorizontal,
 } from 'lucide-react';
 import { ChatView }          from './components/ChatView';
+import { MarkAvatar, MarkAvatarState } from './components/MarkAvatar';
 import { ApprovalsSidebar }  from './components/ApprovalsSidebar';
 import { ExecutionView }     from './components/ExecutionView';
 import { SettingsView }      from './components/SettingsView';
@@ -178,7 +179,12 @@ export default function Dashboard() {
     running, goal, workspace, elapsed,
     cancelRun, cancelRequested,
     serverUrl, pendingPermissions,
+    messages,
   } = useMarkStore();
+
+  const lastMsg = messages[messages.length - 1];
+  const avatarState: MarkAvatarState =
+    lastMsg?.role === 'mark' && lastMsg.isActive ? 'speaking' : running ? 'thinking' : 'idle';
 
   const [liveElapsed, setLiveElapsed] = React.useState(elapsed);
   const [metrics,     setMetrics]     = React.useState<SystemMetrics | null>(null);
@@ -218,8 +224,8 @@ export default function Dashboard() {
 
         {/* Left: logo + workspace + goal */}
         <div className="flex items-center gap-3 min-w-0">
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Zap className="w-4 h-4 text-accent" />
+          <div className="flex items-center gap-2 shrink-0">
+            <MarkAvatar state={avatarState} size={22} />
             <span className="font-bold tracking-tight">MARK</span>
           </div>
           <div className="h-3.5 w-px bg-border shrink-0" />

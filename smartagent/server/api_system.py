@@ -232,7 +232,7 @@ async def list_models() -> dict:
 
     if provider == "github":
         token = os.environ.get("GITHUB_TOKEN", "")
-        active = settings.get("model", "gpt-4.1-mini")
+        active = settings.get("model", "gpt-4.1")
         if not token:
             return {
                 "models": [], "active": active, "provider": "github",

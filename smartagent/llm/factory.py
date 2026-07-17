@@ -8,7 +8,7 @@ Provider selection order:
 
 To switch providers at runtime call the REST API::
 
-    POST /providers/switch  {"provider": "github", "model": "gpt-4.1-mini"}
+    POST /providers/switch  {"provider": "github", "model": "gpt-4.1"}
 
 Or set the env var before starting the server::
 
@@ -35,7 +35,7 @@ logger = get_logger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-GITHUB_DEFAULT_MODEL  = "gpt-4.1-mini"
+GITHUB_DEFAULT_MODEL  = "gpt-4.1"
 GITHUB_FALLBACK_MODEL = "gpt-4o-mini"
 GITHUB_CODING_MODEL   = "gpt-4.1"
 GITHUB_EMBEDDING_MODEL = "text-embedding-3-small"
@@ -97,6 +97,9 @@ def _load_state() -> dict[str, Any]:
             saved = json.loads(_STATE_FILE.read_text())
             # Guard: reject unknown GitHub model names so a stale or hand-edited
             # state file can't silently route every call to a 404 endpoint.
+            # Persist the correction immediately — otherwise a bad on-disk
+            # value gets silently "fixed" in memory on every load without
+            # ever actually being healed, and keeps re-triggering this branch.
             gm = saved.get("github_model", "")
             if gm and gm not in _KNOWN_GITHUB_MODELS:
                 logger.warning(
@@ -104,6 +107,7 @@ def _load_state() -> dict[str, Any]:
                     "— resetting to default %r", gm, GITHUB_DEFAULT_MODEL,
                 )
                 saved["github_model"] = GITHUB_DEFAULT_MODEL
+                _save_state({**state, **saved})
             state.update(saved)
     except Exception as exc:  # noqa: BLE001
         logger.debug("ProviderFactory: could not read state file: %s", exc)

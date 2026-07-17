@@ -552,6 +552,36 @@ class TestProviderFactory:
         assert result["temperature"] == 0.3
         assert state_file.exists()
 
+    def test_invalid_github_model_on_disk_is_healed_and_persisted(self, monkeypatch, tmp_path):
+        """
+        A hand-edited or stale state file with an unknown github_model must be
+        corrected back to the default AND that fix must be written back to
+        disk — otherwise every future load re-corrects the same bad value in
+        memory without ever actually fixing the file.
+        """
+        import smartagent.llm.factory as _fac
+        state_file = tmp_path / ".state.json"
+        state_file.write_text(json.dumps({
+            "provider": "github", "github_model": "my-model",
+        }))
+        monkeypatch.setattr(_fac, "_STATE_FILE", state_file)
+
+        state = _fac._load_state()
+        assert state["github_model"] == _fac.GITHUB_DEFAULT_MODEL
+
+        # The correction must be persisted, not just returned in memory.
+        on_disk = json.loads(state_file.read_text())
+        assert on_disk["github_model"] == _fac.GITHUB_DEFAULT_MODEL
+
+    def test_github_default_model_is_not_mini(self):
+        """The default GitHub Models selection must be a full model, not a
+        'mini' variant, across every place it's defined."""
+        import smartagent.llm.factory as _fac
+        from smartagent.llm.github_provider import GitHubProvider
+        assert _fac.GITHUB_DEFAULT_MODEL == "gpt-4.1"
+        assert "mini" not in _fac.GITHUB_DEFAULT_MODEL
+        assert GitHubProvider().id == "gpt-4.1"
+
 
 # ---------------------------------------------------------------------------
 # ModelManager.load_github_models integration
@@ -595,7 +625,7 @@ class TestModelManagerGitHubIntegration:
         mgr.load_github_models(token="ghp_test_token")
         mgr.load_github_models(token="ghp_test_token")
         # Should not duplicate
-        providers = [m for m in mgr.list_models() if m.id == "gpt-4.1-mini"]
+        providers = [m for m in mgr.list_models() if m.id == "gpt-4.1"]
         assert len(providers) == 1
 
     def test_load_github_models_no_token_skips_quietly(self, monkeypatch):
@@ -660,7 +690,7 @@ class TestOllamaWorkerMixinFactoryIntegration:
         worker = self._make_mixin()
         context = self._make_context()
         model_id = worker._resolve_model_id(context)
-        assert model_id == "gpt-4.1-mini"
+        assert model_id == "gpt-4.1"
 
     def test_resolve_coding_returns_github_coding_model(
         self, monkeypatch, tmp_path
