@@ -1,7 +1,7 @@
 """
 Model Router — Feature 15.
 
-Routes different worker types to different Ollama models.
+Routes different worker types to different models.
 Rules are configurable at runtime via the API.
 
 Endpoints (mounted in api_system.py companion file)
@@ -16,24 +16,29 @@ import logging
 import os
 from typing import Any
 
+from smartagent.llm.factory import NVIDIA_DEFAULT_MODEL
+
 logger = logging.getLogger(__name__)
 
 # ── Default routing rules ─────────────────────────────────────────────────────
+# All workers default to the product's default model — Ollama is not
+# supported. These names are legacy (smartagent.executive.workers.*), not
+# MARK's live-dashboard worker roster (see smartagent.engineer.worker_roles).
 
 _DEFAULT_ROUTES: dict[str, str] = {
-    "ResearchWorker":       "llama3.1:8b",
-    "PlanningWorker":       "llama3.1:8b",
-    "CodingWorker":         "qwen2.5-coder:7b",
-    "TestingWorker":        "qwen2.5-coder:7b",
-    "QualityWorker":        "llama3.1:8b",
-    "ReviewWorker":         "llama3.1:8b",
-    "DocumentationWorker":  "llama3.1:8b",
-    "GitWorker":            "llama3.1:8b",
-    "DebugWorker":          "qwen2.5-coder:7b",
-    "MemoryWorker":         "llama3.1:8b",
-    "KnowledgeWorker":      "llama3.1:8b",
-    "DesignWorker":         "llama3.1:8b",
-    "default":              "llama3.1:8b",
+    "ResearchWorker":       NVIDIA_DEFAULT_MODEL,
+    "PlanningWorker":       NVIDIA_DEFAULT_MODEL,
+    "CodingWorker":         NVIDIA_DEFAULT_MODEL,
+    "TestingWorker":        NVIDIA_DEFAULT_MODEL,
+    "QualityWorker":        NVIDIA_DEFAULT_MODEL,
+    "ReviewWorker":         NVIDIA_DEFAULT_MODEL,
+    "DocumentationWorker":  NVIDIA_DEFAULT_MODEL,
+    "GitWorker":            NVIDIA_DEFAULT_MODEL,
+    "DebugWorker":          NVIDIA_DEFAULT_MODEL,
+    "MemoryWorker":         NVIDIA_DEFAULT_MODEL,
+    "KnowledgeWorker":      NVIDIA_DEFAULT_MODEL,
+    "DesignWorker":         NVIDIA_DEFAULT_MODEL,
+    "default":              NVIDIA_DEFAULT_MODEL,
 }
 
 _routes: dict[str, str] = dict(_DEFAULT_ROUTES)
@@ -46,7 +51,7 @@ def get_model_for_worker(worker_name: str) -> str:
     env_val = os.environ.get(env_key)
     if env_val:
         return env_val
-    return _routes.get(worker_name, _routes.get("default", "llama3.1:8b"))
+    return _routes.get(worker_name, _routes.get("default", NVIDIA_DEFAULT_MODEL))
 
 
 def get_all_routes() -> dict[str, str]:
