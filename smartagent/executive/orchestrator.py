@@ -22,6 +22,7 @@ from smartagent.executive.architecture_guard import ArchitectureGuard, Architect
 _GUARD_DEFAULT = object()  # sentinel: "create a default ArchitectureGuard"
 from smartagent.executive.execution_context import ExecutionContext
 from smartagent.executive.execution_state import ExecutionState
+from smartagent.executive.milestone_planner import Milestone, MilestonePlanner
 from smartagent.executive.planner import Planner
 from smartagent.executive.scheduler import Scheduler
 from smartagent.executive.task import Task, TaskStatus
@@ -68,8 +69,10 @@ class Orchestrator:
         # Pass arch_guard=None to disable; omit (default) to auto-create one.
         arch_guard: Any = _GUARD_DEFAULT,
         workspace_path: Any | None = None,
+        stop_on_failure: bool = True,
     ) -> None:
         self._planner = planner or Planner()
+        self._stop_on_failure = stop_on_failure
         self._worker_registry = worker_registry or build_default_registry()
 
         if scheduler is not None:
@@ -117,36 +120,48 @@ class Orchestrator:
 
         Phase 11.4: injects AI services into the context before execution.
         Phase 11.5: saves results to memory/knowledge after completion.
+        Milestone 7: decomposes work into ordered named milestones for large/
+                     enterprise goals; iterates milestones sequentially, marking
+                     the context with the active milestone before each run.
 
         Args:
             goal:       Free-form user goal.
             complexity: Optional complexity tier — ``"trivial"``, ``"small"``,
                         ``"medium"``, ``"large"``, or ``"enterprise"``.
-                        When supplied, passed to the Planner so it can select
-                        the appropriate task template.  When ``None``, the
-                        Planner falls back to keyword matching (legacy path).
+                        When supplied, passed to the MilestonePlanner so it can
+                        select the appropriate task template and grouping.  When
+                        ``None``, falls back to keyword matching (legacy path).
 
         Steps:
-            1. Create a plan (list of tasks) from the goal.
-            2. Build a validated TaskGraph.
-            3. Seed the TaskQueue with initially-ready tasks.
-            4. Inject AI services into ExecutionContext.metadata.
-            5. Run the Scheduler until all tasks complete or fail.
+            1. Create milestones (wraps Planner; single milestone for simple goals).
+            2. Store milestone metadata in context.
+            3. Inject AI services into ExecutionContext.metadata.
+            4. For each milestone: build TaskGraph → seed queue → run Scheduler.
+            5. Short-circuit on milestone failure when stop_on_failure=True.
             6. Persist results to Memory and Knowledge (11.5).
         """
         context = ExecutionContext(goal=goal)
         context.transition_to(ExecutionState.PLANNING)
         logger.info("Orchestrator: planning goal=%r complexity=%r", goal, complexity)
 
-        if complexity is not None:
-            tasks = self._planner.create_plan(goal, complexity=complexity)
-        else:
-            tasks = self._planner.create_plan(goal)
-        logger.info("Orchestrator: plan has %d tasks", len(tasks))
+        # --- Milestone planning -------------------------------------------
+        milestone_planner = MilestonePlanner(planner=self._planner)
+        milestones = milestone_planner.create_milestones(goal, complexity=complexity)
+        logger.info(
+            "Orchestrator: plan has %d milestone(s), total tasks=%d",
+            len(milestones), sum(len(m.tasks) for m in milestones),
+        )
+
+        # Store milestone metadata in context so workers and the dashboard can
+        # inspect the plan shape.
+        context.metadata["milestones"] = [m.to_dict() for m in milestones]
 
         # Task #8 — Architecture Guardrails: scan before writing a single file.
+        # Use the flattened task list from all milestones (milestone loop replaced
+        # the old single-pass task list, so we derive it from the milestones).
         if self._arch_guard is not None:
-            guard_report = self._arch_guard.scan(goal, tasks)
+            _all_tasks = [t for m in milestones for t in m.tasks]
+            guard_report = self._arch_guard.scan(goal, _all_tasks)
             context.metadata["guard_report"] = guard_report.to_dict()
             if guard_report.blocks_execution:
                 blocking = "; ".join(i["detail"] for i in guard_report.errors)
@@ -159,17 +174,82 @@ class Orchestrator:
                     len(guard_report.warnings),
                 )
 
-        graph = self.build_task_graph(tasks)
-        context.task_graph = graph
-        context.task_queue = self.submit_to_queue(graph)
-        context.transition_to(ExecutionState.READY)
-
         # Milestone 19 — create a FileEditor scoped to the active workspace output dir
         self._inject_file_editor(context)
         # Phase 11.4 — inject services so workers can use them
         self._inject_services(context)
 
-        result = self._scheduler.run(context)
+        context.transition_to(ExecutionState.READY)
+
+        # --- Milestone iteration ------------------------------------------
+        any_milestone_failed = False  # tracks failures across ALL milestones
+        executed_tasks: list[Task] = []  # accumulates tasks for aggregate graph
+
+        for milestone in milestones:
+            logger.info(
+                "Orchestrator: starting milestone %d/%d — %r (%d tasks)",
+                milestone.phase, len(milestones), milestone.title, len(milestone.tasks),
+            )
+            context.metadata["active_milestone"] = milestone.phase
+
+            graph = self.build_task_graph(milestone.tasks)
+            context.task_graph = graph
+            context.task_queue = self.submit_to_queue(graph)
+
+            self._scheduler.run(context)
+
+            # Collect executed tasks for aggregate graph reconstruction
+            executed_tasks.extend(milestone.tasks)
+
+            # Update stored milestone status after execution
+            context.metadata["milestones"][milestone.phase - 1] = milestone.to_dict()
+
+            milestone_failed = graph.has_failures()
+            if milestone_failed:
+                any_milestone_failed = True
+                logger.warning(
+                    "Orchestrator: milestone %d failed (stop_on_failure=%s)",
+                    milestone.phase, self._stop_on_failure,
+                )
+                if self._stop_on_failure:
+                    # Mark remaining milestones SKIPPED in metadata
+                    for remaining in milestones[milestone.phase:]:
+                        skipped = remaining.to_dict()
+                        skipped["status"] = "skipped"
+                        context.metadata["milestones"][remaining.phase - 1] = skipped
+                    logger.info(
+                        "Orchestrator: %d milestone(s) skipped due to failure",
+                        len(milestones) - milestone.phase,
+                    )
+                    break
+
+        # Restore an aggregate task graph containing ALL executed tasks so that
+        # context.task_count / context.completed_count / _build_result_summary()
+        # reflect the full run — not just the last milestone.
+        if executed_tasks:
+            aggregate_graph = TaskGraph()
+            for task in executed_tasks:
+                aggregate_graph.add_task(task)
+            # No validate() — cross-milestone deps were already cleared;
+            # within-milestone deps refer to tasks present in the aggregate.
+            context.task_graph = aggregate_graph
+            logger.debug(
+                "Orchestrator: aggregate graph restored with %d tasks",
+                len(executed_tasks),
+            )
+
+        # Determine final context state from the AGGREGATE outcome across ALL
+        # milestones — not just the last task_graph (which may have succeeded
+        # even when an earlier milestone failed).
+        # We unconditionally override the state so a successful final milestone
+        # cannot mask an earlier failure, regardless of what the Scheduler set.
+        if context.state != ExecutionState.CANCELLED:
+            if any_milestone_failed:
+                context.transition_to(ExecutionState.FAILED)
+            else:
+                context.transition_to(ExecutionState.COMPLETED)
+
+        result = context
 
         # Phase 11.5 — persist results after successful execution
         if result.state == ExecutionState.COMPLETED:
