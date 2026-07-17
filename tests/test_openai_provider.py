@@ -643,7 +643,7 @@ class TestFactoryOpenAIAnthropic:
 
     def test_all_four_providers_accepted(self, monkeypatch, tmp_path):
         import smartagent.llm.factory as fac
-        for provider in ("github", "ollama", "openai", "anthropic"):
+        for provider in ("nvidia", "github", "openai", "anthropic"):
             monkeypatch.setattr(fac, "_STATE_FILE", tmp_path / f".state_{provider}.json")
             settings = fac.switch_provider(provider, model_manager=None)
             assert settings["provider"] == provider
