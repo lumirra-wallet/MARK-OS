@@ -262,12 +262,40 @@ def requires_approval(tool_name: str) -> bool:
 def _safe_path(workspace: str, rel: str) -> Path:
     """
     Resolve *rel* against *workspace* and raise ValueError on path traversal.
+
+    Uses ``resolve()`` + ``is_relative_to()`` rather than a string
+    ``startswith()`` check — the latter would wrongly accept a sibling
+    directory whose name happens to share the workspace path as a string
+    prefix (e.g. workspace ``/a/project`` vs. target ``/a/project-evil``).
     """
     base   = Path(workspace).resolve()
     target = (base / rel).resolve()
-    if not str(target).startswith(str(base)):
+    if not target.is_relative_to(base):
         raise ValueError(f"Path traversal blocked: {rel!r} resolves outside workspace.")
     return target
+
+
+#: Tool names that mutate the filesystem — the only ones subject to the
+#: per-task ``allowed_paths`` scope (reads stay unrestricted so MARK can
+#: still build context; least-privilege applies to what gets changed).
+_WRITE_TOOLS = frozenset({"write_file", "rename_file", "delete_file"})
+
+
+def _is_path_allowed(rel_path: str, workspace: str, allowed_paths: list[str] | None) -> bool:
+    """True if *rel_path* is within *allowed_paths* (or scoping is off)."""
+    if not allowed_paths:
+        return True
+    try:
+        target = _safe_path(workspace, rel_path)
+    except ValueError:
+        return False
+    for allowed in allowed_paths:
+        try:
+            if target == _safe_path(workspace, allowed):
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def _truncate(text: str, label: str = "output") -> str:
