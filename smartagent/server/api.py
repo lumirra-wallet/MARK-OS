@@ -93,6 +93,109 @@ _state = RunState()
 
 
 # ---------------------------------------------------------------------------
+# Chat / planning helpers
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+_CHAT_PATTERNS: list = [
+    _re.compile(p, _re.I) for p in [
+        r"^\s*h(?:i|ey|ello)\s*[!?.]*\s*$",
+        r"^\s*good\s+(?:morning|afternoon|evening|day)\b",
+        r"^\s*how\s+are\s+you\b",
+        r"^\s*what\s+(?:can|do)\s+you\s+(?:do|help)\b",
+        r"^\s*who\s+are\s+you\b",
+        r"^\s*what\s+are\s+you\b",
+        r"^\s*(?:thanks?|thank\s+you)\b",
+        r"^\s*ok(?:ay)?\s*[!?.]*\s*$",
+        r"^\s*(?:tell|explain|describe)\s+me\b",
+        r"^\s*what\s+is\b",
+        r"^\s*how\s+does\b",
+        r"^\s*can\s+you\b",
+        r"^\s*please\s+help\b",
+    ]
+]
+
+_CODE_KEYWORDS = frozenset({
+    "create", "build", "write", "make", "generate", "add", "fix", "update",
+    "refactor", "implement", "code", "file", "function", "class", "module",
+    "api", "endpoint", "app", "script", "program", "deploy", "install",
+    "setup", "configure", "test", "debug",
+})
+
+
+def _is_conversational_goal(goal: str) -> bool:
+    """
+    Return True when *goal* looks like a chat message rather than a
+    software-engineering task.  Any positive match routes to the direct
+    LLM chat path; everything else goes through the build pipeline.
+    """
+    g = goal.strip()
+    if not g:
+        return False
+    for pat in _CHAT_PATTERNS:
+        if pat.match(g):
+            return True
+    # Short messages (≤4 words) with no known code verb → treat as chat
+    words = g.split()
+    if len(words) <= 4 and not any(w.lower() in _CODE_KEYWORDS for w in words):
+        return True
+    return False
+
+
+# System prompts ─────────────────────────────────────────────────────────────
+
+_MARK_CHAT_SYSTEM = (
+    "You are MARK, an AI software engineering assistant embedded in a developer "
+    "dashboard. You help users plan, scaffold, build, debug, and discuss software "
+    "projects. Keep replies concise and friendly — 1-3 short paragraphs max. "
+    "When asked what you can do, mention: generating files and code, explaining "
+    "architecture, fixing bugs, planning features, and answering any software question."
+)
+
+_MARK_PLAN_SYSTEM = (
+    "You are MARK, an AI software engineer. The user has asked you to build "
+    "something. In 2-4 short, friendly sentences tell the user *exactly* what "
+    "you are going to create — what files, what structure, what the end result "
+    "will look like. Be specific and confident. Do NOT include code or fences, "
+    "just the plan in plain prose."
+)
+
+
+def _stream_llm_response(
+    goal: str,
+    system_prompt: str,
+    model_manager: Any,
+    event_bus: Any,
+) -> None:
+    """
+    Call the active LLM and publish every token as a StreamingToken event.
+
+    Must be called from a worker thread (``asyncio.to_thread``) because
+    ``model_manager.chat_stream()`` is a blocking iterator.  Falls back to a
+    canned reply when no model is loaded or the call fails.
+    """
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user",   "content": goal},
+    ]
+    try:
+        for chunk in model_manager.chat_stream(messages):
+            if chunk:
+                event_bus.publish(ServerEvents.STREAMING_TOKEN, text=chunk, source="mark")
+    except Exception as exc:
+        logger.warning(
+            "MARK _stream_llm_response: LLM unavailable (%s) — using fallback", exc
+        )
+        fallback = (
+            "I'm MARK, your AI software engineering assistant! I can create files, "
+            "write and refactor code, fix bugs, plan features, and answer any "
+            "software question. What would you like to build today?"
+        )
+        event_bus.publish(ServerEvents.STREAMING_TOKEN, text=fallback, source="mark")
+
+
+# ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 
@@ -292,62 +395,110 @@ async def execute(req: ExecuteRequest) -> dict:
                         "timestamp": _now_iso(),
                     })
 
-            ticker_task = asyncio.create_task(_status_ticker(), name="mark-status-ticker")
+            # ── Initialise agent in a thread (SmartAgent does blocking network ──
+            # calls to Ollama/GitHub at startup — keep the event loop free).
+            def _init_agent() -> Any:
+                s = Settings(workspace_path=_state.workspace)
+                a = SmartAgent(s)
+                a.events = event_bus
+                return a
 
-            # Build a minimal agent that uses our event bus
-            settings = Settings(workspace_path=_state.workspace)
-            agent    = SmartAgent(settings)
-            # Replace the agent's own bus with our broadcaster-wired bus so
-            # workers that publish via agent.events are also captured.
-            agent.events = event_bus
+            agent = await asyncio.to_thread(_init_agent)
+            logger.info(
+                "MARK STATE agent-ready  active_model=%r",
+                getattr(agent.model_manager, "_active_model_id", "none"),
+            )
 
-            eng = SoftwareEngineer.with_agent(agent, event_bus=event_bus)
+            # ── Route: conversational vs code task ───────────────────────────
+            if _is_conversational_goal(req.goal):
+                # ── CHAT PATH ─────────────────────────────────────────────────
+                logger.info("MARK STATE chat  goal=%r", req.goal[:60])
 
-            def _build() -> Any:
-                with intercept_print(event_bus):
-                    return eng.build(
-                        goal=req.goal,
-                        project_dir=_state.workspace,
-                        test_cmd=req.test_cmd,
-                        max_iterations=req.max_iterations,
-                        run_quality=False,
+                def _do_chat() -> None:
+                    _stream_llm_response(
+                        req.goal, _MARK_CHAT_SYSTEM,
+                        agent.model_manager, event_bus,
                     )
 
-            if _state.cancel_requested:
-                ev_name    = ServerEvents.RUN_CANCELLED
-                ev_payload = {"goal": req.goal, "success": False}
-                logger.info("MARK STATE cancelled  (pre-build cancel_requested)")
-                return
+                await asyncio.to_thread(_do_chat)
+                ev_name    = ServerEvents.RUN_COMPLETED
+                ev_payload = {
+                    "goal":           req.goal,
+                    "success":        True,
+                    "elapsed":        time.monotonic() - _state.start_time,
+                    "files_created":  [],
+                    "files_modified": [],
+                    "summary":        "",
+                }
+                logger.info("MARK STATE chat-complete")
 
-            logger.info("MARK STATE executing  build starting")
-            result = await asyncio.to_thread(_build)
+            else:
+                # ── CODE PATH ─────────────────────────────────────────────────
+                ticker_task = asyncio.create_task(
+                    _status_ticker(), name="mark-status-ticker"
+                )
 
-            logger.info(
-                "MARK STATE executing→complete  success=%s  elapsed=%.1fs  "
-                "files_created=%d  files_modified=%d",
-                result.success,
-                result.total_elapsed,
-                len(result.files_created),
-                len(result.files_modified),
-            )
+                # Planning preview — stream "I'll build X for you" before work
+                logger.info("MARK STATE plan-preview")
 
-            # Always RunCompleted when build() returns normally, regardless of
-            # result.success.  RunFailed is reserved for *unhandled exceptions*
-            # — conflating the two is what causes the dashboard to show
-            # "Run failed" when the workers simply didn't fully pass tests.
-            ev_name    = ServerEvents.RUN_COMPLETED
-            ev_payload = {
-                "goal":           result.goal or req.goal,
-                "success":        result.success,
-                "elapsed":        result.total_elapsed,
-                "files_created":  result.files_created,
-                "files_modified": result.files_modified,
-                "summary":        result.summary[:500] if result.summary else "",
-            }
-            logger.info(
-                "MARK STATE completed  ev=%r  success=%s",
-                ev_name, result.success,
-            )
+                def _do_plan() -> None:
+                    _stream_llm_response(
+                        req.goal, _MARK_PLAN_SYSTEM,
+                        agent.model_manager, event_bus,
+                    )
+                    # Separator so the build's own output starts on a fresh line
+                    event_bus.publish(
+                        ServerEvents.STREAMING_TOKEN, text="\n\n", source="mark"
+                    )
+
+                await asyncio.to_thread(_do_plan)
+
+                if _state.cancel_requested:
+                    ev_name    = ServerEvents.RUN_CANCELLED
+                    ev_payload = {"goal": req.goal, "success": False}
+                    logger.info("MARK STATE cancelled  (pre-build cancel_requested)")
+                    return
+
+                # Build
+                eng = SoftwareEngineer.with_agent(agent, event_bus=event_bus)
+
+                def _build() -> Any:
+                    with intercept_print(event_bus):
+                        return eng.build(
+                            goal=req.goal,
+                            project_dir=_state.workspace,
+                            test_cmd=req.test_cmd,
+                            max_iterations=req.max_iterations,
+                            run_quality=False,
+                        )
+
+                logger.info("MARK STATE executing  build starting")
+                result = await asyncio.to_thread(_build)
+
+                logger.info(
+                    "MARK STATE executing→complete  success=%s  elapsed=%.1fs  "
+                    "files_created=%d  files_modified=%d",
+                    result.success,
+                    result.total_elapsed,
+                    len(result.files_created),
+                    len(result.files_modified),
+                )
+
+                # Always RunCompleted when build() returns normally, regardless of
+                # result.success.  RunFailed is reserved for *unhandled exceptions*.
+                ev_name    = ServerEvents.RUN_COMPLETED
+                ev_payload = {
+                    "goal":           result.goal or req.goal,
+                    "success":        result.success,
+                    "elapsed":        result.total_elapsed,
+                    "files_created":  result.files_created,
+                    "files_modified": result.files_modified,
+                    "summary":        result.summary[:500] if result.summary else "",
+                }
+                logger.info(
+                    "MARK STATE completed  ev=%r  success=%s",
+                    ev_name, result.success,
+                )
 
         except asyncio.CancelledError:
             ev_name    = ServerEvents.RUN_CANCELLED

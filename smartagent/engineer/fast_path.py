@@ -41,8 +41,15 @@ logger = get_logger(__name__)
 # Fence parser — same Pattern B used by FileEditMixin
 # ---------------------------------------------------------------------------
 
+# Primary pattern: ```lang filename.ext\ncode\n```  (preferred)
 _FENCE_RE: re.Pattern = re.compile(
     r"```(?P<lang>\w+)?\s+(?P<filename>[\w/.\-]+\.\w+)\n(?P<code>.*?)```",
+    re.DOTALL,
+)
+
+# Fallback pattern: ```lang\ncode\n```  (no filename on fence line)
+_FENCE_NOFILE_RE: re.Pattern = re.compile(
+    r"```(?P<lang>\w+)\n(?P<code>.*?)```",
     re.DOTALL,
 )
 
@@ -51,18 +58,24 @@ _FENCE_RE: re.Pattern = re.compile(
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = """\
-You are an expert code generator. Produce ONLY fenced code blocks.
-Put the filename directly on the opening fence line. Example:
+You are an expert code generator. Your ONLY output must be fenced code blocks.
+
+MANDATORY FORMAT — put the filename on the same line as the opening fence:
 
 ```python hello.py
-print("Hello World")
+print("Hello, World!")
 ```
 
-Rules:
-- Output ONLY code blocks, no prose, no explanations.
-- One block per file.
-- Use the appropriate language tag (python, html, css, js, markdown, text, …).
-- Make the code complete and working — do not use placeholders.
+```html index.html
+<!DOCTYPE html><html><body><h1>Hello</h1></body></html>
+```
+
+STRICT RULES — violating any of these causes file write failure:
+1. Every code block MUST have the filename on the opening fence line (not inside the block).
+2. Output ONLY code blocks — zero prose, zero explanations, zero markdown outside fences.
+3. One block per file. Multiple files = multiple blocks.
+4. Language tag is required (python, html, css, javascript, typescript, bash, text, …).
+5. Code must be complete and working — no placeholders, no TODOs, no ellipses.
 """
 
 # ---------------------------------------------------------------------------
@@ -166,7 +179,7 @@ class FastPathBuilder:
         logger.debug("[fast] LLM response length=%d chars", len(response))
 
         # ── Step 2: parse + write files ──────────────────────────────
-        created = self._write_files(response)
+        created = self._write_files(response, goal=goal)
         result.files_created = created
 
         # ── Step 3: optional test run ────────────────────────────────
@@ -217,9 +230,14 @@ class FastPathBuilder:
 
         return "".join(chunks)
 
-    def _write_files(self, response: str) -> list[str]:
+    def _write_files(self, response: str, goal: str = "") -> list[str]:
         """
         Parse fenced code blocks from *response* and write each to disk.
+
+        Tries the primary pattern first (```lang filename.ext).  If nothing
+        matches (LLM omitted the filename from the fence line), falls back to
+        the secondary pattern (```lang) and derives a filename from the goal
+        or language tag.
 
         Returns the list of filenames successfully written.
         """
@@ -232,7 +250,40 @@ class FastPathBuilder:
         editor  = FileEditor(self._project_dir)
         created: list[str] = []
 
-        for m in _FENCE_RE.finditer(response):
+        # ── Primary: fences that include filename ──────────────────────────
+        matches = list(_FENCE_RE.finditer(response))
+
+        # ── Fallback: fences without filename ─────────────────────────────
+        if not matches:
+            _LANG_EXT = {
+                "python": "py", "py": "py",
+                "javascript": "js", "js": "js",
+                "typescript": "ts", "ts": "ts",
+                "html": "html", "css": "css",
+                "bash": "sh", "shell": "sh", "sh": "sh",
+                "json": "json", "yaml": "yml", "toml": "toml",
+                "markdown": "md", "md": "md",
+                "text": "txt", "txt": "txt",
+            }
+            # Derive a base name from the goal (first two meaningful words)
+            _goal_words = [w.lower() for w in goal.split() if w.isalpha() and w.lower()
+                           not in ("a", "an", "the", "create", "make", "write", "add", "build")]
+            _base = "_".join(_goal_words[:2]) if _goal_words else "output"
+
+            for i, m in enumerate(_FENCE_NOFILE_RE.finditer(response)):
+                lang = m.group("lang").lower()
+                ext  = _LANG_EXT.get(lang, lang)
+                suffix = f"_{i}" if i > 0 else ""
+                filename = f"{_base}{suffix}.{ext}"
+                # Avoid stomping on previously written files
+                while filename in created:
+                    filename = f"{_base}_{i}{suffix}.{ext}"
+                matches.append(type("_M", (), {
+                    "group": lambda self, k, _code=m.group("code"), _fn=filename:
+                        _fn if k == "filename" else _code
+                })())
+
+        for m in matches:
             filename = m.group("filename")
             code     = m.group("code")
 
