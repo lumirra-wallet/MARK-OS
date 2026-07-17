@@ -96,6 +96,12 @@ class VoiceSpeakRequest(BaseModel):
     text: str = Field(..., description="Text to speak aloud.")
 
 
+class OpenAITTSRequest(BaseModel):
+    """Stream TTS audio from OpenAI tts-1-hd."""
+    text:  str = Field(..., description="Text to synthesise.")
+    voice: str = Field("nova", description="OpenAI voice: alloy | echo | fable | onyx | nova | shimmer")
+
+
 class VoiceSettingsUpdateRequest(BaseModel):
     """Partially update VoiceSettings (all fields optional)."""
     mode:           str   | None = None

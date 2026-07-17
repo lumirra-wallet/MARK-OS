@@ -74,27 +74,22 @@ const SUGGESTION_CONFIG: Record<string, { icon: React.ComponentType<any>; color:
   'dependency':    { icon: AlertTriangle, color: 'text-yellow-400'  },
 };
 
+// ── OpenAI voice options ───────────────────────────────────────────────────────
+
+const OPENAI_VOICES = [
+  { value: 'nova',    label: 'Nova — warm, conversational' },
+  { value: 'alloy',   label: 'Alloy — neutral, clear' },
+  { value: 'echo',    label: 'Echo — deep, confident' },
+  { value: 'fable',   label: 'Fable — expressive, British' },
+  { value: 'onyx',    label: 'Onyx — authoritative' },
+  { value: 'shimmer', label: 'Shimmer — bright, energetic' },
+];
+
 // ── Voice controls ────────────────────────────────────────────────────────────
 
 function VoiceBar() {
-  const { voice, toggleMute } = useMarkStore();
-  const [paused, setPaused]     = useState(false);
-  const [voices, setVoices]     = useState<SpeechSynthesisVoice[]>([]);
-  const [speed,  setSpeed]      = useState(1.0);
-  const [selectedVoice, setSelectedVoice] = useState('');
-
-  useEffect(() => {
-    const load = () => {
-      const v = speechSynthesis.getVoices();
-      if (v.length) {
-        setVoices(v);
-        if (!selectedVoice) setSelectedVoice(v[0]?.name ?? '');
-      }
-    };
-    load();
-    speechSynthesis.onvoiceschanged = load;
-    return () => { speechSynthesis.onvoiceschanged = null; };
-  }, []);
+  const { voice, toggleMute, setTtsProvider, setOpenaiVoice, speak } = useMarkStore();
+  const [paused, setPaused] = useState(false);
 
   const handlePauseResume = () => {
     if (paused) { speechSynthesis.resume(); setPaused(false); }
@@ -107,69 +102,98 @@ function VoiceBar() {
       ? <VolumeX className="w-3.5 h-3.5 text-muted-foreground" />
       : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />;
 
+  const isOpenAI = voice.ttsProvider === 'openai';
+
   return (
-    <div className="flex items-center gap-2 px-3 py-2 border-b border-border/40 bg-card/50 text-xs">
-      <div className="flex items-center gap-1.5 text-muted-foreground">
-        {stateIcon}
-        <span className="font-medium text-foreground/70">Narration</span>
-      </div>
+    <div className="border-b border-border/40 bg-card/50 text-xs">
+      {/* Top row: status + provider toggle + controls */}
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        <div className="flex items-center gap-1.5 text-muted-foreground shrink-0">
+          {stateIcon}
+          <span className="font-medium text-foreground/70">Narration</span>
+        </div>
 
-      {voices.length > 0 && (
-        <select
-          value={selectedVoice}
-          onChange={e => {
-            setSelectedVoice(e.target.value);
-            // Persist so the next speak() uses this voice
-            (window as any).__markVoiceName = e.target.value;
-          }}
-          className="flex-1 min-w-0 bg-muted/40 border border-border/40 rounded px-1.5 py-0.5 text-[10px] text-foreground/80 max-w-[140px]"
-        >
-          {voices.map(v => (
-            <option key={v.name} value={v.name}>{v.name.replace(/\s*\(.*?\)/, '')}</option>
-          ))}
-        </select>
-      )}
-
-      <div className="flex items-center gap-1">
-        <span className="text-muted-foreground font-mono">{speed.toFixed(1)}×</span>
-        <input
-          type="range" min="0.5" max="2" step="0.1"
-          value={speed}
-          onChange={e => {
-            const v = parseFloat(e.target.value);
-            setSpeed(v);
-            (window as any).__markVoiceSpeed = v;
-          }}
-          className="w-14 accent-accent h-1"
-        />
-      </div>
-
-      <Tooltip>
-        <TooltipTrigger asChild>
+        {/* Provider toggle */}
+        <div className="flex items-center bg-muted/40 border border-border/40 rounded overflow-hidden text-[10px] shrink-0">
           <button
-            onClick={handlePauseResume}
-            className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-          >
-            {paused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="text-xs">{paused ? 'Resume' : 'Pause'} narration</TooltipContent>
-      </Tooltip>
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            onClick={() => toggleMute()}
+            onClick={() => setTtsProvider('browser')}
             className={cn(
-              "p-1 rounded hover:bg-muted/60 transition-colors",
-              voice.muted ? "text-destructive/70" : "text-muted-foreground hover:text-foreground",
+              "px-2 py-0.5 transition-colors",
+              !isOpenAI ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {voice.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
+            Browser
           </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="text-xs">{voice.muted ? 'Unmute' : 'Mute'} narration</TooltipContent>
-      </Tooltip>
+          <button
+            onClick={() => setTtsProvider('openai')}
+            className={cn(
+              "px-2 py-0.5 transition-colors",
+              isOpenAI ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            OpenAI
+          </button>
+        </div>
+
+        <div className="flex-1" />
+
+        {/* Pause/resume (browser only) */}
+        {!isOpenAI && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={handlePauseResume}
+                className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {paused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">{paused ? 'Resume' : 'Pause'}</TooltipContent>
+          </Tooltip>
+        )}
+
+        {/* Mute */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => toggleMute()}
+              className={cn(
+                "p-1 rounded hover:bg-muted/60 transition-colors",
+                voice.muted ? "text-destructive/70" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {voice.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">{voice.muted ? 'Unmute' : 'Mute'}</TooltipContent>
+        </Tooltip>
+      </div>
+
+      {/* OpenAI voice selector row */}
+      {isOpenAI && (
+        <div className="flex items-center gap-2 px-3 pb-1.5">
+          <select
+            value={voice.openaiVoice}
+            onChange={e => setOpenaiVoice(e.target.value)}
+            className="flex-1 bg-muted/40 border border-border/40 rounded px-1.5 py-0.5 text-[10px] text-foreground/80"
+          >
+            {OPENAI_VOICES.map(v => (
+              <option key={v.value} value={v.value}>{v.label}</option>
+            ))}
+          </select>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => speak('Hello, I\'m MARK, your AI software engineer.')}
+                className="shrink-0 px-2 py-0.5 rounded bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors text-[10px]"
+              >
+                Test
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">Play a test phrase</TooltipContent>
+          </Tooltip>
+        </div>
+      )}
     </div>
   );
 }

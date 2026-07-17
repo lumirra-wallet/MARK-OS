@@ -50,6 +50,7 @@ from smartagent.server.models import (
     DenyRequest,
     ExecuteRequest,
     HealthResponse,
+    OpenAITTSRequest,
     PendingPermissionInfo,
     PermissionsResponse,
     ProjectFile,
@@ -793,6 +794,47 @@ async def voice_speak(req: VoiceSpeakRequest) -> dict:
     """Synthesise text via Piper TTS (non-blocking)."""
     voice_manager.speak(req.text)
     return {"success": True}
+
+
+@router.post("/voice/speak-openai")
+async def voice_speak_openai(req: OpenAITTSRequest) -> Any:
+    """
+    Stream TTS audio synthesised by OpenAI tts-1-hd.
+
+    Returns raw MP3 bytes (audio/mpeg).  Falls back with HTTP 503 when
+    OPENAI_API_KEY is not set — the frontend silently uses browser TTS.
+    """
+    import os
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY not configured")
+
+    valid_voices = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
+    voice = req.voice if req.voice in valid_voices else "nova"
+
+    try:
+        from openai import OpenAI as _OpenAI
+        from fastapi.responses import Response as _Response
+        client = _OpenAI(api_key=api_key)
+        tts_response = await asyncio.to_thread(
+            lambda: client.audio.speech.create(
+                model="tts-1-hd",
+                voice=voice,   # type: ignore[arg-type]
+                input=req.text,
+                response_format="mp3",
+            )
+        )
+        audio_bytes = tts_response.content
+        return _Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "no-cache"},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("OpenAI TTS error: %s", exc)
+        raise HTTPException(status_code=503, detail=f"TTS unavailable: {exc}")
 
 
 @router.post("/voice/transcribe", response_model=VoiceTranscribeResponse)

@@ -62,6 +62,10 @@ export interface VoiceState {
   wakePhraseEnabled: boolean;
   transcript: string;
   isBrowserTTSFallback: boolean;
+  /** Which TTS engine to use for narration */
+  ttsProvider: 'browser' | 'openai';
+  /** OpenAI voice ID (alloy | echo | fable | onyx | nova | shimmer) */
+  openaiVoice: string;
 }
 
 // ── Live Engineer panel types ─────────────────────────────────────────────────
@@ -190,6 +194,8 @@ interface MarkState {
   updateVoiceSettings:  (s: Partial<VoiceSettings>) => Promise<void>;
   transcribeAudio:      (blob: Blob) => Promise<string>;
   speak:                (text: string) => Promise<void>;
+  setTtsProvider:       (provider: 'browser' | 'openai') => void;
+  setOpenaiVoice:       (voice: string) => void;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -208,6 +214,7 @@ const DEFAULT_VOICE: VoiceState = {
   muted: false, autoSubmit: true, whisperModel: 'base',
   ttsVoice: 'en_US-lessac-medium', ttsSpeed: 1.0,
   wakePhraseEnabled: false, transcript: '', isBrowserTTSFallback: false,
+  ttsProvider: 'browser', openaiVoice: 'nova',
 };
 
 // ── Browser TTS ───────────────────────────────────────────────────────────────
@@ -218,6 +225,25 @@ function browserSpeak(text: string, speed = 1.0): void {
   const utt = new SpeechSynthesisUtterance(text);
   utt.rate = Math.max(0.5, Math.min(2.0, speed));
   window.speechSynthesis.speak(utt);
+}
+
+// ── OpenAI TTS ────────────────────────────────────────────────────────────────
+
+async function openaiSpeak(text: string, voice: string, serverUrl: string): Promise<void> {
+  const res = await fetch(`${serverUrl}/voice/speak-openai`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, voice }),
+  });
+  if (!res.ok) throw new Error(`OpenAI TTS ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  await new Promise<void>((resolve, reject) => {
+    audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+    audio.onerror = () => { URL.revokeObjectURL(url); reject(new Error('audio error')); };
+    audio.play().catch(reject);
+  });
 }
 
 // ── WebSocket singleton ───────────────────────────────────────────────────────
@@ -339,6 +365,10 @@ export const useMarkStore = create<MarkState>((set, get) => {
     _addNarration(text, 'action');
     const { voice, serverUrl } = get();
     if (!voice.running || voice.muted) return;
+    if (voice.ttsProvider === 'openai') {
+      openaiSpeak(text, voice.openaiVoice, serverUrl).catch(() => browserSpeak(text, voice.ttsSpeed));
+      return;
+    }
     if (voice.isBrowserTTSFallback) {
       browserSpeak(text, voice.ttsSpeed);
       return;
@@ -510,7 +540,7 @@ export const useMarkStore = create<MarkState>((set, get) => {
                 addTimeline(`Run started: ${payload.goal}`);
                 _startMarkMsg(timestamp);
                 _pushBlock({ type: 'text', text: `I'll get started on that right away.\n` });
-                _narrate(`Starting: ${payload.goal.slice(0, 60)}`);
+                _narrate('On it — analyzing the workspace.');
                 break;
               }
 
@@ -983,6 +1013,9 @@ export const useMarkStore = create<MarkState>((set, get) => {
 
     speak: async (text) => {
       const { voice, serverUrl } = get();
+      if (voice.ttsProvider === 'openai') {
+        try { await openaiSpeak(text, voice.openaiVoice, serverUrl); return; } catch { /* fall through */ }
+      }
       if (voice.isBrowserTTSFallback) { browserSpeak(text, voice.ttsSpeed); return; }
       try {
         await markApi.speak(serverUrl, text);
@@ -990,5 +1023,11 @@ export const useMarkStore = create<MarkState>((set, get) => {
         browserSpeak(text, voice.ttsSpeed);
       }
     },
+
+    setTtsProvider: (provider) =>
+      set(state => ({ voice: { ...state.voice, ttsProvider: provider } })),
+
+    setOpenaiVoice: (voice) =>
+      set(state => ({ voice: { ...state.voice, openaiVoice: voice } })),
   };
 });
