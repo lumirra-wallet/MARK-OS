@@ -445,9 +445,10 @@ export const useMarkStore = create<MarkState>((set, get) => {
               }
 
               case 'RunFailed': {
-                set({ running: false, lastError: payload.error });
-                addTimeline(`Run failed: ${payload.error}`);
-                _finaliseMsg([{ type: 'error', text: payload.error || 'Run failed.' }]);
+                const failMsg = payload.error || payload.summary || 'Run failed unexpectedly.';
+                set({ running: false, lastError: failMsg });
+                addTimeline(`Run failed: ${failMsg}`);
+                _finaliseMsg([{ type: 'error', text: failMsg }]);
                 _narrate('The run encountered an error.');
                 break;
               }

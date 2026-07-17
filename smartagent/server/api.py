@@ -254,32 +254,46 @@ async def execute(req: ExecuteRequest) -> dict:
     })
 
     async def _run() -> None:
-        # Use module-level imports (patchable in tests).
-        # Create a fresh EventBus so the broadcaster wires to the correct one
-        event_bus = EventBus()
-        broadcaster.install(event_bus, connection_manager, loop)
+        # ── Initialise locals BEFORE try so finally/post-hooks can always ──────
+        # reference them even if an exception fires during setup.
+        ev_name:    str  = ServerEvents.RUN_FAILED
+        ev_payload: dict = {"goal": req.goal, "error": "Unexpected internal error.", "success": False}
+        event_bus        = None   # assigned inside try
+        ticker_task      = None   # assigned inside try
 
-        # Periodic StatusChanged ticker — keeps the dashboard's elapsed timer live.
-        async def _status_ticker() -> None:
-            while _state.running:
-                await asyncio.sleep(2)
-                if not _state.running:
-                    break
-                await connection_manager.broadcast({
-                    "type":      "event",
-                    "name":      ServerEvents.STATUS_CHANGED,
-                    "payload":   {
-                        "running":   _state.running,
-                        "goal":      _state.goal,
-                        "workspace": _state.workspace,
-                        "elapsed":   _state.elapsed,
-                    },
-                    "timestamp": _now_iso(),
-                })
-
-        ticker_task = asyncio.create_task(_status_ticker(), name="mark-status-ticker")
+        logger.info(
+            "MARK STATE queued    goal=%r  workspace=%r",
+            req.goal[:80], _state.workspace,
+        )
 
         try:
+            # Use module-level imports (patchable in tests).
+            # Create a fresh EventBus so the broadcaster wires to the correct one.
+            event_bus = EventBus()
+            broadcaster.install(event_bus, connection_manager, loop)
+
+            logger.info("MARK STATE planning   EventBus wired")
+
+            # Periodic StatusChanged ticker — keeps the dashboard's elapsed timer live.
+            async def _status_ticker() -> None:
+                while _state.running:
+                    await asyncio.sleep(2)
+                    if not _state.running:
+                        break
+                    await connection_manager.broadcast({
+                        "type":      "event",
+                        "name":      ServerEvents.STATUS_CHANGED,
+                        "payload":   {
+                            "running":   _state.running,
+                            "goal":      _state.goal,
+                            "workspace": _state.workspace,
+                            "elapsed":   _state.elapsed,
+                        },
+                        "timestamp": _now_iso(),
+                    })
+
+            ticker_task = asyncio.create_task(_status_ticker(), name="mark-status-ticker")
+
             # Build a minimal agent that uses our event bus
             settings = Settings(workspace_path=_state.workspace)
             agent    = SmartAgent(settings)
@@ -300,42 +314,83 @@ async def execute(req: ExecuteRequest) -> dict:
                     )
 
             if _state.cancel_requested:
+                ev_name    = ServerEvents.RUN_CANCELLED
+                ev_payload = {"goal": req.goal, "success": False}
+                logger.info("MARK STATE cancelled  (pre-build cancel_requested)")
                 return
 
+            logger.info("MARK STATE executing  build starting")
             result = await asyncio.to_thread(_build)
 
-            ev_name    = ServerEvents.RUN_COMPLETED if result.success else ServerEvents.RUN_FAILED
-            ev_payload: dict = {
-                "goal":           result.goal,
+            logger.info(
+                "MARK STATE executing→complete  success=%s  elapsed=%.1fs  "
+                "files_created=%d  files_modified=%d",
+                result.success,
+                result.total_elapsed,
+                len(result.files_created),
+                len(result.files_modified),
+            )
+
+            # Always RunCompleted when build() returns normally, regardless of
+            # result.success.  RunFailed is reserved for *unhandled exceptions*
+            # — conflating the two is what causes the dashboard to show
+            # "Run failed" when the workers simply didn't fully pass tests.
+            ev_name    = ServerEvents.RUN_COMPLETED
+            ev_payload = {
+                "goal":           result.goal or req.goal,
                 "success":        result.success,
                 "elapsed":        result.total_elapsed,
                 "files_created":  result.files_created,
                 "files_modified": result.files_modified,
                 "summary":        result.summary[:500] if result.summary else "",
             }
+            logger.info(
+                "MARK STATE completed  ev=%r  success=%s",
+                ev_name, result.success,
+            )
 
         except asyncio.CancelledError:
             ev_name    = ServerEvents.RUN_CANCELLED
-            ev_payload = {"goal": req.goal}
-            raise
+            ev_payload = {"goal": req.goal, "success": False}
+            logger.info("MARK STATE cancelled  goal=%r", req.goal[:60])
+            # Do NOT re-raise — post-run hooks (complete_job + WS broadcast)
+            # must run.  The asyncio task will finish normally after the hooks.
+
         except Exception as exc:
             ev_name    = ServerEvents.RUN_FAILED
-            ev_payload = {"goal": req.goal, "error": str(exc)}
-            logger.exception("MARK build failed: %s", exc)
+            ev_payload = {"goal": req.goal, "error": str(exc), "success": False}
+            logger.exception("MARK STATE failed     exception during build: %s", exc)
+
         finally:
             _state.running = False
             _state._task   = None
-            ticker_task.cancel()
-            broadcaster.uninstall(event_bus)
+            if ticker_task is not None:
+                ticker_task.cancel()
+            if event_bus is not None:
+                try:
+                    broadcaster.uninstall(event_bus)
+                except Exception:
+                    pass
+            logger.info(
+                "MARK STATE teardown   running=False  ev=%r", ev_name,
+            )
 
         # ── Post-run hooks ────────────────────────────────────────────────────
         run_id   = getattr(_state, "_run_id", "")
         elapsed  = time.monotonic() - _state.start_time
 
+        logger.info(
+            "MARK STATE post-run   ev=%r  job_success=%s  run_id=%r",
+            ev_name, ev_payload.get("success", False), run_id,
+        )
+
         # Feature 14 — complete the long-running job
+        # Use ev_payload["success"] rather than ev_name==RUN_COMPLETED so that
+        # RunCompleted with success=False is correctly persisted as failed.
+        _job_success = bool(ev_payload.get("success", False))
         try:
             from smartagent.server.api_jobs import complete_job
-            complete_job(run_id, success=ev_name == ServerEvents.RUN_COMPLETED,
+            complete_job(run_id, success=_job_success,
                          result={"summary": ev_payload.get("summary", "")[:200]})
         except Exception:
             pass
@@ -361,7 +416,7 @@ async def execute(req: ExecuteRequest) -> dict:
             files_m  = len(ev_payload.get("files_modified", []))
             score_run(
                 run_id=run_id, goal=req.goal,
-                success=ev_name == ServerEvents.RUN_COMPLETED,
+                success=_job_success,
                 elapsed_s=elapsed,
                 files_created=files_c, files_modified=files_m,
                 tests_passed=0, tests_failed=0,
@@ -372,7 +427,7 @@ async def execute(req: ExecuteRequest) -> dict:
             await connection_manager.broadcast({
                 "type":    "event",
                 "name":    ServerEvents.EVALUATION_COMPLETE,
-                "payload": {"run_id": run_id, "success": ev_name == ServerEvents.RUN_COMPLETED},
+                "payload": {"run_id": run_id, "success": _job_success},
                 "timestamp": _now_iso(),
             })
         except Exception:
@@ -381,11 +436,12 @@ async def execute(req: ExecuteRequest) -> dict:
         # Feature 8 — self-reflection
         try:
             reflection = {
-                "succeeded": ev_name == ServerEvents.RUN_COMPLETED,
+                "succeeded": _job_success,
                 "goal":      req.goal[:200],
                 "elapsed_s": round(elapsed, 1),
-                "lesson":    "Run completed." if ev_name == ServerEvents.RUN_COMPLETED
-                             else "Run did not complete — check error payload.",
+                "lesson":    "Run completed successfully." if _job_success
+                             else ("Run was cancelled." if ev_name == ServerEvents.RUN_CANCELLED
+                                   else "Run finished with failures — check summary or error."),
             }
             await connection_manager.broadcast({
                 "type":    "event",
