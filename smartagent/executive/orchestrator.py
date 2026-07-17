@@ -18,8 +18,10 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from smartagent.executive.architecture_guard import ArchitectureGuard, ArchitectureViolation
+from smartagent.executive.checkpoint_manager import CheckpointManager, CheckpointResult
 
-_GUARD_DEFAULT = object()  # sentinel: "create a default ArchitectureGuard"
+_GUARD_DEFAULT     = object()  # sentinel: "create a default ArchitectureGuard"
+_CHECKPOINT_DEFAULT = object()  # sentinel: "create a default CheckpointManager"
 from smartagent.executive.execution_context import ExecutionContext
 from smartagent.executive.execution_state import ExecutionState
 from smartagent.executive.milestone_planner import Milestone, MilestonePlanner
@@ -70,6 +72,9 @@ class Orchestrator:
         arch_guard: Any = _GUARD_DEFAULT,
         workspace_path: Any | None = None,
         stop_on_failure: bool = True,
+        # Task #11 — Checkpoint Commits
+        # Pass checkpoint_manager=None to disable; omit to auto-create one.
+        checkpoint_manager: Any = _CHECKPOINT_DEFAULT,
     ) -> None:
         self._planner = planner or Planner()
         self._stop_on_failure = stop_on_failure
@@ -109,6 +114,13 @@ class Orchestrator:
             )
         else:
             self._arch_guard = arch_guard  # None disables the guard
+        # Task #11 — Checkpoint Commits
+        if checkpoint_manager is _CHECKPOINT_DEFAULT:
+            self._checkpoint_manager: CheckpointManager | None = CheckpointManager(
+                workspace_path=workspace_path
+            )
+        else:
+            self._checkpoint_manager = checkpoint_manager  # None disables
 
     # ------------------------------------------------------------------
     # Main pipeline
@@ -203,6 +215,13 @@ class Orchestrator:
 
             # Update stored milestone status after execution
             context.metadata["milestones"][milestone.phase - 1] = milestone.to_dict()
+
+            # Task #11 — Checkpoint commit after each milestone
+            if self._checkpoint_manager is not None:
+                cp_result = self._checkpoint_manager.commit(milestone)
+                context.metadata.setdefault("checkpoints", []).append(
+                    cp_result.to_dict()
+                )
 
             milestone_failed = graph.has_failures()
             if milestone_failed:

@@ -79,6 +79,7 @@ class Milestone:
     title: str
     objective: str
     tasks: list[Task] = field(default_factory=list)
+    total: int = 1  # Task #11 — total milestones in this run (set by MilestonePlanner)
 
     # ------------------------------------------------------------------
     # Serialisation helpers
@@ -239,6 +240,12 @@ class MilestonePlanner:
             )
             phase_number += 1
 
+        # Task #11 — stamp total on each milestone so CheckpointManager can
+        # include it in the commit message without needing the full list.
+        total = len(milestones)
+        for m in milestones:
+            m.total = total
+
         return milestones
 
     def _single_milestone(self, goal: str, tasks: list[Task]) -> list[Milestone]:
@@ -249,6 +256,7 @@ class MilestonePlanner:
                 title="Execution",
                 objective=f"Execute: {goal[:100]}",
                 tasks=tasks,
+                total=1,
             )
         ]
 
