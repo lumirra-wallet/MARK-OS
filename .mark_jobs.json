@@ -97,37 +97,13 @@
       "summary": "Fast path: generated 0 file(s) in 0.0s"
     }
   },
-  "ae78064e-6497-454c-be55-395f66737bc3": {
-    "id": "ae78064e-6497-454c-be55-395f66737bc3",
-    "goal": "create hello.py",
-    "workspace": "/tmp/pytest-of-runner/pytest-10/test_starts_run0",
-    "status": "running",
-    "created_at": "2026-07-17T00:31:35+00:00",
-    "updated_at": "2026-07-17T00:31:35+00:00",
-    "paused": false,
-    "progress": 0,
-    "current_step": "Starting\u2026",
-    "result": null
-  },
-  "5ccf0742-ef5b-4dea-8395-88c69eeeb4bf": {
-    "id": "5ccf0742-ef5b-4dea-8395-88c69eeeb4bf",
-    "goal": "build a CLI",
-    "workspace": "/tmp/pytest-of-runner/pytest-10/test_goal_set_in_state0",
-    "status": "running",
-    "created_at": "2026-07-17T00:31:35+00:00",
-    "updated_at": "2026-07-17T00:31:35+00:00",
-    "paused": false,
-    "progress": 0,
-    "current_step": "Starting\u2026",
-    "result": null
-  },
-  "75df2b37-0e0c-4a01-a6fb-8a051d128e40": {
-    "id": "75df2b37-0e0c-4a01-a6fb-8a051d128e40",
-    "goal": "test",
-    "workspace": "/tmp/pytest-of-runner/pytest-10/test_workspace_absolute_path0",
+  "86ccf2d3-67e7-4ca3-bc2f-de0cc3617408": {
+    "id": "86ccf2d3-67e7-4ca3-bc2f-de0cc3617408",
+    "goal": "HI",
+    "workspace": "/home/runner/workspace",
     "status": "failed",
-    "created_at": "2026-07-17T00:31:35+00:00",
-    "updated_at": "2026-07-17T00:31:35+00:00",
+    "created_at": "2026-07-17T00:32:45+00:00",
+    "updated_at": "2026-07-17T00:32:46+00:00",
     "paused": false,
     "progress": 100,
     "current_step": "Starting\u2026",
@@ -135,13 +111,27 @@
       "summary": "Fast path: generated 0 file(s) in 0.0s"
     }
   },
-  "687679ab-baab-4e24-b31c-4205b74171c6": {
-    "id": "687679ab-baab-4e24-b31c-4205b74171c6",
-    "goal": "write a script",
-    "workspace": "/tmp/pytest-of-runner/pytest-10/test_response_includes_goal0",
+  "6f3fcf6c-0ff1-4be1-bed7-7e9c94e3bfe4": {
+    "id": "6f3fcf6c-0ff1-4be1-bed7-7e9c94e3bfe4",
+    "goal": "HI",
+    "workspace": "/home/runner/workspace",
     "status": "failed",
-    "created_at": "2026-07-17T00:31:35+00:00",
-    "updated_at": "2026-07-17T00:31:35+00:00",
+    "created_at": "2026-07-17T00:38:48+00:00",
+    "updated_at": "2026-07-17T00:38:48+00:00",
+    "paused": false,
+    "progress": 100,
+    "current_step": "Starting\u2026",
+    "result": {
+      "summary": "Fast path: generated 0 file(s) in 0.0s"
+    }
+  },
+  "9a060348-8feb-4c41-9928-3e618a18ad75": {
+    "id": "9a060348-8feb-4c41-9928-3e618a18ad75",
+    "goal": "HI",
+    "workspace": "/home/runner/workspace",
+    "status": "failed",
+    "created_at": "2026-07-17T00:39:42+00:00",
+    "updated_at": "2026-07-17T00:39:42+00:00",
     "paused": false,
     "progress": 100,
     "current_step": "Starting\u2026",
