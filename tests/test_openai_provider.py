@@ -722,7 +722,7 @@ class TestProvidersEndpoints:
         assert by_id["openai"]["token_env"]    == "OPENAI_API_KEY"
         assert by_id["anthropic"]["token_env"] == "ANTHROPIC_API_KEY"
         assert by_id["github"]["token_env"]    == "GITHUB_TOKEN"
-        assert by_id["ollama"]["requires_token"] is False
+        assert by_id["nvidia"]["token_env"]    == "NVIDIA_API_KEY"
 
     def test_get_current_provider_returns_provider_field(self, client):
         resp = client.get("/providers/current")
