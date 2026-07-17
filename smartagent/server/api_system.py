@@ -239,19 +239,22 @@ async def list_models() -> dict:
                 "error": "GITHUB_TOKEN not set",
             }
         try:
-            from smartagent.llm.github_provider import GitHubProvider
+            from smartagent.llm.github_provider import GitHubProvider, _GITHUB_MODEL_CATALOGUE
             p = GitHubProvider(token=token)
             p.load()
             raw_models = p.list_models()
+            # Build a lookup so catalogue metadata (modified, params, size_gb) are
+            # available even when the live endpoint returns bare ids.
+            _cat: dict[str, dict] = {m["id"]: m for m in _GITHUB_MODEL_CATALOGUE}
             models = [
                 {
                     "name":     m["id"],
                     "id":       m["id"],
-                    "size_gb":  0,
-                    "modified": "",
-                    "family":   m.get("family", ""),
-                    "params":   "",
-                    "context":  m.get("context", 128_000),
+                    "size_gb":  _cat.get(m["id"], {}).get("size_gb", 0),
+                    "modified": _cat.get(m["id"], {}).get("modified", ""),
+                    "family":   m.get("family", _cat.get(m["id"], {}).get("family", "")),
+                    "params":   _cat.get(m["id"], {}).get("params", ""),
+                    "context":  m.get("context", _cat.get(m["id"], {}).get("context", 128_000)),
                     "provider": "github",
                 }
                 for m in raw_models
@@ -259,6 +262,52 @@ async def list_models() -> dict:
             return {"models": models, "active": active, "provider": "github"}
         except Exception as exc:
             return {"models": [], "active": active, "provider": "github", "error": str(exc)}
+
+    if provider == "openai":
+        active = settings.get("model", "gpt-4o-mini")
+        try:
+            from smartagent.llm.openai_provider import OpenAIProvider
+            p = OpenAIProvider()
+            raw_models = p.list_models()
+            models = [
+                {
+                    "name":     m["id"],
+                    "id":       m["id"],
+                    "size_gb":  m.get("size_gb", 0),
+                    "modified": m.get("modified", ""),
+                    "family":   m.get("family", ""),
+                    "params":   m.get("params", ""),
+                    "context":  m.get("context", 128_000),
+                    "provider": "openai",
+                }
+                for m in raw_models
+            ]
+            return {"models": models, "active": active, "provider": "openai"}
+        except Exception as exc:
+            return {"models": [], "active": active, "provider": "openai", "error": str(exc)}
+
+    if provider == "anthropic":
+        active = settings.get("model", "claude-haiku-3-5")
+        try:
+            from smartagent.llm.anthropic_provider import AnthropicProvider
+            p = AnthropicProvider()
+            raw_models = p.list_models()
+            models = [
+                {
+                    "name":     m["id"],
+                    "id":       m["id"],
+                    "size_gb":  m.get("size_gb", 0),
+                    "modified": m.get("modified", ""),
+                    "family":   m.get("family", "claude"),
+                    "params":   m.get("params", ""),
+                    "context":  m.get("context", 200_000),
+                    "provider": "anthropic",
+                }
+                for m in raw_models
+            ]
+            return {"models": models, "active": active, "provider": "anthropic"}
+        except Exception as exc:
+            return {"models": [], "active": active, "provider": "anthropic", "error": str(exc)}
 
     # Ollama (default)
     ollama_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434")

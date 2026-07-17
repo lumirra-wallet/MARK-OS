@@ -59,24 +59,106 @@ _EXCLUDE_FROM_DISCOVERY = True
 GITHUB_INFERENCE_BASE_URL = "https://models.github.ai/inference"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 
-# Curated catalogue of GitHub Models available as of 2025.
+# Curated catalogue of GitHub Models available as of mid-2026.
 # Used as a static fallback when the live /models endpoint is unavailable.
+# Fields: id, family, context, supports_tools, params, size_gb, modified (ISO-8601 date)
 _GITHUB_MODEL_CATALOGUE: list[dict[str, Any]] = [
-    {"id": "gpt-4.1-mini",              "family": "gpt",       "context": 128_000, "supports_tools": True},
-    {"id": "gpt-4o-mini",               "family": "gpt",       "context": 128_000, "supports_tools": True},
-    {"id": "gpt-4.1",                   "family": "gpt",       "context": 128_000, "supports_tools": True},
-    {"id": "gpt-4o",                    "family": "gpt",       "context": 128_000, "supports_tools": True},
-    {"id": "o1-mini",                   "family": "o1",        "context": 128_000, "supports_tools": False},
-    {"id": "o3-mini",                   "family": "o3",        "context": 200_000, "supports_tools": False},
-    {"id": "Phi-4",                     "family": "phi",       "context": 16_384,  "supports_tools": False},
-    {"id": "Phi-4-mini-instruct",       "family": "phi",       "context": 128_000, "supports_tools": False},
-    {"id": "Llama-3.3-70B-Instruct",   "family": "llama",     "context": 128_000, "supports_tools": True},
-    {"id": "Llama-3.2-90B-Vision-Instruct", "family": "llama", "context": 128_000, "supports_tools": False},
-    {"id": "DeepSeek-V3",               "family": "deepseek",  "context": 64_000,  "supports_tools": False},
-    {"id": "Mistral-Large-2411",        "family": "mistral",   "context": 128_000, "supports_tools": True},
-    {"id": "Codestral-2501",            "family": "mistral",   "context": 256_000, "supports_tools": False},
-    {"id": "text-embedding-3-small",    "family": "embedding", "context": 8_191,   "supports_tools": False},
-    {"id": "text-embedding-3-large",    "family": "embedding", "context": 8_191,   "supports_tools": False},
+    # ── OpenAI ────────────────────────────────────────────────────────────────
+    {
+        "id": "gpt-4.1",                "family": "gpt",       "context": 1_047_576,
+        "supports_tools": True,         "params": "",          "size_gb": 0,
+        "modified": "2025-04-14",
+    },
+    {
+        "id": "gpt-4.1-mini",           "family": "gpt",       "context": 1_047_576,
+        "supports_tools": True,         "params": "",          "size_gb": 0,
+        "modified": "2025-04-14",
+    },
+    {
+        "id": "gpt-4.1-nano",           "family": "gpt",       "context": 1_047_576,
+        "supports_tools": True,         "params": "",          "size_gb": 0,
+        "modified": "2025-04-14",
+    },
+    {
+        "id": "gpt-4o",                 "family": "gpt",       "context": 128_000,
+        "supports_tools": True,         "params": "",          "size_gb": 0,
+        "modified": "2024-11-20",
+    },
+    {
+        "id": "gpt-4o-mini",            "family": "gpt",       "context": 128_000,
+        "supports_tools": True,         "params": "",          "size_gb": 0,
+        "modified": "2024-07-18",
+    },
+    {
+        "id": "o3",                     "family": "o3",        "context": 200_000,
+        "supports_tools": True,         "params": "",          "size_gb": 0,
+        "modified": "2025-04-16",
+    },
+    {
+        "id": "o3-mini",                "family": "o3",        "context": 200_000,
+        "supports_tools": False,        "params": "",          "size_gb": 0,
+        "modified": "2025-01-31",
+    },
+    {
+        "id": "o4-mini",                "family": "o3",        "context": 200_000,
+        "supports_tools": True,         "params": "",          "size_gb": 0,
+        "modified": "2025-04-16",
+    },
+    # ── Microsoft Phi ─────────────────────────────────────────────────────────
+    {
+        "id": "Phi-4",                  "family": "phi",       "context": 16_384,
+        "supports_tools": False,        "params": "14B",       "size_gb": 0,
+        "modified": "2024-12-12",
+    },
+    {
+        "id": "Phi-4-mini-instruct",    "family": "phi",       "context": 128_000,
+        "supports_tools": False,        "params": "3.8B",      "size_gb": 0,
+        "modified": "2025-03-01",
+    },
+    {
+        "id": "Phi-4-reasoning",        "family": "phi",       "context": 32_000,
+        "supports_tools": False,        "params": "14B",       "size_gb": 0,
+        "modified": "2025-04-30",
+    },
+    # ── Meta Llama ────────────────────────────────────────────────────────────
+    {
+        "id": "Llama-3.3-70B-Instruct", "family": "llama",    "context": 128_000,
+        "supports_tools": True,         "params": "70B",       "size_gb": 0,
+        "modified": "2024-12-06",
+    },
+    {
+        "id": "Llama-4-Scout-17B-16E-Instruct", "family": "llama", "context": 128_000,
+        "supports_tools": False,        "params": "17B",       "size_gb": 0,
+        "modified": "2025-04-05",
+    },
+    # ── Mistral ───────────────────────────────────────────────────────────────
+    {
+        "id": "Mistral-Large-2411",     "family": "mistral",   "context": 128_000,
+        "supports_tools": True,         "params": "123B",      "size_gb": 0,
+        "modified": "2024-11-01",
+    },
+    {
+        "id": "Codestral-2501",         "family": "codestral", "context": 256_000,
+        "supports_tools": False,        "params": "22B",       "size_gb": 0,
+        "modified": "2025-01-01",
+    },
+    # ── DeepSeek ──────────────────────────────────────────────────────────────
+    {
+        "id": "DeepSeek-V3",            "family": "deepseek",  "context": 64_000,
+        "supports_tools": False,        "params": "671B",      "size_gb": 0,
+        "modified": "2025-01-20",
+    },
+    # ── Embeddings ────────────────────────────────────────────────────────────
+    {
+        "id": "text-embedding-3-small", "family": "embedding", "context": 8_191,
+        "supports_tools": False,        "params": "",          "size_gb": 0,
+        "modified": "2024-01-25",
+    },
+    {
+        "id": "text-embedding-3-large", "family": "embedding", "context": 8_191,
+        "supports_tools": False,        "params": "",          "size_gb": 0,
+        "modified": "2024-01-25",
+    },
 ]
 
 
@@ -547,5 +629,8 @@ def _infer_family(model_id: str) -> str:
 
 
 def _infer_tools(model_id: str) -> bool:
-    tool_capable = ("gpt-4", "llama-3.3", "mistral-large", "gpt-4o")
+    tool_capable = (
+        "gpt-4", "gpt-4o", "gpt-4.1", "o3", "o4",
+        "llama-3.3", "llama-4", "mistral-large",
+    )
     return any(t in model_id.lower() for t in tool_capable)

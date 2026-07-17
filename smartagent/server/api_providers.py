@@ -88,12 +88,12 @@ _PROVIDER_CATALOGUE = [
     {
         "id":          "anthropic",
         "name":        "Anthropic",
-        "description": "Anthropic Claude 3.5 and Claude 4 models",
+        "description": "Anthropic Claude — Opus 4.5, Sonnet 4.5, and Haiku 3.5",
         "base_url":    "https://api.anthropic.com",
         "requires_token": True,
         "token_env":   "ANTHROPIC_API_KEY",
-        "capabilities": ["chat", "streaming"],
-        "default_model": "claude-3-5-haiku-20241022",
+        "capabilities": ["chat", "streaming", "tool_calling"],
+        "default_model": "claude-haiku-3-5",
     },
 ]
 

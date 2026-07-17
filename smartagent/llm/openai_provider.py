@@ -25,6 +25,56 @@ _DEFAULT_MODEL      = os.environ.get("OPENAI_DEFAULT_MODEL", "gpt-4o-mini")
 _DEFAULT_EMBED      = os.environ.get("OPENAI_EMBED_MODEL",   "text-embedding-3-small")
 _BASE_URL           = os.environ.get("OPENAI_BASE_URL", "")  # override for Azure/proxies
 
+# Curated mid-2026 OpenAI model catalogue.
+# Returned by list_models() enriched with dashboard metadata fields.
+_KNOWN_MODELS: list[dict] = [
+    {
+        "id": "gpt-4.1",         "name": "GPT-4.1",         "provider": "openai",
+        "family": "gpt",         "params": "",               "context": 1_047_576,
+        "size_gb": 0,            "modified": "2025-04-14",   "supports_tools": True,
+    },
+    {
+        "id": "gpt-4.1-mini",    "name": "GPT-4.1 Mini",    "provider": "openai",
+        "family": "gpt",         "params": "",               "context": 1_047_576,
+        "size_gb": 0,            "modified": "2025-04-14",   "supports_tools": True,
+    },
+    {
+        "id": "gpt-4o",          "name": "GPT-4o",           "provider": "openai",
+        "family": "gpt",         "params": "",               "context": 128_000,
+        "size_gb": 0,            "modified": "2024-11-20",   "supports_tools": True,
+    },
+    {
+        "id": "gpt-4o-mini",     "name": "GPT-4o Mini",     "provider": "openai",
+        "family": "gpt",         "params": "",               "context": 128_000,
+        "size_gb": 0,            "modified": "2024-07-18",   "supports_tools": True,
+    },
+    {
+        "id": "o3",              "name": "o3",               "provider": "openai",
+        "family": "o3",          "params": "",               "context": 200_000,
+        "size_gb": 0,            "modified": "2025-04-16",   "supports_tools": True,
+    },
+    {
+        "id": "o3-mini",         "name": "o3-mini",          "provider": "openai",
+        "family": "o3",          "params": "",               "context": 200_000,
+        "size_gb": 0,            "modified": "2025-01-31",   "supports_tools": False,
+    },
+    {
+        "id": "o4-mini",         "name": "o4-mini",          "provider": "openai",
+        "family": "o3",          "params": "",               "context": 200_000,
+        "size_gb": 0,            "modified": "2025-04-16",   "supports_tools": True,
+    },
+    {
+        "id": "text-embedding-3-small", "name": "text-embedding-3-small", "provider": "openai",
+        "family": "embedding",   "params": "",               "context": 8_191,
+        "size_gb": 0,            "modified": "2024-01-25",   "supports_tools": False,
+    },
+    {
+        "id": "text-embedding-3-large", "name": "text-embedding-3-large", "provider": "openai",
+        "family": "embedding",   "params": "",               "context": 8_191,
+        "size_gb": 0,            "modified": "2024-01-25",   "supports_tools": False,
+    },
+]
+
 
 class OpenAIProvider:
     """
@@ -118,16 +168,26 @@ class OpenAIProvider:
         return self.embed(text, **kwargs)
 
     def list_models(self) -> list[dict[str, Any]]:
+        """
+        Return enriched model metadata for the current OpenAI lineup.
+
+        Always returns the curated catalogue — the live /v1/models endpoint
+        returns hundreds of fine-tuned snapshots with no useful metadata, so
+        we overlay the curated list on top of what the API confirms is available.
+        """
         try:
-            models = self._client_or_raise().models.list()
+            live_ids: set[str] = {
+                m.id for m in self._client_or_raise().models.list().data
+            }
+            # Keep curated models that the API confirms exist; fall back to
+            # showing all curated models if the API is unavailable.
             return [
-                {"id": m.id, "name": m.id, "provider": "openai"}
-                for m in models.data
-                if "gpt" in m.id or "text-embedding" in m.id
-            ]
+                m for m in _KNOWN_MODELS
+                if m["id"] in live_ids
+            ] or list(_KNOWN_MODELS)
         except Exception as exc:
-            logger.warning("OpenAIProvider.list_models: %s", exc)
-            return []
+            logger.warning("OpenAIProvider.list_models: %s — using curated catalogue", exc)
+            return list(_KNOWN_MODELS)
 
     def health(self) -> dict[str, Any]:
         if not self._api_key:

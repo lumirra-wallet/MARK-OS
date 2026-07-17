@@ -74,12 +74,10 @@ def _auto_default_provider() -> str:
     return "ollama"
 
 
-_KNOWN_GITHUB_MODELS = {
-    "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o",
-    "o1-mini", "o3-mini", "Phi-4", "Phi-4-mini-instruct",
-    "Llama-3.3-70B-Instruct", "Llama-3.2-90B-Vision-Instruct",
-    "DeepSeek-V3", "Mistral-Large-2411", "Codestral-2501",
-}
+# Derive the allowed set directly from the catalogue so adding a model there
+# automatically allows it here — no duplicate maintenance required.
+from smartagent.llm.github_provider import _GITHUB_MODEL_CATALOGUE as _CAT  # noqa: E402
+_KNOWN_GITHUB_MODELS: set[str] = {m["id"] for m in _CAT}
 
 
 def _load_state() -> dict[str, Any]:
@@ -158,8 +156,8 @@ def get_llm_settings() -> dict[str, Any]:
         model        = state.get("openai_model",        os.environ.get("OPENAI_DEFAULT_MODEL", "gpt-4o-mini"))
         coding_model = state.get("openai_coding_model", "gpt-4o")
     elif provider == "anthropic":
-        model        = state.get("anthropic_model",        os.environ.get("ANTHROPIC_DEFAULT_MODEL", "claude-3-5-haiku-20241022"))
-        coding_model = state.get("anthropic_coding_model", "claude-3-5-sonnet-20241022")
+        model        = state.get("anthropic_model",        os.environ.get("ANTHROPIC_DEFAULT_MODEL", "claude-haiku-3-5"))
+        coding_model = state.get("anthropic_coding_model", "claude-sonnet-4-5")
     else:
         model        = state.get("ollama_model",        OLLAMA_DEFAULT_MODEL)
         coding_model = state.get("ollama_coding_model", OLLAMA_CODING_MODEL)
@@ -244,7 +242,7 @@ def _default_model(provider: str, state: dict[str, Any]) -> str:
     if provider == "openai":
         return state.get("openai_model", os.environ.get("OPENAI_DEFAULT_MODEL", "gpt-4o-mini"))
     if provider == "anthropic":
-        return state.get("anthropic_model", os.environ.get("ANTHROPIC_DEFAULT_MODEL", "claude-3-5-haiku-20241022"))
+        return state.get("anthropic_model", os.environ.get("ANTHROPIC_DEFAULT_MODEL", "claude-haiku-3-5"))
     return state.get("ollama_model", OLLAMA_DEFAULT_MODEL)
 
 

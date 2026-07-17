@@ -23,16 +23,46 @@ from smartagent.logs.logger import get_logger
 
 logger = get_logger(__name__)
 
-_DEFAULT_MODEL = os.environ.get("ANTHROPIC_DEFAULT_MODEL", "claude-3-5-haiku-20241022")
+_DEFAULT_MODEL = os.environ.get("ANTHROPIC_DEFAULT_MODEL", "claude-haiku-3-5")
 _MAX_TOKENS    = int(os.environ.get("ANTHROPIC_MAX_TOKENS", "4096"))
 
-# Available Claude models (for list_models())
+# Available Claude models — current mid-2026 lineup (for list_models()).
+# Fields mirror the OllamaModel shape expected by the dashboard:
+#   id, name, provider, family, params, context, size_gb, modified, supports_tools
 _KNOWN_MODELS = [
-    {"id": "claude-opus-4-5",             "name": "Claude Opus 4.5",      "provider": "anthropic"},
-    {"id": "claude-sonnet-4-5",           "name": "Claude Sonnet 4.5",    "provider": "anthropic"},
-    {"id": "claude-3-5-haiku-20241022",   "name": "Claude 3.5 Haiku",     "provider": "anthropic"},
-    {"id": "claude-3-5-sonnet-20241022",  "name": "Claude 3.5 Sonnet",    "provider": "anthropic"},
-    {"id": "claude-3-opus-20240229",      "name": "Claude 3 Opus",        "provider": "anthropic"},
+    {
+        "id":            "claude-opus-4-5",
+        "name":          "Claude Opus 4.5",
+        "provider":      "anthropic",
+        "family":        "claude",
+        "params":        "",
+        "context":       200_000,
+        "size_gb":       0,
+        "modified":      "2025-08-01",
+        "supports_tools": True,
+    },
+    {
+        "id":            "claude-sonnet-4-5",
+        "name":          "Claude Sonnet 4.5",
+        "provider":      "anthropic",
+        "family":        "claude",
+        "params":        "",
+        "context":       200_000,
+        "size_gb":       0,
+        "modified":      "2025-08-01",
+        "supports_tools": True,
+    },
+    {
+        "id":            "claude-haiku-3-5",
+        "name":          "Claude Haiku 3.5",
+        "provider":      "anthropic",
+        "family":        "claude",
+        "params":        "",
+        "context":       200_000,
+        "size_gb":       0,
+        "modified":      "2024-11-05",
+        "supports_tools": True,
+    },
 ]
 
 

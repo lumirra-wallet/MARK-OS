@@ -679,3 +679,80 @@ class TestOllamaWorkerMixinFactoryIntegration:
         context = self._make_context()
         model_id = worker._resolve_model_id(context)
         assert model_id == "gpt-4.1"
+
+
+# ---------------------------------------------------------------------------
+# Model-selection persistence for 2026 catalogue additions
+# ---------------------------------------------------------------------------
+
+class TestNewModelPersistence:
+    """
+    Ensure that newly added 2026 model IDs (o3, o4-mini, gpt-4.1-nano, etc.)
+    are accepted by the factory's allow-list and survive a state-file round-trip.
+    Previously unknown IDs were silently reset to the default on the next load.
+    """
+
+    NEW_MODEL_IDS = [
+        "o3",
+        "o4-mini",
+        "gpt-4.1-nano",
+        "Llama-4-Scout-17B-16E-Instruct",
+        "Phi-4-reasoning",
+    ]
+
+    def _select_and_reload(self, model_id: str, tmp_path, monkeypatch):
+        """
+        Switch to *model_id*, then reload state from disk and return the
+        persisted github_model value.
+        """
+        import smartagent.llm.factory as _fac
+        monkeypatch.setenv("ACTIVE_PROVIDER", "github")
+        monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / "state.json")
+
+        _fac.switch_provider("github", model_id)
+        reloaded = _fac._load_state()
+        return reloaded.get("github_model")
+
+    @pytest.mark.parametrize("model_id", NEW_MODEL_IDS)
+    def test_new_model_survives_state_roundtrip(self, model_id, tmp_path, monkeypatch):
+        """Selecting a 2026 catalogue model must persist and not be reset to default."""
+        persisted = self._select_and_reload(model_id, tmp_path, monkeypatch)
+        assert persisted == model_id, (
+            f"Model {model_id!r} was not persisted — got {persisted!r}. "
+            "Check _KNOWN_GITHUB_MODELS in factory.py."
+        )
+
+    @pytest.mark.parametrize("model_id", NEW_MODEL_IDS)
+    def test_new_model_in_known_set(self, model_id):
+        """Every 2026 model must appear in _KNOWN_GITHUB_MODELS."""
+        from smartagent.llm.factory import _KNOWN_GITHUB_MODELS
+        assert model_id in _KNOWN_GITHUB_MODELS, (
+            f"{model_id!r} not in _KNOWN_GITHUB_MODELS. "
+            "Add it to _GITHUB_MODEL_CATALOGUE in github_provider.py."
+        )
+
+    @pytest.mark.parametrize("model_id", NEW_MODEL_IDS)
+    def test_new_model_in_catalogue(self, model_id):
+        """Every 2026 model must have a complete entry in _GITHUB_MODEL_CATALOGUE."""
+        catalogue_ids = {m["id"] for m in _GITHUB_MODEL_CATALOGUE}
+        assert model_id in catalogue_ids, (
+            f"{model_id!r} missing from _GITHUB_MODEL_CATALOGUE."
+        )
+
+    def test_get_llm_settings_active_in_catalogue(self, tmp_path, monkeypatch):
+        """
+        After switching to a new model, get_llm_settings() must report an
+        active model that exists in the catalogue.
+        """
+        import smartagent.llm.factory as _fac
+        monkeypatch.setenv("ACTIVE_PROVIDER", "github")
+        monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / "state.json")
+        catalogue_ids = {m["id"] for m in _GITHUB_MODEL_CATALOGUE}
+
+        for mid in ("o3", "o4-mini"):
+            _fac.switch_provider("github", mid)
+            settings = _fac.get_llm_settings()
+            assert settings["model"] in catalogue_ids, (
+                f"After selecting {mid!r}, active model {settings['model']!r} "
+                "is not in _GITHUB_MODEL_CATALOGUE."
+            )
