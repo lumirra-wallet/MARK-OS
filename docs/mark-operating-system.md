@@ -95,17 +95,19 @@ exists and should be extended, not rebuilt:
 Being direct about the gaps, because papering over them defeats the point of
 writing this down:
 
-**1. The Worker Manager isn't real yet — it's narrative, not dispatch.**
-`DevPipeline` calls `run_agent_loop()` once per milestone as a single generic
-executor; there's no `Engineer`/`QA`/`Reviewer`/`Security`/`Docs` worker with
-its own system prompt, tool scope, and identity being *dispatched* by a
-scheduler. The org chart in this doc is currently true in the chat text MARK
-composes ("I've assigned the Engineer...") but not in the code path
-underneath it. A separate, well-shaped `smartagent/executive/` framework
-(Orchestrator → Scheduler → named Worker classes) already exists in this repo
-and already has the right shape — it's just disconnected from the live
-dashboard path (`api.py` → `dev_pipeline.py`). Closing this gap means wiring
-real dispatch to named workers, not adding more narrative flavor text.
+**1. ~~The Worker Manager isn't real yet~~ — closed.** `DevPipeline` now
+dispatches real named workers (`smartagent/engineer/worker_roles.py`:
+Engineer, QA, Debugger, Reviewer, Git, Research, Security, Docs, Preview),
+each with its own identity/system prompt, and publishes real
+`WorkerStarted`/`WorkerFinished` events per phase — this is what actually
+drives the Active Workers panel now, not narrative text alone. Delegated
+workers run through `run_agent_loop(..., allow_direct_reply=False)`, so a
+worker's own words are captured for MARK's synthesis but never stream to
+chat directly — only MARK's executive-composed summary does. The separate
+`smartagent/executive/` framework (Orchestrator → Scheduler → named Worker
+classes) remains disconnected from the live dashboard path and unused; this
+fix built dispatch directly into `dev_pipeline.py` rather than wiring that
+framework in.
 
 **2. The UI still fundamentally works like Cursor/VS Code/ChatGPT.**
 `Dashboard.tsx` is a 23-icon tab rail where one view shows at a time. The M4
