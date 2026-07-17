@@ -212,7 +212,8 @@ _active_model: str = ""
 @router.get("/models")
 async def list_models() -> dict:
     """
-    List available models for the active provider (GitHub Models or Ollama).
+    List available models for the active provider (NVIDIA, GitHub Models,
+    OpenAI, Anthropic, or Ollama).
 
     Returns a unified shape regardless of provider so the frontend needs no
     special-casing:
