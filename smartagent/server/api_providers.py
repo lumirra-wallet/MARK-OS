@@ -173,10 +173,12 @@ async def switch_provider_endpoint(req: SwitchProviderRequest) -> dict:
         settings = switch_provider(req.provider, req.model, model_manager=mm)
         return {"success": True, **settings}
     except ValueError as exc:
-        return {"success": False, "error": str(exc)}
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.warning("switch_provider: unexpected error: %s", exc)
-        return {"success": False, "error": str(exc)}
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/models/select")
