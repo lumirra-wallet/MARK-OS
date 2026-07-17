@@ -1,0 +1,333 @@
+MARK Execution Engine Audit (Highest Priority)
+
+MARK is still behaving like a normal chatbot instead of an autonomous software engineer.
+
+Evidence:
+
+"Can you write to my workspace folder?"
+
+MARK answered:
+
+"I don't have direct access to your workspace..."
+
+This is incorrect.
+
+MARK SHOULD have access through the execution engine and tool layer.
+
+Perform a COMPLETE audit of the execution pipeline.
+
+1. Find why the LLM is replying directly
+
+The assistant must never answer user requests directly.
+
+Every user message must flow through:
+
+User
+↓
+Planner
+↓
+Task Analyzer
+↓
+Execution Engine
+↓
+Workers
+↓
+Filesystem/Git/Terminal
+↓
+Result
+↓
+LLM narration
+
+NOT
+
+User
+↓
+LLM response
+
+2. Verify /run
+
+Verify POST /run actually executes the full pipeline.
+
+It must NOT simply call the chat model.
+
+Trace the request from frontend to backend.
+
+Confirm it reaches:
+
+Planner
+
+Task Graph
+
+Workers
+
+Filesystem
+
+Checkpoint Manager
+
+Narrator
+
+3. Verify tool calling
+
+The LLM must receive available tools.
+
+Examples:
+
+read_file
+
+write_file
+
+list_directory
+
+search_workspace
+
+run_tests
+
+run_terminal
+
+git_status
+
+git_commit
+
+git_diff
+
+search_memory
+
+record_memory
+
+If tools are not being exposed to the provider, wire them in.
+
+4. Build a Tool Registry
+
+Create
+
+smartagent/tools/
+
+with:
+
+ToolRegistry
+
+ToolExecutor
+
+ToolResult
+
+ToolPermission
+
+Every worker should invoke tools through the registry.
+
+Never call filesystem functions directly.
+
+5. Workspace Context
+
+Before answering ANY coding request MARK must automatically gather:
+
+workspace root
+
+git status
+
+directory tree
+
+language
+
+framework
+
+package manager
+
+tests
+
+README
+
+active files
+
+Store this in the execution context.
+
+6. Automatic Intent Detection
+
+MARK should classify every prompt.
+
+Examples:
+
+Chat
+
+Question
+
+Coding
+
+Refactor
+
+Bug
+
+Feature
+
+Research
+
+Documentation
+
+Testing
+
+Deployment
+
+If intent != Chat
+
+DO NOT produce a conversational response.
+
+Launch execution.
+
+7. File Operations
+
+Verify these work:
+
+Create file
+
+Edit file
+
+Delete file
+
+Rename file
+
+Move file
+
+Search project
+
+Read project
+
+Bulk edit
+
+Patch existing files
+
+8. Terminal Operations
+
+Verify MARK can
+
+run pytest
+
+run npm
+
+run pnpm
+
+run cargo
+
+run go test
+
+run docker
+
+run git
+
+capture stdout/stderr
+
+stream output live
+
+9. Git Operations
+
+Verify:
+
+status
+
+diff
+
+branch
+
+commit
+
+tag
+
+checkpoint
+
+rollback
+
+work correctly.
+
+10. Approval System
+
+Actions requiring approval:
+
+delete
+
+git push
+
+rm -rf
+
+database migrations
+
+docker deploy
+
+production deploy
+
+Everything else should execute automatically.
+
+11. Replace Chat Mode
+
+If the user says
+
+"Create hello.py"
+
+MARK should NOT answer
+
+"I cannot access your files."
+
+Instead it should
+
+Create hello.py
+
+Write code
+
+Show progress
+
+Commit checkpoint
+
+Return success
+
+12. End-to-End Validation
+
+After fixes perform these live tests:
+
+• "Create hello.py"
+
+Expected:
+File exists.
+
+• "Read package.json"
+
+Expected:
+Contents displayed.
+
+• "Rename hello.py to app.py"
+
+Expected:
+Rename succeeds.
+
+• "Run tests"
+
+Expected:
+Terminal executes tests.
+
+• "Create Flask API"
+
+Expected:
+Multiple files written.
+
+• "Commit milestone"
+
+Expected:
+Git commit created.
+
+13. Report
+
+Produce a report showing:
+
+✔ Planner reached
+
+✔ Workers executed
+
+✔ Tools invoked
+
+✔ Files written
+
+✔ Git commit
+
+✔ Narration generated
+
+No mocked results.
+
+Only real execution.
+
+I believe the root problem is that the LLM provider (GitHub Models/OpenAI) has been integrated, but it's only being used as a chat completion API. It hasn't been connected to the tool execution layer that makes an agent autonomous. Until that wiring exists, MARK will keep responding like ChatGPT instead of acting like a software engineer that can inspect and modify your project. This prompt directs Replit to fix that architectural gap.

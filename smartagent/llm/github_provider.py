@@ -401,6 +401,49 @@ class GitHubProvider(BaseModel):
             yield f"GitHub Models error: {exc}"
 
     # ------------------------------------------------------------------
+    # Tool calling (agentic)
+    # ------------------------------------------------------------------
+
+    def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        max_tokens: int = 4096,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Non-streaming chat call with OpenAI function-calling tool definitions.
+
+        Returns the raw ``choices[0].message`` object from the OpenAI SDK so
+        callers can inspect ``.tool_calls`` and ``.content`` directly.
+
+        Raises:
+            RuntimeError: If the provider is not loaded.
+        """
+        if self._status != ModelStatus.LOADED:
+            raise RuntimeError(
+                f"GitHubProvider {self._model_name!r} must be load()ed before chat_with_tools()."
+            )
+        self._call_count += 1
+        try:
+            client = self._get_client()
+            response = client.chat.completions.create(
+                model=self._model_name,
+                messages=messages,  # type: ignore[arg-type]
+                tools=tools,        # type: ignore[arg-type]
+                tool_choice="auto",
+                max_tokens=max_tokens,
+                stream=False,
+            )
+            return response.choices[0].message
+        except Exception as exc:
+            logger.warning(
+                "GitHubProvider.chat_with_tools: error for model %s: %s",
+                self._model_name, exc,
+            )
+            raise
+
+    # ------------------------------------------------------------------
     # Embeddings
     # ------------------------------------------------------------------
 

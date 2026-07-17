@@ -330,6 +330,42 @@ class ModelManager:
         kwargs = {**self.settings.generation_kwargs(), **overrides}
         yield from model.chat_stream(messages, **kwargs)
 
+    def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        model_id: str | None = None,
+        **overrides: Any,
+    ) -> Any:
+        """
+        Non-streaming chat call with tool/function-calling definitions.
+
+        Delegates to the active model's ``chat_with_tools()`` method.  Only
+        providers that implement the method (e.g. ``GitHubProvider``) support
+        this; calling it against a provider that doesn't will raise
+        ``AttributeError``.
+
+        Returns the raw provider message object so callers can inspect
+        ``.tool_calls`` and ``.content`` directly.
+
+        Raises:
+            NoActiveModelError: Same condition as ``generate()``.
+        """
+        resolved_id = model_id or self.select_default()
+        if resolved_id is None:
+            raise NoActiveModelError(
+                "No model is currently loaded and no default_model_id is configured. "
+                "Call ModelManager.load()/switch() with a registered model id first."
+            )
+        model = self.load(resolved_id)
+        if not hasattr(model, "chat_with_tools"):
+            raise AttributeError(
+                f"Provider {model.provider!r} (model {resolved_id!r}) does not support "
+                "tool/function calling.  Switch to a provider that implements "
+                "chat_with_tools() (e.g. GitHub Models or OpenAI)."
+            )
+        return model.chat_with_tools(messages, tools, **overrides)
+
     # ------------------------------------------------------------------
     # Health / statistics
     # ------------------------------------------------------------------

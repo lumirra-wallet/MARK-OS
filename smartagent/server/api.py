@@ -98,48 +98,79 @@ _state = RunState()
 
 import re as _re
 
-_CHAT_PATTERNS: list = [
+# Pure greeting / acknowledgement patterns — these and only these go to chat.
+# "Can you X?", "Please help", "What is X?" are NOT here — they route to the
+# agent execution path where MARK will actually act.
+_PURE_GREETING_PATTERNS: list = [
     _re.compile(p, _re.I) for p in [
-        r"^\s*h(?:i|ey|ello)\s*[!?.]*\s*$",
-        r"^\s*good\s+(?:morning|afternoon|evening|day)\b",
-        r"^\s*how\s+are\s+you\b",
-        r"^\s*what\s+(?:can|do)\s+you\s+(?:do|help)\b",
-        r"^\s*who\s+are\s+you\b",
-        r"^\s*what\s+are\s+you\b",
-        r"^\s*(?:thanks?|thank\s+you)\b",
-        r"^\s*ok(?:ay)?\s*[!?.]*\s*$",
-        r"^\s*(?:tell|explain|describe)\s+me\b",
-        r"^\s*what\s+is\b",
-        r"^\s*how\s+does\b",
-        r"^\s*can\s+you\b",
-        r"^\s*please\s+help\b",
+        r"^\s*h(?:i|ey|ello)[\s!?.]*$",
+        r"^\s*good\s+(?:morning|afternoon|evening|day)[\s!?.]*$",
+        r"^\s*how\s+are\s+you[\s!?.]*$",
+        r"^\s*(?:thanks?|thank\s+you)[\s!?.]*$",
+        r"^\s*ok(?:ay)?[\s!?.]*$",
+        r"^\s*who\s+are\s+you[\s!?.]*$",
+        r"^\s*what\s+are\s+you[\s!?.]*$",
+        r"^\s*what\s+can\s+you\s+do[\s!?.]*$",
+        r"^\s*(?:yo|sup|howdy)[\s!?.]*$",
     ]
 ]
 
-_CODE_KEYWORDS = frozenset({
-    "create", "build", "write", "make", "generate", "add", "fix", "update",
-    "refactor", "implement", "code", "file", "function", "class", "module",
-    "api", "endpoint", "app", "script", "program", "deploy", "install",
-    "setup", "configure", "test", "debug",
+# Any word from this set in the goal → always route to agent execution.
+_ACTION_KEYWORDS = frozenset({
+    # file/workspace operations
+    "file", "files", "folder", "directory", "workspace", "project",
+    "write", "read", "create", "build", "make", "generate", "add", "fix",
+    "update", "refactor", "implement", "edit", "patch", "delete", "rename",
+    "move", "copy", "open", "save", "load", "parse", "format",
+    # code
+    "code", "function", "class", "module", "method", "variable", "import",
+    "api", "endpoint", "app", "script", "program", "server", "client",
+    # infra / tools
+    "deploy", "install", "setup", "configure", "test", "debug", "run",
+    "execute", "commit", "push", "pull", "branch", "git", "docker",
+    "npm", "pnpm", "pip", "cargo", "pytest", "jest",
+    # languages / frameworks
+    "python", "javascript", "typescript", "flask", "fastapi", "react",
+    "vue", "angular", "django", "express", "node", "rust", "go",
+    # misc technical
+    "database", "sql", "migration", "schema", "model", "view", "route",
+    "middleware", "auth", "login", "session", "token", "jwt", "oauth",
+    "package", "dependency", "requirements", "environment", "config",
 })
 
 
 def _is_conversational_goal(goal: str) -> bool:
     """
-    Return True when *goal* looks like a chat message rather than a
-    software-engineering task.  Any positive match routes to the direct
-    LLM chat path; everything else goes through the build pipeline.
+    Return True ONLY for pure greetings and acknowledgements (no workspace
+    or code intent whatsoever).  Everything else routes to the agent
+    execution path where MARK can actually act via tools.
+
+    Conservative by design — false negatives (chat message treated as code
+    task) produce a harmless agent response.  False positives (code task
+    treated as chat) produce the wrong "I'm MARK…" answer.
     """
     g = goal.strip()
     if not g:
         return False
-    for pat in _CHAT_PATTERNS:
+
+    # Pure greeting / thanks patterns → chat
+    for pat in _PURE_GREETING_PATTERNS:
         if pat.match(g):
             return True
-    # Short messages (≤4 words) with no known code verb → treat as chat
-    words = g.split()
-    if len(words) <= 4 and not any(w.lower() in _CODE_KEYWORDS for w in words):
+
+    # Any action/code/workspace keyword → agent, regardless of phrasing
+    words_lower = {w.lower().strip("?!.,;:'\"") for w in g.split()}
+    if words_lower & _ACTION_KEYWORDS:
+        return False
+
+    # File-extension or path pattern → agent
+    if _re.search(r'\b\w+\.\w{1,6}\b', g):
+        return False
+
+    # Very short messages (≤ 3 words) with no action keyword → chat
+    if len(g.split()) <= 3:
         return True
+
     return False
 
 
@@ -409,9 +440,9 @@ async def execute(req: ExecuteRequest) -> dict:
                 getattr(agent.model_manager, "_active_model_id", "none"),
             )
 
-            # ── Route: conversational vs code task ───────────────────────────
+            # ── Route: conversational vs agent task ──────────────────────────
             if _is_conversational_goal(req.goal):
-                # ── CHAT PATH ─────────────────────────────────────────────────
+                # ── CHAT PATH — pure greetings / acknowledgements ─────────────
                 logger.info("MARK STATE chat  goal=%r", req.goal[:60])
 
                 def _do_chat() -> None:
@@ -433,59 +464,42 @@ async def execute(req: ExecuteRequest) -> dict:
                 logger.info("MARK STATE chat-complete")
 
             else:
-                # ── CODE PATH ─────────────────────────────────────────────────
+                # ── AGENT PATH — every non-chat request goes here ─────────────
+                # MARK uses tool calling to read/write files, run terminal
+                # commands, and manage git — never just generates text.
                 ticker_task = asyncio.create_task(
                     _status_ticker(), name="mark-status-ticker"
                 )
 
-                # Planning preview — stream "I'll build X for you" before work
-                logger.info("MARK STATE plan-preview")
-
-                def _do_plan() -> None:
-                    _stream_llm_response(
-                        req.goal, _MARK_PLAN_SYSTEM,
-                        agent.model_manager, event_bus,
-                    )
-                    # Separator so the build's own output starts on a fresh line
-                    event_bus.publish(
-                        ServerEvents.STREAMING_TOKEN, text="\n\n", source="mark"
-                    )
-
-                await asyncio.to_thread(_do_plan)
-
                 if _state.cancel_requested:
                     ev_name    = ServerEvents.RUN_CANCELLED
                     ev_payload = {"goal": req.goal, "success": False}
-                    logger.info("MARK STATE cancelled  (pre-build cancel_requested)")
+                    logger.info("MARK STATE cancelled  (pre-agent cancel_requested)")
                     return
 
-                # Build
-                eng = SoftwareEngineer.with_agent(agent, event_bus=event_bus)
+                from smartagent.engineer.agent_loop import run_agent_loop
 
-                def _build() -> Any:
-                    with intercept_print(event_bus):
-                        return eng.build(
-                            goal=req.goal,
-                            project_dir=_state.workspace,
-                            test_cmd=req.test_cmd,
-                            max_iterations=req.max_iterations,
-                            run_quality=False,
-                        )
+                def _run_agent() -> Any:
+                    return run_agent_loop(
+                        goal          = req.goal,
+                        model_manager = agent.model_manager,
+                        event_bus     = event_bus,
+                        workspace_path= _state.workspace,
+                    )
 
-                logger.info("MARK STATE executing  build starting")
-                result = await asyncio.to_thread(_build)
+                logger.info("MARK STATE executing  agent-loop starting")
+                result = await asyncio.to_thread(_run_agent)
 
                 logger.info(
                     "MARK STATE executing→complete  success=%s  elapsed=%.1fs  "
-                    "files_created=%d  files_modified=%d",
+                    "files_created=%d  files_modified=%d  stop=%r",
                     result.success,
                     result.total_elapsed,
                     len(result.files_created),
                     len(result.files_modified),
+                    result.stop_reason,
                 )
 
-                # Always RunCompleted when build() returns normally, regardless of
-                # result.success.  RunFailed is reserved for *unhandled exceptions*.
                 ev_name    = ServerEvents.RUN_COMPLETED
                 ev_payload = {
                     "goal":           result.goal or req.goal,
@@ -493,7 +507,7 @@ async def execute(req: ExecuteRequest) -> dict:
                     "elapsed":        result.total_elapsed,
                     "files_created":  result.files_created,
                     "files_modified": result.files_modified,
-                    "summary":        result.summary[:500] if result.summary else "",
+                    "summary":        (result.final_summary or result.summary or "")[:500],
                 }
                 logger.info(
                     "MARK STATE completed  ev=%r  success=%s",
