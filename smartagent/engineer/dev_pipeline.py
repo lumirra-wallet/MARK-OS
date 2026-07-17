@@ -312,6 +312,13 @@ class DevPipeline:
     def _run_milestone(self, milestone: str, attempt_number: int) -> MilestoneResult:
         mr = MilestoneResult(milestone=milestone)
 
+        # Least-privilege scope: only the files this milestone names may be
+        # written. Grows as attempts proceed so a fixer can touch what the
+        # executor already created, without ever widening beyond declared intent.
+        allowed_paths = extract_file_targets(milestone)
+        if allowed_paths:
+            self._activity("permission", f"Scoped to: {', '.join(allowed_paths)}")
+
         for attempt in range(1, self._max_attempts + 1):
             mr.attempts = attempt
 
@@ -322,9 +329,13 @@ class DevPipeline:
                 event_bus      = self._eb,
                 workspace_path = self._ws,
                 max_turns      = MAX_MILESTONE_TURNS,
+                allowed_paths  = allowed_paths,
             )
             mr.files_created  = loop_result.files_created
             mr.files_modified = loop_result.files_modified
+            for f in mr.files_created + mr.files_modified:
+                if f not in allowed_paths:
+                    allowed_paths.append(f)
 
             # Tester
             test_output, tests_passed = self._run_tests()
