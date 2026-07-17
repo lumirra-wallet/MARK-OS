@@ -475,38 +475,52 @@ class TestCheckLLMProvider:
         assert result["status"] == "error"
         assert "ANTHROPIC_API_KEY" in result["message"]
 
-    # ── ollama ────────────────────────────────────────────────────────────────
+    # ── nvidia ────────────────────────────────────────────────────────────────
 
-    def test_ollama_ok(self):
+    def test_nvidia_ok(self):
         from smartagent.server.api_diagnostics import _check_llm_provider
-        mock_resp = MagicMock(); mock_resp.read.return_value = b"{}"
-        ctx = MagicMock(); ctx.__enter__ = MagicMock(return_value=mock_resp); ctx.__exit__ = MagicMock(return_value=False)
-        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
-             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "llama3.1:8b"}), \
-             patch("urllib.request.urlopen", return_value=ctx):
+        health = MagicMock(); health.healthy = True; health.message = "NVIDIA OK"
+        p = MagicMock(); p.health.return_value = health
+        with patch("smartagent.llm.factory.get_active_provider", return_value="nvidia"), \
+             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "nvidia/nemotron-3-ultra-550b-a55b"}), \
+             patch("os.environ.get", side_effect=lambda k, d="": "nvapi-test" if k == "NVIDIA_API_KEY" else d), \
+             patch("smartagent.llm.nvidia_provider.NvidiaProvider", return_value=p):
             result = self._run(_check_llm_provider())
         assert result["status"] == "ok"
-        assert result["provider"] == "ollama"
+        assert result["provider"] == "nvidia"
 
-    def test_ollama_unreachable(self):
+    def test_nvidia_no_key(self):
         from smartagent.server.api_diagnostics import _check_llm_provider
-        import urllib.error
-        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
-             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "llama3.1:8b"}), \
-             patch("urllib.request.urlopen", side_effect=urllib.error.URLError("refused")):
+        with patch("smartagent.llm.factory.get_active_provider", return_value="nvidia"), \
+             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "nvidia/nemotron-3-ultra-550b-a55b"}), \
+             patch("os.environ.get", return_value=""):
             result = self._run(_check_llm_provider())
         assert result["status"] == "error"
-        assert result["provider"] == "ollama"
+        assert "NVIDIA_API_KEY" in result["message"]
 
     def test_result_has_model_field(self):
         from smartagent.server.api_diagnostics import _check_llm_provider
-        mock_resp = MagicMock(); mock_resp.read.return_value = b"{}"
-        ctx = MagicMock(); ctx.__enter__ = MagicMock(return_value=mock_resp); ctx.__exit__ = MagicMock(return_value=False)
-        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
-             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "llama3.1:8b"}), \
-             patch("urllib.request.urlopen", return_value=ctx):
+        health = MagicMock(); health.healthy = True; health.message = "NVIDIA OK"
+        p = MagicMock(); p.health.return_value = health
+        with patch("smartagent.llm.factory.get_active_provider", return_value="nvidia"), \
+             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "nvidia/nemotron-3-ultra-550b-a55b"}), \
+             patch("os.environ.get", side_effect=lambda k, d="": "nvapi-test" if k == "NVIDIA_API_KEY" else d), \
+             patch("smartagent.llm.nvidia_provider.NvidiaProvider", return_value=p):
             result = self._run(_check_llm_provider())
-        assert result["model"] == "llama3.1:8b"
+        assert result["model"] == "nvidia/nemotron-3-ultra-550b-a55b"
+
+    # ── unknown provider ─────────────────────────────────────────────────────
+    # Ollama is not supported — get_active_provider() never returns it in
+    # practice, but _check_llm_provider() still degrades gracefully instead
+    # of crashing for any unrecognized value.
+
+    def test_unknown_provider_returns_error(self):
+        from smartagent.server.api_diagnostics import _check_llm_provider
+        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
+             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "llama3.1:8b"}):
+            result = self._run(_check_llm_provider())
+        assert result["status"] == "error"
+        assert result["provider"] == "ollama"
 
     def test_result_has_latency_ms(self):
         # OpenAI/Anthropic paths add latency_ms; Ollama encodes it in the message.
