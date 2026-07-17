@@ -159,12 +159,11 @@ class FastPathBuilder:
         t0 = time.monotonic()
         result = FastPathResult(goal=goal, project_dir=self._project_dir)
 
-        print(f"  [fast] Detected simple task")
-        print(f"  [fast] Generating: {goal[:70]}")
+        logger.info("[fast] Generating: %s", goal[:70])
 
         # ── Step 1: one LLM call ──────────────────────────────────────
         response = self._call_llm(goal)
-        logger.debug("FastPathBuilder: LLM response length=%d chars", len(response))
+        logger.debug("[fast] LLM response length=%d chars", len(response))
 
         # ── Step 2: parse + write files ──────────────────────────────
         created = self._write_files(response)
@@ -172,14 +171,18 @@ class FastPathBuilder:
 
         # ── Step 3: optional test run ────────────────────────────────
         if run_tests and created:
-            test_ok = self._run_tests(test_cmd, created)
-            result.success = test_ok
+            result.success = self._run_tests(test_cmd, created)
         else:
-            # No test → mark success if at least one file was created
-            result.success = bool(created)
+            # No tests requested — success as long as the LLM responded.
+            # A non-empty response means the model handled the goal; absence
+            # of file fences just means the task had no file output (e.g. a
+            # conversational goal or a pure-text request).
+            result.success = bool(response)
 
-        print(f"  [fast] Done.  {len(created)} file(s) written in "
-              f"{time.monotonic() - t0:.1f}s")
+        logger.info(
+            "[fast] Done.  %d file(s) written in %.1fs  success=%s",
+            len(created), time.monotonic() - t0, result.success,
+        )
 
         result.total_elapsed = time.monotonic() - t0
         result.stop_reason   = "fast_path_done"
@@ -233,7 +236,7 @@ class FastPathBuilder:
             filename = m.group("filename")
             code     = m.group("code")
 
-            print(f"  [fast] Writing {filename} ...")
+            logger.debug("[fast] Writing %s ...", filename)
             try:
                 edit_result = editor.create(filename, code)
                 if edit_result.success:
@@ -268,7 +271,7 @@ class FastPathBuilder:
         else:
             cmd = test_cmd
 
-        print(f"  [fast] Running tests: {cmd}")
+        logger.info("[fast] Running tests: %s", cmd)
         try:
             proc = subprocess.run(
                 cmd,

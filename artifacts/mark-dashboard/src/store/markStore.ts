@@ -427,8 +427,12 @@ export const useMarkStore = create<MarkState>((set, get) => {
                 const created  = filesInRun.filter(f => f.operation === 'created').map(f => f.path);
                 const modified = filesInRun.filter(f => f.operation === 'modified').map(f => f.path);
                 const summaryText = payload.success
-                  ? `Done! ${created.length + modified.length > 0 ? `Created ${created.length} file(s), modified ${modified.length} file(s).` : 'All tasks completed.'}`
-                  : 'Completed with some failures.';
+                  ? created.length + modified.length > 0
+                    ? `Done! Created ${created.length} file(s), modified ${modified.length} file(s).`
+                    : 'Done!'
+                  : payload.summary
+                    ? `Finished: ${payload.summary}`
+                    : 'Completed with some failures.';
                 _finaliseMsg([{
                   type: 'summary', text: summaryText, success: payload.success,
                   filesCreated: created, filesModified: modified, elapsed: payload.elapsed,

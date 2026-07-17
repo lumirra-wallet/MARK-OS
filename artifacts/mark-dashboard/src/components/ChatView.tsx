@@ -313,7 +313,7 @@ function SummaryBlock({ block }: { block: Extract<ContentBlock, { type: 'summary
           {block.text}
         </span>
         <span className="ml-auto text-xs font-mono text-muted-foreground">
-          {Math.round(block.elapsed)}s
+          {block.elapsed < 1 ? '< 1s' : `${Math.round(block.elapsed)}s`}
         </span>
       </div>
 

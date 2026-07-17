@@ -309,7 +309,7 @@ class SoftwareEngineer:
         # ----------------------------------------------------------
         complexity = classify_complexity(goal)
 
-        print(f"  [tier] Complexity : {complexity.value}")
+        logger.info("[tier] Complexity : %s", complexity.value)
 
         # ── Tier 1: TRIVIAL / SMALL — fast path (one LLM call, no pipeline) ──
         if complexity in (TaskComplexity.TRIVIAL, TaskComplexity.SMALL):
@@ -320,8 +320,9 @@ class SoftwareEngineer:
 
         # ── Tier 2: MEDIUM — lean pipeline (no research/architecture/docs) ──
         # ── Tier 3: LARGE / ENTERPRISE — full pipeline as before ─────────────
-        print(
-            f"  [tier] Tier: {'medium (lean pipeline)' if complexity == TaskComplexity.MEDIUM else 'full pipeline'}"
+        logger.info(
+            "[tier] Tier: %s",
+            'medium (lean pipeline)' if complexity == TaskComplexity.MEDIUM else 'full pipeline',
         )
 
         report = SoftwareEngineerReport(goal=goal, project_dir=resolved_project_dir)
@@ -341,7 +342,7 @@ class SoftwareEngineer:
         # Step 1: Requirement analysis
         # ----------------------------------------------------------
         self._emit("WorkerStarted", worker="Planning", task="requirement analysis")
-        print(f"  [req]  Analyzing requirements...")
+        logger.info("[req] Analyzing requirements...")
         req = self._analyze(goal, project_name)
         report.requirements = req
         self._emit("WorkerFinished", worker="Planning", success=True)
@@ -446,9 +447,9 @@ class SoftwareEngineer:
         No DevLoop, no Planner, no Scheduler, no specialist workers.
         Typical completion time: < 10 seconds.
         """
-        print(
-            f"  [tier] Tier: fast path"
-            f" ({'trivial' if complexity == TaskComplexity.TRIVIAL else 'simple'} task)"
+        logger.info(
+            "[tier] Tier: fast path (%s task)",
+            'trivial' if complexity == TaskComplexity.TRIVIAL else 'simple',
         )
 
         from smartagent.engineer.fast_path import FastPathBuilder
