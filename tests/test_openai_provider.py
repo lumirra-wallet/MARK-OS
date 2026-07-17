@@ -701,7 +701,7 @@ class TestProvidersEndpoints:
         data = resp.json()
         providers = data if isinstance(data, list) else data.get("providers", [])
         ids = [p["id"] for p in providers]
-        for expected in ("github", "ollama", "openai", "anthropic"):
+        for expected in ("nvidia", "github", "openai", "anthropic"):
             assert expected in ids, f"Missing provider: {expected}"
 
     def test_get_providers_have_capabilities(self, client):
