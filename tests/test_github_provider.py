@@ -506,9 +506,10 @@ class TestProviderFactory:
         monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / ".state.json")
         assert _fac.get_active_provider() == "github"
 
-    def test_get_model_for_role_returns_none_for_ollama(self, monkeypatch, tmp_path):
-        """When provider is Ollama, get_model_for_role() returns None (mixin uses settings)."""
-        monkeypatch.setenv("ACTIVE_PROVIDER", "ollama")
+    def test_get_model_for_role_returns_none_for_openai(self, monkeypatch, tmp_path):
+        """get_model_for_role() only has branches for nvidia/github — every
+        other provider (e.g. openai) returns None (mixin uses its own settings)."""
+        monkeypatch.setenv("ACTIVE_PROVIDER", "openai")
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         import smartagent.llm.factory as _fac
         monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / ".state.json")
