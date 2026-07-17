@@ -44,7 +44,7 @@ Root `package.json` `dev` script uses `concurrently` to start both the Python ba
 `.env.example` — comprehensive with all env vars documented.
 
 ## Test count
-2737 passed, 0 failed (127 new tests in test_storage.py + test_vector.py).
+2840 passed, 0 failed (103 new tests in test_diagnostics.py).
 
 ## Key constraints
 - `DATABASE_PROVIDER` must be EXPLICITLY set to "postgres" to activate PostgreSQL — never auto-detect from DATABASE_URL alone (Replit sets DATABASE_URL automatically).
