@@ -44,7 +44,7 @@ Root `package.json` `dev` script uses `concurrently` to start both the Python ba
 `.env.example` — comprehensive with all env vars documented.
 
 ## Test count
-2536 passed, 0 failed.
+2610 passed, 0 failed (74 new tests in tests/test_openai_provider.py).
 
 ## Key constraints
 - `DATABASE_PROVIDER` must be EXPLICITLY set to "postgres" to activate PostgreSQL — never auto-detect from DATABASE_URL alone (Replit sets DATABASE_URL automatically).
