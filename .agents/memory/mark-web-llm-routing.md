@@ -54,6 +54,25 @@ read_file, write_file, list_directory, search_workspace, run_terminal, git_statu
 
 **Routing in api.py** — code path now calls `run_agent_loop()` instead of `SoftwareEngineer.build()`. The planning preview (`_MARK_PLAN_SYSTEM`) is gone — the agent's own tool-call narration replaces it.
 
+## DevPipeline (Planner→Executor→Tester→Reviewer→Fixer)
+
+`smartagent/engineer/dev_pipeline.py` — full pipeline class:
+- `DevPipeline.run(goal)` → `PipelineResult`; runs in a thread
+- `_plan()` — LLM chat_stream → parse numbered/dash milestone list (2-5 milestones)
+- `_run_milestone()` — calls `run_agent_loop()` → `_run_tests()` → `_review()` → Fixer if FAIL
+- `_detect_test_cmd()` — auto-detects pytest/npm/cargo/go from workspace
+- `_reviewer()` — LLM produces "PASS: reason" or "FAIL: issue"
+- `_build_fix_goal()` — static, combines milestone + review feedback + test output into fix goal
+- Fixer calls `run_agent_loop(fix_goal, system_prompt=_FIXER_SYSTEM)`
+- Final checkpoint `git_commit` after all milestones
+- `is_complex_goal(goal)` — pattern-only (no word count gate); matches "project", "from scratch", "with tests", "full-stack", "microservice", "build a todo", etc.
+
+**Routing in api.py:**
+- `is_complex_goal(req.goal)` → True → `DevPipeline.run()`
+- `is_complex_goal(req.goal)` → False → `run_agent_loop()` directly
+
+**State file protection:** `update_llm_settings()` now validates `github_model` against `_KNOWN_GITHUB_MODELS` before saving; rejects unknown models silently.
+
 ## General api.py fixes (earlier in session)
 
 - `ev_name = RUN_FAILED` when `result.success = False` was conflating "build finished with failures" with "exception during build". Now always `RUN_COMPLETED` for normal returns; `RUN_FAILED` reserved for exceptions.
