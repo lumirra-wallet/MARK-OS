@@ -17,6 +17,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from smartagent.executive.architecture_guard import ArchitectureGuard, ArchitectureViolation
+
+_GUARD_DEFAULT = object()  # sentinel: "create a default ArchitectureGuard"
 from smartagent.executive.execution_context import ExecutionContext
 from smartagent.executive.execution_state import ExecutionState
 from smartagent.executive.planner import Planner
@@ -61,6 +64,10 @@ class Orchestrator:
         max_workers: int = 4,
         reflection_engine: Any | None = None,
         workspace_manager: Any | None = None,
+        # Task #8 — Architecture Guardrails
+        # Pass arch_guard=None to disable; omit (default) to auto-create one.
+        arch_guard: Any = _GUARD_DEFAULT,
+        workspace_path: Any | None = None,
     ) -> None:
         self._planner = planner or Planner()
         self._worker_registry = worker_registry or build_default_registry()
@@ -91,6 +98,14 @@ class Orchestrator:
         self._reflection_engine = reflection_engine
         # Milestone 15 — workspace manager (optional)
         self._workspace_manager = workspace_manager
+        # Task #8 — Architecture Guardrails
+        # sentinel → create default; None → disabled; instance → use as-is
+        if arch_guard is _GUARD_DEFAULT:
+            self._arch_guard: ArchitectureGuard | None = ArchitectureGuard(
+                workspace_path=workspace_path
+            )
+        else:
+            self._arch_guard = arch_guard  # None disables the guard
 
     # ------------------------------------------------------------------
     # Main pipeline
@@ -128,6 +143,21 @@ class Orchestrator:
         else:
             tasks = self._planner.create_plan(goal)
         logger.info("Orchestrator: plan has %d tasks", len(tasks))
+
+        # Task #8 — Architecture Guardrails: scan before writing a single file.
+        if self._arch_guard is not None:
+            guard_report = self._arch_guard.scan(goal, tasks)
+            context.metadata["guard_report"] = guard_report.to_dict()
+            if guard_report.blocks_execution:
+                blocking = "; ".join(i["detail"] for i in guard_report.errors)
+                raise ArchitectureViolation(
+                    f"Architecture guard blocked execution: {blocking}"
+                )
+            if guard_report.warnings:
+                logger.warning(
+                    "ArchitectureGuard: %d warning(s) — continuing",
+                    len(guard_report.warnings),
+                )
 
         graph = self.build_task_graph(tasks)
         context.task_graph = graph
