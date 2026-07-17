@@ -90,15 +90,14 @@ export function ProjectInspector() {
   const activePreviews  = previews.filter(p => p.status === 'ready');
 
   return (
-    <div className="h-full p-6 flex flex-col gap-4 bg-background overflow-y-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight mb-1">Project Inspector</h2>
-          <p className="text-muted-foreground text-sm">Live status across git, tests, workers, previews, and the model.</p>
-        </div>
+    <div className="h-full p-3 flex flex-col gap-3 bg-background overflow-y-auto">
+      <div className="flex items-center justify-between shrink-0">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Project Inspector
+        </h2>
         <button
           onClick={refresh}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors border border-border/40 rounded-md px-2.5 py-1.5"
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors border border-border/40 rounded-md px-2 py-1"
         >
           <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
           Refresh

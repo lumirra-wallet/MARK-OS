@@ -39,6 +39,7 @@ except ImportError:  # pragma: no cover
     Settings = None         # type: ignore[assignment,misc]
     SoftwareEngineer = None # type: ignore[assignment,misc]
 
+from smartagent.llm.factory import is_llm_error_text
 from smartagent.server.events import ServerEvents, broadcaster, intercept_print
 from smartagent.server.workspace_analyzer import (
     analyze_workspace as _analyze_workspace,
@@ -250,6 +251,8 @@ def _stream_llm_response(
     ]
     try:
         for chunk in model_manager.chat_stream(messages):
+            if chunk and is_llm_error_text(chunk):
+                raise RuntimeError(chunk)
             if chunk:
                 event_bus.publish(ServerEvents.STREAMING_TOKEN, text=chunk, source="mark")
     except Exception as exc:
@@ -980,6 +983,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             ]
             chunks: list[str] = []
             for chunk in mm.chat_stream(messages, max_tokens=200):
+                if chunk and is_llm_error_text(chunk):
+                    raise RuntimeError(chunk)
                 if chunk:
                     chunks.append(chunk)
             return "".join(chunks).strip()

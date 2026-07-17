@@ -45,6 +45,21 @@ OLLAMA_CODING_MODEL   = "qwen2.5-coder:7b"
 
 _STATE_FILE = Path(".mark_provider_state.json")
 
+# GitHubProvider.chat()/chat_stream() deliberately swallow API exceptions and
+# return/yield this prefix as if it were real model content (see
+# github_provider.py's own tests — this is intentional so a raw exception
+# never crashes a caller mid-stream). That means callers must check for this
+# sentinel themselves before treating the text as genuine model output —
+# otherwise a rate-limit or outage message streams straight to the user as
+# if MARK had said it. Use ``is_llm_error_text()`` wherever chat_stream()/
+# chat() output is about to be published or parsed as real content.
+LLM_ERROR_PREFIX = "GitHub Models error: "
+
+
+def is_llm_error_text(text: str) -> bool:
+    """True when *text* is a provider's swallowed-error sentinel, not real model output."""
+    return text.strip().startswith(LLM_ERROR_PREFIX)
+
 # ---------------------------------------------------------------------------
 # State helpers
 # ---------------------------------------------------------------------------

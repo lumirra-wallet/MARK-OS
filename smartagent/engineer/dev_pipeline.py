@@ -41,6 +41,7 @@ from smartagent.engineer.agent_tools import execute_tool
 from smartagent.engineer.worker_roles import (
     ENGINEER, QA, DEBUGGER, REVIEWER, GIT, SECURITY, DOCS, PREVIEW,
 )
+from smartagent.llm.factory import is_llm_error_text
 from smartagent.logs.logger import get_logger
 from smartagent.server.events import ServerEvents
 
@@ -357,6 +358,8 @@ class DevPipeline:
         try:
             chunks: list[str] = []
             for chunk in self._mm.chat_stream(messages, max_tokens=512):
+                if is_llm_error_text(chunk):
+                    raise RuntimeError(chunk)
                 chunks.append(chunk)
             raw = "".join(chunks).strip()
         except Exception as exc:
@@ -520,6 +523,8 @@ class DevPipeline:
         try:
             chunks: list[str] = []
             for chunk in self._mm.chat_stream(messages, max_tokens=150):
+                if is_llm_error_text(chunk):
+                    raise RuntimeError(chunk)
                 chunks.append(chunk)
             return "".join(chunks).strip() or "PASS: (no feedback)"
         except Exception as exc:
@@ -597,6 +602,8 @@ class DevPipeline:
         try:
             chunks: list[str] = []
             for chunk in self._mm.chat_stream(messages, max_tokens=200):
+                if is_llm_error_text(chunk):
+                    raise RuntimeError(chunk)
                 chunks.append(chunk)
             text = "".join(chunks).strip()
             return text or fallback
@@ -645,6 +652,8 @@ class DevPipeline:
             ]
             chunks: list[str] = []
             for chunk in self._mm.chat_stream(messages, max_tokens=200):
+                if is_llm_error_text(chunk):
+                    raise RuntimeError(chunk)
                 chunks.append(chunk)
             finding = "".join(chunks).strip()
         except Exception as exc:
@@ -675,6 +684,8 @@ class DevPipeline:
             ]
             chunks: list[str] = []
             for chunk in self._mm.chat_stream(messages, max_tokens=600):
+                if is_llm_error_text(chunk):
+                    raise RuntimeError(chunk)
                 chunks.append(chunk)
             raw = "".join(chunks).strip()
 

@@ -240,6 +240,38 @@ class TestExtractFileTargets:
         assert extract_file_targets("Add src/utils/helpers.py") == ["src/utils/helpers.py"]
 
 
+# ── Swallowed-provider-error handling ──────────────────────────────────────────
+
+class TestSwallowedProviderError:
+    """
+    GitHubProvider.chat_stream() deliberately yields a 'GitHub Models error: …'
+    string instead of raising when the API call fails (rate limits, outages).
+    Every chat_stream() consumer in DevPipeline must recognize that sentinel
+    and fall back — otherwise a raw provider error streams to chat as if MARK
+    had said it.
+    """
+
+    def test_plan_falls_back_on_swallowed_error(self, ws):
+        mm = make_model_manager(chat_stream_chunks=["GitHub Models error: Too many requests."])
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        assert dp._plan("Build something") == ["Build something"]
+
+    def test_review_falls_back_on_swallowed_error(self, ws):
+        mm = make_model_manager(chat_stream_chunks=["GitHub Models error: Too many requests."])
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        from smartagent.engineer.agent_loop import AgentLoopResult
+        lr = AgentLoopResult(goal="x")
+        lr.files_created = ["app.py"]
+        review = dp._review("Create app.py", lr, "")
+        assert review == "PASS: (review skipped due to LLM error)"
+
+    def test_synthesize_falls_back_on_swallowed_error(self, ws):
+        mm = make_model_manager(chat_stream_chunks=["GitHub Models error: Too many requests."])
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        text = dp._synthesize("some context", fallback="fallback text")
+        assert text == "fallback text"
+
+
 # ── Executive synthesis ────────────────────────────────────────────────────────
 
 class TestExecutiveSynthesis:

@@ -138,15 +138,12 @@ export function WorkersView() {
   const { workers } = useMarkStore();
 
   return (
-    <div className="h-full p-6 flex flex-col gap-6 bg-background overflow-y-auto">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight mb-2">Active Workers</h2>
-        <p className="text-muted-foreground text-sm">
-          MARK's specialist team — each worker reports status only to MARK, never directly to you.
-        </p>
-      </div>
+    <div className="h-full p-3 flex flex-col gap-3 bg-background overflow-y-auto">
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
+        Active Workers
+      </h2>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {workers.map(worker => (
           <WorkerCard key={worker.name} worker={worker} />
         ))}

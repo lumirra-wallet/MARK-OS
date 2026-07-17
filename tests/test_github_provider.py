@@ -573,6 +573,22 @@ class TestProviderFactory:
         on_disk = json.loads(state_file.read_text())
         assert on_disk["github_model"] == _fac.GITHUB_DEFAULT_MODEL
 
+    def test_is_llm_error_text_detects_swallowed_provider_error(self):
+        """
+        GitHubProvider.chat()/chat_stream() deliberately swallow API errors
+        and return/yield ``LLM_ERROR_PREFIX``-prefixed text as if it were
+        real content (see TestGitHubProviderChat/TestGitHubProviderStream's
+        fallback tests below). Every consumer that publishes chat_stream()
+        output to the user must check for this sentinel first — otherwise a
+        rate-limit or outage message streams straight to chat as if MARK had
+        said it.
+        """
+        import smartagent.llm.factory as _fac
+        assert _fac.is_llm_error_text("GitHub Models error: Too many requests.")
+        assert _fac.is_llm_error_text("  GitHub Models error: rate limited  ")
+        assert not _fac.is_llm_error_text("I've reviewed the repository.")
+        assert not _fac.is_llm_error_text("")
+
     def test_github_default_model_is_not_mini(self):
         """The default GitHub Models selection must be a full model, not a
         'mini' variant, across every place it's defined."""
