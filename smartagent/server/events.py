@@ -132,6 +132,11 @@ class ServerEvents:
     MEMORY_UPDATED      = "MemoryUpdated"       # engineering session memory
     NARRATION           = "Narration"           # explicit TTS narration text
 
+    # Previews (Task 19)
+    PREVIEW_REGISTERED     = "PreviewRegistered"
+    PREVIEW_UPDATED        = "PreviewUpdated"
+    PREVIEW_CLOSED         = "PreviewClosed"
+
     # Voice pipeline
     VOICE_STARTED          = "VoiceStarted"
     VOICE_STOPPED          = "VoiceStopped"

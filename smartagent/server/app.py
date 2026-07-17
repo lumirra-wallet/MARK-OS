@@ -36,6 +36,7 @@ from smartagent.server.api_terminal     import router as terminal_router
 from smartagent.server.api_git_enhanced import router as git_enhanced_router
 from smartagent.server.api_providers    import router as providers_router
 from smartagent.server.api_diagnostics  import router as diagnostics_router
+from smartagent.server.api_previews     import router as previews_router, preview_manager
 from smartagent.server.voice_manager    import voice_manager
 from smartagent.server.websocket        import connection_manager
 
@@ -74,8 +75,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     loop = asyncio.get_running_loop()
     voice_manager.install(None, connection_manager, loop)
 
+    # Start the preview auto-detection loop
+    import os as _os
+    _scan_interval = float(_os.environ.get("PREVIEW_SCAN_INTERVAL", "15"))
+    preview_manager.start_detection(loop, connection_manager, interval=_scan_interval)
+
     yield
     logger.info("MARK server shutting down")
+    preview_manager.stop_detection()
     if voice_manager.running:
         voice_manager.stop()
 
@@ -119,6 +126,7 @@ app.include_router(terminal_router)
 app.include_router(git_enhanced_router)
 app.include_router(providers_router)
 app.include_router(diagnostics_router)
+app.include_router(previews_router)
 
 # ---------------------------------------------------------------------------
 # Path-prefix stripping — applied LAST so all add_middleware / include_router
