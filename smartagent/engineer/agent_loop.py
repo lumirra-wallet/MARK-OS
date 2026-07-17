@@ -215,6 +215,7 @@ def run_agent_loop(
     workspace_path: str,
     system_prompt: str | None = None,
     max_turns: int = MAX_TURNS,
+    allowed_paths: list[str] | None = None,
 ) -> AgentLoopResult:
     """
     Run the agentic tool-calling loop for *goal*.
@@ -229,6 +230,9 @@ def run_agent_loop(
         workspace_path: Absolute path to the active workspace.
         system_prompt:  Override the default MARK agent prompt.
         max_turns:      Hard cap on tool-call rounds.
+        allowed_paths:  When non-empty, restricts write/rename/delete calls to
+            these paths for the duration of this loop (least-privilege
+            per-task scoping — see ``DevPipeline``). ``None`` is unrestricted.
 
     Returns:
         :class:`AgentLoopResult`
