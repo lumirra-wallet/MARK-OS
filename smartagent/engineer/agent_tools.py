@@ -313,14 +313,34 @@ def _truncate(text: str, label: str = "output") -> str:
 # Executor
 # ────────────────────────────────────────────────────────────────────────────
 
-def execute_tool(name: str, args: dict[str, Any], workspace_path: str) -> str:
+def execute_tool(
+    name: str,
+    args: dict[str, Any],
+    workspace_path: str,
+    allowed_paths: list[str] | None = None,
+) -> str:
     """
     Dispatch *name* with *args* against *workspace_path*.
+
+    Args:
+        allowed_paths: When non-empty, restricts write/rename/delete calls to
+            these paths (least-privilege scoping for a specific task/milestone
+            — see ``DevPipeline``). Reads are never restricted. ``None`` or an
+            empty list means unrestricted, the historical default.
 
     Returns a UTF-8 string (stdout / content / error message).
     Callers should pass the result back to the LLM as a tool message.
     """
     try:
+        if name in _WRITE_TOOLS and allowed_paths:
+            rel = args.get("path") or args.get("dst") or args.get("src") or ""
+            if rel and not _is_path_allowed(rel, workspace_path, allowed_paths):
+                return (
+                    f"Permission denied: {rel!r} is outside this task's assigned scope "
+                    f"({', '.join(allowed_paths)}). This worker was only granted access "
+                    "to those files for this milestone — ask MARK to widen scope if this "
+                    "file genuinely needs to change."
+                )
         return _DISPATCH[name](args, workspace_path)
     except KeyError:
         return f"Unknown tool: {name!r}"
