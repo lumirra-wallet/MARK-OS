@@ -66,3 +66,10 @@ vault/*/*.md
 # smartagent/tts/kokoro_provider.py). ~115MB, doesn't belong in git.
 .mark_tts_models/
 .mark_storage/screenshots/
+
+# Real secrets (GITHUB_TOKEN, SESSION_SECRET, API keys) — never belongs in
+# git. This was missing before and .env got committed in 1ee427a; see
+# .env.example for the documented set of vars instead.
+.env
+.env.local
+.env.*.local
