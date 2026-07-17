@@ -21,6 +21,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
+# Load .env (GITHUB_TOKEN, OPENAI_API_KEY, ACTIVE_PROVIDER, etc.) into the real
+# process environment before anything below reads os.environ — a .env file at
+# the repo root previously had no effect at all (nothing loaded it). Silent
+# no-op if there's no .env (e.g. Replit, which injects Secrets directly).
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse

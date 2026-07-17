@@ -8,6 +8,15 @@
 pytest>=8.0
 pytest
 
+# Loads .env (GITHUB_TOKEN, OPENAI_API_KEY, ACTIVE_PROVIDER, etc.) into the
+# real process environment at server startup — see smartagent/server/app.py.
+python-dotenv>=1.0
+
+# GitHub Models' API is OpenAI-compatible, so GitHubProvider (smartagent/llm/)
+# uses this SDK under the hood; also used by the OpenAI TTS provider
+# (smartagent/tts/openai_provider.py) and the existing /voice/speak-openai route.
+openai>=1.0
+
 # Browser automation for MARK's preview self-inspection (smartagent/preview/).
 # Uses the system-installed Chromium (see browser_agent._find_chromium_executable),
 # not Playwright's own bundled-browser download.
