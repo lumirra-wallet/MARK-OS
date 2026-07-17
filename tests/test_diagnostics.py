@@ -8,7 +8,7 @@ Covers:
                           providers), _check_embeddings (all 4 providers),
                           GET /diagnostics (structure + overall status logic)
   api_system.py        — GET /metrics (CPU/RAM/disk), workspace detect/recent,
-                          record_workspace, GET /models (ollama + github),
+                          record_workspace, GET /models (nvidia + github),
                           POST /models/switch, GET /memory, GET /memory/file
                           (path-traversal guard), GET /git/status, /git/log,
                           /git/diff
