@@ -37,6 +37,23 @@ After fixing provider setup, three new paths were added to `_run()`:
 - Diagnostic `print()` calls → `logger.info()` so they don't appear in chat bubbles
 - `success = bool(response)` instead of `bool(created)` — success when LLM responded, regardless of file output
 
+## Execution Engine Audit (agency wiring)
+
+Three components added to make MARK truly autonomous instead of chatbot-like:
+
+**`smartagent/engineer/agent_tools.py`** — 10 tools with OpenAI JSON-schema definitions + executor dispatcher:
+read_file, write_file, list_directory, search_workspace, run_terminal, git_status, git_diff, git_commit, rename_file, delete_file. `requires_approval()` gates delete_file and git_push. `_safe_path()` blocks traversal.
+
+**`smartagent/engineer/agent_loop.py`** — agentic tool-calling loop: calls `model_manager.chat_with_tools(messages, TOOL_DEFINITIONS)`, executes tool_calls, appends results, loops until no more tool_calls, then streams final text. MAX_TURNS=20 hard cap. Publishes `STREAMING_TOKEN` events with live tool activity ("⚙ write_file(...)").
+
+**`smartagent/llm/github_provider.py`** — `chat_with_tools(messages, tools, max_tokens)` method added. Uses `client.chat.completions.create(tools=..., tool_choice="auto", stream=False)` and returns raw `choices[0].message` for caller to inspect `.tool_calls`.
+
+**`smartagent/models/manager/model_manager.py`** — `chat_with_tools(messages, tools, model_id, **overrides)` passthrough. Raises `AttributeError` if provider doesn't support tools.
+
+**Intent detection rewrite** — `_PURE_GREETING_PATTERNS` replaces `_CHAT_PATTERNS`. "Can you X?", "Please help", "What is X?" no longer route to chat. `_ACTION_KEYWORDS` (50+ words) — any match forces agent path. File-extension regex also forces agent path. Only pure greetings/thanks/ack → chat.
+
+**Routing in api.py** — code path now calls `run_agent_loop()` instead of `SoftwareEngineer.build()`. The planning preview (`_MARK_PLAN_SYSTEM`) is gone — the agent's own tool-call narration replaces it.
+
 ## General api.py fixes (earlier in session)
 
 - `ev_name = RUN_FAILED` when `result.success = False` was conflating "build finished with failures" with "exception during build". Now always `RUN_COMPLETED` for normal returns; `RUN_FAILED` reserved for exceptions.
