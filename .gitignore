@@ -60,3 +60,4 @@ venv/
 # don't commit actual personal memories written at runtime.
 vault/*/*.md
 .mark_jobs.json
+.mark_previews.json
