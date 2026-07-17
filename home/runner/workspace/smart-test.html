@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Test Landing Page</title>
+    <style>
+        /* CSS styles for the landing page */
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            text-align: center;
+        }
+        header {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+            letter-spacing: 1px;
+        }
+        .tagline {
+            font-size: 1.25rem;
+            margin-bottom: 40px;
+            font-weight: 300;
+        }
+        button {
+            background-color: #ff6f61;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.25rem;
+            color: white;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 6px 12px rgba(255, 111, 97, 0.6);
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        button:hover {
+            background-color: #ff8a75;
+            transform: translateY(-3px);
+        }
+        footer {
+            margin-top: auto;
+            font-size: 0.875rem;
+            color: #d1c4e9;
+        }
+    </style>
+</head>
+<body>
+    <header>Smart Test</header>
+    <p class="tagline">Revolutionize your testing experience with AI-powered automation.</p>
+    <button id="ctaBtn">Get Started</button>
+
+    <footer>&copy; 2024 Smart Test, Inc.</footer>
+
+    <script>
+        // JS for button click
+        document.getElementById('ctaBtn').addEventListener('click', function() {
+            alert('Thank you for your interest! More features coming soon.');
+        });
+    </script>
+</body>
+</html>

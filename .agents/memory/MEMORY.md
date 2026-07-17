@@ -22,3 +22,4 @@
 - [Provider Layer Refactor](provider-layer-refactor.md) — VITE_API_URL replaces localhost hardcode; ServerConfig module; OllamaProvider embed()+list_models()+stream_chat(); DiagnosticsView+/diagnostics endpoint; 2536 total tests.
 - [Production Architecture v3](production-architecture.md) — storage/vector/provider abstractions; OpenAI+Anthropic providers; Docker; docs/; unified pnpm dev launcher; all 15 spec tasks complete.
 - [MARK Web LLM Routing & Provider Bugs](mark-web-llm-routing.md) — ImportError in factory silently killed GitHub provider; stale state file set invalid model; chat/code routing; fast-path fence fallback.
+- [Live Engineer Panel](live-engineer-panel.md) — workspace analysis on WS connect, activity feed, reasoning stages, browser TTS auto-start, idle inspector; `completedMilestones` not `milestones` field name.

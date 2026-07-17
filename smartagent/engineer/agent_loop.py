@@ -43,6 +43,34 @@ logger = get_logger(__name__)
 
 MAX_TURNS = 20  # hard limit on tool-call rounds
 
+# ── Stage and activity-type maps ──────────────────────────────────────────────
+
+_TOOL_STAGE: dict[str, str] = {
+    "read_file":        "analyzing",
+    "list_directory":   "analyzing",
+    "search_workspace": "analyzing",
+    "git_status":       "analyzing",
+    "git_diff":         "analyzing",
+    "write_file":       "writing",
+    "rename_file":      "writing",
+    "delete_file":      "writing",
+    "run_terminal":     "running",
+    "git_commit":       "committing",
+}
+
+_TOOL_ACTIVITY_TYPE: dict[str, str] = {
+    "read_file":        "read",
+    "list_directory":   "analyze",
+    "search_workspace": "search",
+    "write_file":       "write",
+    "rename_file":      "rename",
+    "delete_file":      "delete",
+    "run_terminal":     "run",
+    "git_status":       "git",
+    "git_diff":         "git",
+    "git_commit":       "commit",
+}
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # Result dataclass
@@ -119,6 +147,39 @@ EXAMPLE CORRECT WORKFLOW for "who are you":
 # Helpers
 # ────────────────────────────────────────────────────────────────────────────
 
+def _activity_text(name: str, args: dict[str, Any], result: str) -> str:
+    """One-line description of a completed tool call for the activity feed."""
+    if name == "write_file":
+        chars = len(args.get("content", ""))
+        return f"Wrote {args.get('path','?')} ({chars:,} chars)"
+    if name == "read_file":
+        return f"Read {args.get('path','?')}"
+    if name == "list_directory":
+        d = args.get('path', '.') or '.'
+        lines = len(result.splitlines())
+        return f"Listed {d} ({lines} entries)"
+    if name == "run_terminal":
+        cmd = args.get('command', '')[:60]
+        first = result.strip().splitlines()[0][:80] if result.strip() else ''
+        return f"Ran: {cmd}" + (f" → {first}" if first else "")
+    if name == "git_commit":
+        return f"Committed: {args.get('message','')[:60]}"
+    if name == "git_status":
+        return "Checked git status"
+    if name == "git_diff":
+        return "Checked git diff"
+    if name == "search_workspace":
+        q = args.get('query','')[:40]
+        hits = len([l for l in result.splitlines() if l.strip()])
+        return f"Searched '{q}' ({hits} hits)"
+    if name == "rename_file":
+        return f"Renamed {args.get('src','?')} → {args.get('dst','?')}"
+    if name == "delete_file":
+        return f"Deleted {args.get('path','?')}"
+    keys = list(args.keys())[:2]
+    return f"{name}({', '.join(keys)})"
+
+
 def _format_args_display(name: str, args: dict[str, Any]) -> str:
     """Short human-readable representation of a tool call for the dashboard."""
     if name == "write_file":
@@ -189,6 +250,12 @@ def run_agent_loop(
 
     logger.info("AgentLoop: starting  goal=%r  workspace=%r", goal[:60], workspace_path)
 
+    # Signal the dashboard that analysis is beginning
+    try:
+        event_bus.publish(ServerEvents.REASONING_STAGE, stage="analyzing", tool=None)
+    except Exception:
+        pass
+
     for turn in range(max_turns):
         logger.info("AgentLoop: turn %d/%d", turn + 1, max_turns)
 
@@ -244,6 +311,13 @@ def run_agent_loop(
             display = _format_args_display(name, args)
             logger.info("AgentLoop: tool call  %s", display)
 
+            # Emit reasoning stage for this tool
+            stage = _TOOL_STAGE.get(name, "running")
+            try:
+                event_bus.publish(ServerEvents.REASONING_STAGE, stage=stage, tool=name)
+            except Exception:
+                pass
+
             # Publish live tool activity to dashboard
             _publish(f"⚙ {display}\n")
 
@@ -282,6 +356,24 @@ def run_agent_loop(
                 "content":      tool_result,
             })
 
+            # Emit activity feed entry
+            activity_type = _TOOL_ACTIVITY_TYPE.get(name, "run")
+            activity_txt  = _activity_text(name, args, tool_result)
+            is_success    = not any(
+                w in tool_result.lower()
+                for w in ("error:", "not found", "permission denied", "traceback")
+            )
+            try:
+                event_bus.publish(
+                    ServerEvents.ACTIVITY_FEED_ENTRY,
+                    type=activity_type,
+                    text=activity_txt,
+                    detail=tool_result.split("\n")[0][:120] if tool_result else "",
+                    success=is_success,
+                )
+            except Exception:
+                pass
+
             # Show a brief result line in dashboard
             result_preview = tool_result.split("\n")[0][:100]
             _publish(f"  ↳ {result_preview}\n")
@@ -292,6 +384,12 @@ def run_agent_loop(
         result.stop_reason   = "max_turns"
         result.final_summary = f"Reached the {max_turns}-turn limit."
         result.success       = bool(files_created)
+
+    # Signal completion stage
+    try:
+        event_bus.publish(ServerEvents.REASONING_STAGE, stage="done", tool=None)
+    except Exception:
+        pass
 
     result.total_elapsed  = time.monotonic() - t0
     result.files_created  = files_created

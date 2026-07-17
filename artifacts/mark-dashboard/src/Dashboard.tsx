@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChatView }          from './components/ChatView';
-import { ApprovalsSidebar } from './components/ApprovalsSidebar';
+import { LiveEngineerPanel } from './components/LiveEngineerPanel';
 import { ExecutionView }     from './components/ExecutionView';
 import { SettingsView }      from './components/SettingsView';
 import { FilesView }         from './components/FilesView';
@@ -328,7 +328,7 @@ export default function Dashboard() {
           </PanelResizeHandle>
 
           <Panel defaultSize={30} minSize={20} className="flex flex-col border-l border-border/50 bg-card/30">
-            <ApprovalsSidebar />
+            <LiveEngineerPanel />
           </Panel>
         </PanelGroup>
       </div>

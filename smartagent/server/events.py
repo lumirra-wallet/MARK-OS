@@ -124,6 +124,14 @@ class ServerEvents:
     # Terminal (Feature 11)
     TERMINAL_OUTPUT      = "TerminalOutput"
 
+    # Live Engineer panel
+    WORKSPACE_ANALYZED  = "WorkspaceAnalyzed"   # startup project context
+    REASONING_STAGE     = "ReasoningStage"      # current execution phase
+    ACTIVITY_FEED_ENTRY = "ActivityFeedEntry"   # one action in the live feed
+    IDLE_SUGGESTION     = "IdleSuggestion"      # proactive improvement hint
+    MEMORY_UPDATED      = "MemoryUpdated"       # engineering session memory
+    NARRATION           = "Narration"           # explicit TTS narration text
+
     # Voice pipeline
     VOICE_STARTED          = "VoiceStarted"
     VOICE_STOPPED          = "VoiceStopped"

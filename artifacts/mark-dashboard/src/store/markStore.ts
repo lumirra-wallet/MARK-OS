@@ -64,6 +64,60 @@ export interface VoiceState {
   isBrowserTTSFallback: boolean;
 }
 
+// ── Live Engineer panel types ─────────────────────────────────────────────────
+
+export interface ActivityEntry {
+  id: string;
+  timestamp: string;
+  type: string;
+  text: string;
+  detail?: string;
+  success?: boolean;
+  elapsed?: number;
+}
+
+export type ReasoningStage =
+  | 'idle' | 'analyzing' | 'planning' | 'writing'
+  | 'running' | 'testing' | 'committing' | 'reviewing' | 'done';
+
+export interface NarrationEntry {
+  id: string;
+  timestamp: string;
+  text: string;
+  type: 'stage' | 'action' | 'summary' | 'suggestion';
+}
+
+export interface WorkspaceContext {
+  projectType: string;
+  frameworks: string[];
+  gitBranch: string;
+  lastCommit: string;
+  testFramework: string | null;
+  todoCount: number;
+  fileCount: number;
+  hasCI: boolean;
+  summary: string;
+  workspace: string;
+}
+
+export interface IdleSuggestion {
+  id: string;
+  timestamp: string;
+  category: string;
+  title: string;
+  description: string;
+  file?: string;
+  priority: 'high' | 'medium' | 'low';
+}
+
+export interface EngineeringMemoryState {
+  currentGoal: string | null;
+  completedMilestones: { text: string; completed: boolean }[];
+  blockers: { text: string; resolved: boolean }[];
+  context: string;
+  sessionElapsed: number;
+}
+
 // ── Store interface ───────────────────────────────────────────────────────────
 
 interface MarkState {
@@ -101,6 +155,14 @@ interface MarkState {
 
   // Voice
   voice: VoiceState;
+
+  // Live Engineer panel
+  activityFeed:        ActivityEntry[];
+  reasoningStage:      ReasoningStage;
+  narrationTranscript: NarrationEntry[];
+  workspaceContext:    WorkspaceContext | null;
+  idleSuggestions:     IdleSuggestion[];
+  engineeringMemory:   EngineeringMemoryState;
 
   // Actions
   setServerUrl:      (url: string) => void;
@@ -260,8 +322,21 @@ export const useMarkStore = create<MarkState>((set, get) => {
     });
   };
 
-  /** Speak text via TTS if voice is active. */
+  /** Add an entry to the live narration transcript. */
+  const _addNarration = (text: string, type: NarrationEntry['type'] = 'action') => {
+    if (!text?.trim()) return;
+    set(state => ({
+      narrationTranscript: [
+        { id: _id(), timestamp: new Date().toISOString(), text: text.trim(), type },
+        ...state.narrationTranscript,
+      ].slice(0, 100),
+    }));
+  };
+
+  /** Speak text via TTS if voice is active, and track in narration transcript. */
   const _narrate = (text: string) => {
+    if (!text?.trim()) return;
+    _addNarration(text, 'action');
     const { voice, serverUrl } = get();
     if (!voice.running || voice.muted) return;
     if (voice.isBrowserTTSFallback) {
@@ -306,6 +381,20 @@ export const useMarkStore = create<MarkState>((set, get) => {
     activeBranch:     'main',
     tokenBudget:      { used: 0, window: 8192 },
     voice:            { ...DEFAULT_VOICE },
+
+    // Live Engineer panel defaults
+    activityFeed:        [],
+    reasoningStage:      'idle' as ReasoningStage,
+    narrationTranscript: [],
+    workspaceContext:    null,
+    idleSuggestions:     [],
+    engineeringMemory: {
+      currentGoal:         null,
+      completedMilestones: [],
+      blockers:            [],
+      context:             '',
+      sessionElapsed:      0,
+    },
 
     // ── Branch actions (Feature 9) ────────────────────────────────────────────
 
@@ -363,6 +452,8 @@ export const useMarkStore = create<MarkState>((set, get) => {
         ws.onopen = () => {
           set({ connectionStatus: 'connected' });
           if (reconnectTimer) clearTimeout(reconnectTimer);
+          // Auto-enable browser TTS narration (zero config, instant)
+          set(state => ({ voice: { ...state.voice, running: true, isBrowserTTSFallback: true } }));
           // Greeting on first connect
           if (get().messages.length === 0) {
             set(state => ({
@@ -407,12 +498,15 @@ export const useMarkStore = create<MarkState>((set, get) => {
 
               // ── Run lifecycle ──────────────────────────────────────────────
               case 'RunStarted': {
-                set({
+                set(state => ({
                   running: true, goal: payload.goal, workspace: payload.workspace,
                   elapsed: 0, cancelRequested: false, streamingTokens: '',
                   timeline: [], filesInRun: [], lastError: null,
                   workers: [...DEFAULT_WORKERS],
-                });
+                  activityFeed:   [],
+                  reasoningStage: 'analyzing' as ReasoningStage,
+                  engineeringMemory: { ...state.engineeringMemory, currentGoal: payload.goal },
+                }));
                 addTimeline(`Run started: ${payload.goal}`);
                 _startMarkMsg(timestamp);
                 _pushBlock({ type: 'text', text: `I'll get started on that right away.\n` });
@@ -421,7 +515,7 @@ export const useMarkStore = create<MarkState>((set, get) => {
               }
 
               case 'RunCompleted': {
-                set({ running: false, elapsed: payload.elapsed });
+                set({ running: false, elapsed: payload.elapsed, reasoningStage: 'done' as ReasoningStage });
                 addTimeline(`Run completed ${payload.success ? 'successfully' : 'with failures'}.`);
                 const { filesInRun } = get();
                 const created  = filesInRun.filter(f => f.operation === 'created').map(f => f.path);
@@ -656,6 +750,82 @@ export const useMarkStore = create<MarkState>((set, get) => {
               case 'EvaluationComplete':
                 addTimeline(`Evaluation complete · run ${payload.run_id}`);
                 break;
+
+              // ── Live Engineer panel ────────────────────────────────────────
+              case 'WorkspaceAnalyzed': {
+                const ctx: WorkspaceContext = {
+                  projectType:   payload.project_type ?? 'Unknown',
+                  frameworks:    payload.frameworks ?? [],
+                  gitBranch:     payload.git_branch ?? 'unknown',
+                  lastCommit:    payload.last_commit ?? '',
+                  testFramework: payload.test_framework ?? null,
+                  todoCount:     payload.todo_count ?? 0,
+                  fileCount:     payload.file_count ?? 0,
+                  hasCI:         payload.has_ci ?? false,
+                  summary:       payload.summary ?? '',
+                  workspace:     payload.workspace ?? '',
+                };
+                set({ workspaceContext: ctx });
+                _addNarration(ctx.summary || `${ctx.projectType} workspace ready`, 'stage');
+                _narrate(ctx.summary || `${ctx.projectType} project ready`);
+                break;
+              }
+
+              case 'ReasoningStage':
+                set({ reasoningStage: (payload.stage ?? 'idle') as ReasoningStage });
+                break;
+
+              case 'ActivityFeedEntry': {
+                const entry: ActivityEntry = {
+                  id: _id(), timestamp,
+                  type:    payload.type    ?? 'run',
+                  text:    payload.text    ?? '',
+                  detail:  payload.detail,
+                  success: payload.success,
+                  elapsed: payload.elapsed,
+                };
+                set(state => ({
+                  activityFeed: [entry, ...state.activityFeed].slice(0, 300),
+                }));
+                break;
+              }
+
+              case 'IdleSuggestion': {
+                const sug: IdleSuggestion = {
+                  id: _id(), timestamp,
+                  category:    payload.category    ?? 'docs',
+                  title:       payload.title       ?? '',
+                  description: payload.description ?? '',
+                  file:        payload.file,
+                  priority:    payload.priority    ?? 'medium',
+                };
+                set(state => ({
+                  idleSuggestions: [sug, ...state.idleSuggestions].slice(0, 30),
+                }));
+                _addNarration(`Suggestion: ${sug.title}`, 'suggestion');
+                break;
+              }
+
+              case 'MemoryUpdated':
+                set({
+                  engineeringMemory: {
+                    currentGoal:         payload.current_goal ?? null,
+                    completedMilestones: payload.milestones   ?? [],
+                    blockers:            payload.blockers     ?? [],
+                    context:             payload.context      ?? '',
+                    sessionElapsed:      payload.session_elapsed ?? 0,
+                  },
+                });
+                break;
+
+              case 'Narration': {
+                const text = payload.text ?? '';
+                if (text) {
+                  _addNarration(text, (payload.narration_type ?? 'action') as NarrationEntry['type']);
+                  _narrate(text);
+                }
+                break;
+              }
             }
           } catch (err) {
             console.error('WS message parse error', err);

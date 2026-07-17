@@ -40,6 +40,11 @@ except ImportError:  # pragma: no cover
     SoftwareEngineer = None # type: ignore[assignment,misc]
 
 from smartagent.server.events import ServerEvents, broadcaster, intercept_print
+from smartagent.server.workspace_analyzer import (
+    analyze_workspace as _analyze_workspace,
+    idle_suggestions as _idle_suggestions,
+)
+from smartagent.server.engineering_memory import engineering_memory
 from smartagent.server.models import (
     ApproveRequest,
     DenyRequest,
@@ -869,6 +874,26 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         "timestamp": _now_iso(),
     })
 
+    # Workspace analysis — send to this client once after connect
+    async def _send_workspace_analysis() -> None:
+        try:
+            payload = await asyncio.to_thread(
+                _analyze_workspace, _state.workspace or "."
+            )
+            await connection_manager.send_to(ws, {
+                "type":      "event",
+                "name":      ServerEvents.WORKSPACE_ANALYZED,
+                "payload":   payload,
+                "timestamp": _now_iso(),
+            })
+        except Exception as exc:
+            logger.debug("workspace analysis failed: %s", exc)
+
+    asyncio.create_task(_send_workspace_analysis())
+
+    # Idle inspector — start once per server process
+    _ensure_idle_inspector()
+
     try:
         while True:
             try:
@@ -878,6 +903,47 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 await connection_manager.send_to(ws, {"type": "ping"})
     except (WebSocketDisconnect, Exception):
         connection_manager.disconnect(ws)
+
+
+# ---------------------------------------------------------------------------
+# Idle inspector
+# ---------------------------------------------------------------------------
+
+_idle_inspector_task: asyncio.Task | None = None
+
+
+def _ensure_idle_inspector() -> None:
+    global _idle_inspector_task
+    try:
+        loop = asyncio.get_event_loop()
+        if _idle_inspector_task is None or _idle_inspector_task.done():
+            _idle_inspector_task = loop.create_task(_idle_inspector_loop())
+    except Exception:
+        pass
+
+
+async def _idle_inspector_loop() -> None:
+    """Emit proactive workspace suggestions when MARK has been idle for 2 min."""
+    import time as _t
+    _last_notified: float = 0.0
+    while True:
+        await asyncio.sleep(30)
+        try:
+            idle_secs = _t.time() - _last_notified
+            if not _state.running and idle_secs > 120 and connection_manager.active_connections:
+                ws_path = _state.workspace or "."
+                suggestions = await asyncio.to_thread(_idle_suggestions, ws_path)
+                if suggestions:
+                    for sug in suggestions[:4]:
+                        await connection_manager.broadcast({
+                            "type":      "event",
+                            "name":      ServerEvents.IDLE_SUGGESTION,
+                            "payload":   sug,
+                            "timestamp": _now_iso(),
+                        })
+                    _last_notified = _t.time()
+        except Exception as exc:
+            logger.debug("idle inspector error: %s", exc)
 
 
 # ---------------------------------------------------------------------------
