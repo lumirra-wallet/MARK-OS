@@ -134,13 +134,13 @@ design deliberately: more frequent checkpoints (on analysis, on assignment,
 on each worker's completion) than today, but still MARK's own composed
 sentences — never a return to raw per-tool-call narration.
 
-**4. No Security or Docs worker exists as a concept.** The current roster
-(`DEFAULT_WORKERS` in `markStore.ts`: Research, Planning, Coding, Testing,
-Quality, Review) doesn't include Security or Docs, and "Debugger" is folded
-into Testing/Quality rather than being its own specialist. Formalizing the
-Worker Manager (gap #1) is the right place to fix this, since it means
-deciding each worker's actual scope and system prompt, not just adding two
-more labels to a UI list.
+**4. ~~No Security or Docs worker exists~~ — closed.** The roster
+(`DEFAULT_WORKERS` in `markStore.ts`) is now Engineer, QA, Debugger,
+Reviewer, Git, Research, Security, Docs, Preview. Security reviews each
+milestone's diff for obvious issues (injection, exposed secrets, unsafe path
+handling); Docs decides whether a README/docs update is warranted and writes
+it directly when so. Both are best-effort (same try/except pattern as
+preview inspection) — a failed LLM call never blocks the pipeline.
 
 ## Recommended sequencing
 
