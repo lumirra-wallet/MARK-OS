@@ -148,21 +148,19 @@ Architecture first, per the instruction that prompted this document — the
 UI should be built to reflect a real dispatch model, not the other way
 around:
 
-1. **Formalize the Worker Manager.** Give `DevPipeline` real named-worker
-   dispatch (distinct prompt + tool scope per role: Engineer, QA, Reviewer,
-   Git, Security, Docs, Research, Preview) instead of one generic executor
-   loop wearing different narrative labels. This is what makes principles
-   1–2 above literally true in the code, not just in what MARK says about
-   itself.
-2. **Redesign the dashboard around a persistent Engineering Workspace.**
-   Remove the primary tab/sidebar navigation model; build the mission-control
-   layout (MARK conversation + Active Workers + Timeline + Live Preview +
-   Project Inspector, simultaneously visible); relocate secondary/advanced
-   views out of the primary rail.
-3. **Increase narration cadence** to the "continuous conversation" feel,
-   sourced from the now-real worker dispatch events in step 1 (assignment,
-   per-worker completion, review outcome), still composed by MARK — never
-   raw internal events.
+1. **Formalize the Worker Manager — done.** `DevPipeline` now has real
+   named-worker dispatch (distinct prompt + tool scope per role: Engineer,
+   QA, Debugger, Reviewer, Git, Security, Docs, Research, Preview) instead of
+   one generic executor loop wearing different narrative labels.
+2. **Redesign the dashboard around a persistent Engineering Workspace —
+   done.** The primary tab/sidebar navigation model is gone; the
+   mission-control layout (MARK conversation + Active Workers + Timeline +
+   Live Preview + Project Inspector, simultaneously visible) replaced it.
+3. ~~Increase narration cadence~~ — superseded. A later, explicit decision
+   removed narration/TTS as a separate surface entirely rather than making it
+   more frequent; MARK's only voice is the chat message stream itself. MARK
+   does now open the conversation proactively from the workspace analysis the
+   moment a client connects, rather than waiting for the user to speak first.
 
 Each of these is a substantial change in its own right and deserves its own
 planning pass before implementation, per the same reasoning that produced
