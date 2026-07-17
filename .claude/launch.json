@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mark-combined",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd /home/smart/Documents/Smart-Agent-Core && BASE_PATH=/ PORT=18949 npx pnpm --filter @workspace/mark-dashboard run build && npx pnpm --filter @workspace/mark-api run dev"],
+      "port": 18949
+    },
+    {
+      "name": "mark-api",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd /home/smart/Documents/Smart-Agent-Core && npx pnpm --filter @workspace/mark-api run dev"],
+      "port": 18949
+    },
+    {
+      "name": "mark-dashboard",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd /home/smart/Documents/Smart-Agent-Core && PORT=5173 BASE_PATH=/ VITE_API_URL=http://localhost:18949 npx pnpm --filter @workspace/mark-dashboard run dev"],
+      "port": 5173
+    }
+  ]
+}

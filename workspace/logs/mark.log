@@ -1,0 +1,106 @@
+2026-07-14 14:45:23,950 [INFO] smartagent.memory.memory_manager: MemoryManager ready (vault=vault)
+2026-07-14 14:45:23,953 [INFO] smartagent.skills.skill_loader: Discovered skill class ConversationSkill in smartagent.skills.builtin.conversation_skill
+2026-07-14 14:45:23,955 [INFO] smartagent.skills.skill_loader: Discovered skill class KnowledgeSkill in smartagent.skills.builtin.knowledge_skill
+2026-07-14 14:45:23,956 [INFO] smartagent.skills.skill_loader: Discovered skill class MemorySkill in smartagent.skills.builtin.memory_skill
+2026-07-14 14:45:23,957 [INFO] smartagent.skills.skill_loader: Discovered skill class PlanningSkill in smartagent.skills.builtin.planning_skill
+2026-07-14 14:45:23,958 [INFO] smartagent.skills.skill_loader: Discovered skill class ResearchSkill in smartagent.skills.builtin.research_skill
+2026-07-14 14:45:23,960 [INFO] smartagent.skills.skill_loader: Discovered skill class SystemInfoSkill in smartagent.skills.builtin.system_info_skill
+2026-07-14 14:45:23,960 [INFO] smartagent.skills.skill_registry: Skill registered: conversation_skill (v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:23,960 [INFO] smartagent.skills.skill_engine: Skill Loaded: conversation_skill
+2026-07-14 14:45:23,961 [INFO] smartagent.skills.skill_registry: Skill registered: knowledge_skill (v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:23,961 [INFO] smartagent.skills.skill_engine: Skill Loaded: knowledge_skill
+2026-07-14 14:45:23,961 [INFO] smartagent.skills.skill_registry: Skill registered: memory_skill (v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:23,961 [INFO] smartagent.skills.skill_engine: Skill Loaded: memory_skill
+2026-07-14 14:45:23,961 [INFO] smartagent.skills.skill_registry: Skill registered: planning_skill (v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:23,961 [INFO] smartagent.skills.skill_engine: Skill Loaded: planning_skill
+2026-07-14 14:45:23,961 [INFO] smartagent.skills.skill_registry: Skill registered: research_skill (v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:23,961 [INFO] smartagent.skills.skill_engine: Skill Loaded: research_skill
+2026-07-14 14:45:23,961 [INFO] smartagent.skills.skill_registry: Skill registered: system_info_skill (v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:23,961 [INFO] smartagent.skills.skill_engine: Skill Loaded: system_info_skill
+2026-07-14 14:45:24,010 [INFO] smartagent.tools.tool_loader: Discovered tool class CopyFileTool in smartagent.tools.builtin.filesystem.copy_file_tool
+2026-07-14 14:45:24,011 [INFO] smartagent.tools.tool_loader: Discovered tool class DeleteFileTool in smartagent.tools.builtin.filesystem.delete_file_tool
+2026-07-14 14:45:24,011 [INFO] smartagent.tools.tool_loader: Discovered tool class DirectoryCreateTool in smartagent.tools.builtin.filesystem.directory_create_tool
+2026-07-14 14:45:24,012 [INFO] smartagent.tools.tool_loader: Discovered tool class DirectoryListTool in smartagent.tools.builtin.filesystem.directory_list_tool
+2026-07-14 14:45:24,013 [INFO] smartagent.tools.tool_loader: Discovered tool class FileReadTool in smartagent.tools.builtin.filesystem.file_read_tool
+2026-07-14 14:45:24,013 [INFO] smartagent.tools.tool_loader: Discovered tool class FileWriteTool in smartagent.tools.builtin.filesystem.file_write_tool
+2026-07-14 14:45:24,014 [INFO] smartagent.tools.tool_loader: Discovered tool class MoveFileTool in smartagent.tools.builtin.filesystem.move_file_tool
+2026-07-14 14:45:24,015 [INFO] smartagent.tools.tool_loader: Discovered tool class SearchFilesTool in smartagent.tools.builtin.filesystem.search_files_tool
+2026-07-14 14:45:24,016 [INFO] smartagent.tools.tool_loader: Discovered tool class DateTimeTool in smartagent.tools.builtin.system.date_time_tool
+2026-07-14 14:45:24,016 [INFO] smartagent.tools.tool_loader: Discovered tool class EnvironmentTool in smartagent.tools.builtin.system.environment_tool
+2026-07-14 14:45:24,017 [INFO] smartagent.tools.tool_loader: Discovered tool class SystemInfoTool in smartagent.tools.builtin.system.system_info_tool
+2026-07-14 14:45:24,018 [INFO] smartagent.tools.tool_loader: Discovered tool class OpenTextFileTool in smartagent.tools.builtin.text.open_text_file_tool
+2026-07-14 14:45:24,019 [INFO] smartagent.tools.tool_loader: Discovered tool class ReadMarkdownTool in smartagent.tools.builtin.text.read_markdown_tool
+2026-07-14 14:45:24,049 [INFO] smartagent.tools.tool_loader: Discovered tool class HashTool in smartagent.tools.builtin.utilities.hash_tool
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_loader: Discovered tool class UUIDTool in smartagent.tools.builtin.utilities.uuid_tool
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_registry: Tool registered: copy_file (Copy File Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_engine: Tool Loaded: copy_file (Copy File Tool)
+2026-07-14 14:45:24,052 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'copy_file', 'tool_name': 'Copy File Tool'}
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_registry: Tool registered: delete_file (Delete File Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_engine: Tool Loaded: delete_file (Delete File Tool)
+2026-07-14 14:45:24,052 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'delete_file', 'tool_name': 'Delete File Tool'}
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_registry: Tool registered: directory_create (Directory Create Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_engine: Tool Loaded: directory_create (Directory Create Tool)
+2026-07-14 14:45:24,052 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'directory_create', 'tool_name': 'Directory Create Tool'}
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_registry: Tool registered: directory_list (Directory List Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_engine: Tool Loaded: directory_list (Directory List Tool)
+2026-07-14 14:45:24,052 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'directory_list', 'tool_name': 'Directory List Tool'}
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_registry: Tool registered: file_read (File Read Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_engine: Tool Loaded: file_read (File Read Tool)
+2026-07-14 14:45:24,052 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'file_read', 'tool_name': 'File Read Tool'}
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_registry: Tool registered: file_write (File Write Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_engine: Tool Loaded: file_write (File Write Tool)
+2026-07-14 14:45:24,052 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'file_write', 'tool_name': 'File Write Tool'}
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_registry: Tool registered: move_file (Move File Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_engine: Tool Loaded: move_file (Move File Tool)
+2026-07-14 14:45:24,052 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'move_file', 'tool_name': 'Move File Tool'}
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_registry: Tool registered: search_files (Search Files Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,052 [INFO] smartagent.tools.tool_engine: Tool Loaded: search_files (Search Files Tool)
+2026-07-14 14:45:24,053 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'search_files', 'tool_name': 'Search Files Tool'}
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_registry: Tool registered: date_time (Date Time Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_engine: Tool Loaded: date_time (Date Time Tool)
+2026-07-14 14:45:24,053 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'date_time', 'tool_name': 'Date Time Tool'}
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_registry: Tool registered: environment_info (Environment Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_engine: Tool Loaded: environment_info (Environment Tool)
+2026-07-14 14:45:24,053 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'environment_info', 'tool_name': 'Environment Tool'}
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_registry: Tool registered: system_info (System Info Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_engine: Tool Loaded: system_info (System Info Tool)
+2026-07-14 14:45:24,053 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'system_info', 'tool_name': 'System Info Tool'}
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_registry: Tool registered: open_text_file (Open Text File Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_engine: Tool Loaded: open_text_file (Open Text File Tool)
+2026-07-14 14:45:24,053 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'open_text_file', 'tool_name': 'Open Text File Tool'}
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_registry: Tool registered: read_markdown (Read Markdown Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_engine: Tool Loaded: read_markdown (Read Markdown Tool)
+2026-07-14 14:45:24,053 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'read_markdown', 'tool_name': 'Read Markdown Tool'}
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_registry: Tool registered: hash_compute (Hash Compute Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_engine: Tool Loaded: hash_compute (Hash Compute Tool)
+2026-07-14 14:45:24,053 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'hash_compute', 'tool_name': 'Hash Compute Tool'}
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_registry: Tool registered: uuid_generate (UUID Generate Tool v1.0.0 by SmartAgent Core Team)
+2026-07-14 14:45:24,053 [INFO] smartagent.tools.tool_engine: Tool Loaded: uuid_generate (UUID Generate Tool)
+2026-07-14 14:45:24,053 [INFO] smartagent.brain.events: Event published: ToolLoaded {'tool_id': 'uuid_generate', 'tool_name': 'UUID Generate Tool'}
+2026-07-14 14:45:24,056 [INFO] smartagent.models.registry.model_loader: Discovered model provider class MockModelProvider in smartagent.models.providers.mock_provider
+2026-07-14 14:45:24,056 [INFO] smartagent.models.providers.mock_provider: MockModelProvider initialized (no real backend to configure).
+2026-07-14 14:45:24,056 [INFO] smartagent.models.registry.model_registry: Model registered: mock (Mock Model, provider=mock v0.1.0)
+2026-07-14 14:45:24,056 [INFO] smartagent.models.manager.model_manager: Discovered 1 model provider(s): mock
+2026-07-14 14:45:24,056 [INFO] smartagent.knowledge.storage.knowledge_storage: KnowledgeStorage ready at knowledge
+2026-07-14 14:45:24,057 [INFO] smartagent.knowledge.ontology.ontology_engine: OntologyEngine loaded 7 categories
+2026-07-14 14:45:24,057 [INFO] smartagent.knowledge.inbox.knowledge_inbox: Inbox loaded 0 item(s) from storage
+2026-07-14 14:45:24,057 [INFO] smartagent.knowledge.knowledge_manager: Graph rebuilt: 0 nodes, 0 edges
+2026-07-14 14:45:24,057 [INFO] smartagent.knowledge.knowledge_manager: KnowledgeManager ready (root=knowledge)
+2026-07-14 14:45:24,059 [INFO] smartagent.mind.self_model.self_model_engine: SelfModel updated: skills: [] -> ['conversation_skill', 'knowledge_skill', 'memory_skill', 'planning_skill', 'research_skill', 'system_info_skill']; tools: [] -> ['copy_file', 'delete_file', 'directory_create', 'directory_list', 'file_read', 'file_write', 'move_file', 'search_files', 'date_time', 'environment_info', 'system_info', 'open_text_file', 'read_markdown', 'hash_compute', 'uuid_generate']
+2026-07-14 14:45:24,059 [INFO] smartagent.brain.events: Event published: SelfModelUpdated {'changes': ["skills: [] -> ['conversation_skill', 'knowledge_skill', 'memory_skill', 'planning_skill', 'research_skill', 'system_info_skill']", "tools: [] -> ['copy_file', 'delete_file', 'directory_create', 'directory_list', 'file_read', 'file_write', 'move_file', 'search_files', 'date_time', 'environment_info', 'system_info', 'open_text_file', 'read_markdown', 'hash_compute', 'uuid_generate']"]}
+2026-07-14 14:45:24,059 [INFO] smartagent.ui.console: Console: starting interactive session
+2026-07-14 14:45:24,059 [INFO] smartagent.mind.homeostasis.homeostasis_engine: Health band changed: None -> healthy (score=1.00)
+2026-07-14 14:45:24,059 [INFO] smartagent.brain.events: Event published: HealthChanged {'previous_band': None, 'band': 'healthy', 'score': 1.0}
+2026-07-14 14:45:24,059 [INFO] smartagent.mind.homeostasis.loop: Homeostasis tick: healthy=True overloaded=False progress=True failing=False notify=False
+2026-07-14 15:10:17,253 [INFO] smartagent.memory.vault: Wrote memory 20260714-151017-9f035757 to vault/Journal/20260714-151017-9f035757.md
+2026-07-14 15:10:17,324 [INFO] smartagent.memory.memory_manager: Remembered 20260714-151017-9f035757 in category 'Journal' (tags=[])
+2026-07-14 15:10:17,325 [INFO] smartagent.brain.events: Event published: MemorySaved {'id': '20260714-151017-9f035757', 'category': 'Journal', 'tags': []}
+2026-07-14 15:13:05,190 [INFO] smartagent.memory.memory_manager: Search '' (category=None) matched 1 memories
+2026-07-14 15:13:23,673 [INFO] smartagent.memory.memory_manager: Search 'pizza' (category=None) matched 1 memories
+2026-07-14 15:26:25,050 [INFO] smartagent.knowledge.storage.knowledge_storage: Wrote inbox item inbox-6e3301b03d90
+2026-07-14 15:26:25,141 [INFO] smartagent.knowledge.inbox.knowledge_inbox: Submitted concept 'Python' to inbox as inbox-6e3301b03d90 (status=pending)
+2026-07-14 15:26:25,141 [INFO] smartagent.knowledge.knowledge_manager: Proposed concept 'Python' (inbox=inbox-6e3301b03d90, status=pending)
+2026-07-14 15:27:16,521 [INFO] smartagent.knowledge.storage.knowledge_storage: Wrote inbox item inbox-6e3301b03d90
+2026-07-14 15:27:16,522 [INFO] smartagent.knowledge.inbox.knowledge_inbox: Approved inbox item inbox-6e3301b03d90 ('Python')
+2026-07-14 15:27:16,522 [INFO] smartagent.knowledge.storage.knowledge_storage: Wrote concept concept-20260714-152625-7013ffad ('Python')
+2026-07-14 15:27:16,522 [INFO] smartagent.knowledge.knowledge_manager: Committed concept 'Python' (concept-20260714-152625-7013ffad) to knowledge graph

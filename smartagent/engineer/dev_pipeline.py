@@ -129,6 +129,22 @@ Use your tools to:
 Be surgical — change only what is needed.  Do not rewrite unaffected files.
 """
 
+_EXECUTIVE_SYSTEM = """\
+You are MARK, the executive director of an autonomous engineering team.
+Your specialist workers just finished a piece of work; you are given their
+structured results below. Write a short (2-4 sentence) conversational update
+for the user, in first person as MARK ("I had the team...", "I've reviewed...").
+
+Rules:
+- No markdown, no code fences, no bullet lists — plain conversational prose.
+- Do not mention internal tool names verbatim (e.g. write_file, run_terminal,
+  chat_with_tools) — describe actions in plain English instead.
+- Do not narrate step-by-step ("first I did X, then Y") — synthesize the
+  outcome, the way a lead engineer reports status to their manager.
+- Be direct and confident. If something failed, say so plainly and what
+  you're doing about it.
+"""
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # DevPipeline
@@ -161,7 +177,7 @@ class DevPipeline:
         t0     = time.monotonic()
         result = PipelineResult(goal=goal)
 
-        self._emit(f"🗂  Planning: {goal[:80]}\n")
+        self._activity("plan", f"Planning: {goal[:80]}")
 
         # ── 1. Plan ───────────────────────────────────────────────────────────
         milestones = self._plan(goal)
@@ -170,10 +186,11 @@ class DevPipeline:
             milestones = [goal]
 
         result.milestones = milestones
-        self._emit(f"\n📋 {len(milestones)} milestone{'s' if len(milestones) != 1 else ''}:\n")
-        for i, m in enumerate(milestones, 1):
-            self._emit(f"   {i}. {m}\n")
-        self._emit("\n")
+        self._activity(
+            "plan",
+            f"Split into {len(milestones)} milestone{'s' if len(milestones) != 1 else ''}",
+            detail=" | ".join(milestones),
+        )
 
         # ── 2. Execute each milestone ─────────────────────────────────────────
         all_files_created:  list[str] = []
@@ -181,8 +198,7 @@ class DevPipeline:
 
         for i, milestone in enumerate(milestones, 1):
             mt0 = time.monotonic()
-            self._emit(f"{'─'*60}\n")
-            self._emit(f"🔨 Milestone {i}/{len(milestones)}: {milestone}\n\n")
+            self._activity("milestone", f"Starting milestone {i}/{len(milestones)}: {milestone}")
 
             mr = self._run_milestone(milestone, attempt_number=1)
 
@@ -197,17 +213,21 @@ class DevPipeline:
             mr.elapsed = time.monotonic() - mt0
             result.milestone_results.append(mr)
 
-            status = "✅" if mr.success else "⚠"
-            self._emit(f"\n{status} Milestone {i} complete"
-                       f" ({mr.attempts} attempt{'s' if mr.attempts != 1 else ''},"
-                       f" {mr.elapsed:.1f}s)\n")
+            self._activity(
+                "milestone",
+                f"Milestone {i} complete ({mr.attempts} attempt{'s' if mr.attempts != 1 else ''}, {mr.elapsed:.1f}s)",
+                success=mr.success,
+            )
+
+            # One executive-composed message per milestone — the only chat text
+            # the user sees for this milestone (full detail stays in Timeline).
+            summary_text = self._synthesize_milestone_summary(i, len(milestones), mr)
+            self._emit(summary_text)
 
         # ── 3. Final checkpoint commit ────────────────────────────────────────
-        self._emit(f"\n{'─'*60}\n")
-        self._emit("📦 Creating checkpoint commit…\n")
         commit_msg = f"MARK: {goal[:60]}"
         commit_out = execute_tool("git_commit", {"message": commit_msg}, self._ws)
-        self._emit(f"   {commit_out.split(chr(10))[0][:80]}\n")
+        self._activity("commit", "Created checkpoint commit", detail=commit_out.split("\n")[0][:120])
 
         # ── 4. Build result ───────────────────────────────────────────────────
         result.files_created  = all_files_created
@@ -225,9 +245,8 @@ class DevPipeline:
         result.final_summary = summary
         result.summary       = summary
 
-        self._emit(f"\n{'═'*60}\n")
-        self._emit(f"{'✅ Done!' if result.success else '⚠ Partial completion'} "
-                   f"{summary}\n")
+        final_text = self._synthesize_final_summary(goal, result)
+        self._emit(final_text)
 
         logger.info(
             "DevPipeline done  success=%s  milestones=%d/%d  files=%d  elapsed=%.1fs",
@@ -290,21 +309,23 @@ class DevPipeline:
             mr.tests_passed = tests_passed
 
             if test_output:
-                status_icon = "✅" if tests_passed else "❌"
-                self._emit(f"\n{status_icon} Tests: {test_output.splitlines()[0][:70]}\n")
+                self._activity(
+                    "test", f"Tests: {test_output.splitlines()[0][:70]}",
+                    success=tests_passed,
+                )
 
             # Reviewer
             review = self._review(milestone, loop_result, test_output)
             mr.review = review
             passed   = review.upper().startswith("PASS")
-            self._emit(f"👁  Review: {review[:100]}\n")
+            self._activity("review", f"Review: {review[:100]}", success=passed)
 
             if passed or attempt >= self._max_attempts:
                 mr.success = passed or loop_result.success
                 break
 
             # Fixer — build repair goal and retry
-            self._emit(f"\n🔧 Attempt {attempt + 1}/{self._max_attempts}: fixing…\n\n")
+            self._activity("fix", f"Retrying (attempt {attempt + 1}/{self._max_attempts})")
             fix_goal = self._build_fix_goal(milestone, review, test_output)
             _ = run_agent_loop(
                 goal           = fix_goal,
@@ -409,10 +430,74 @@ class DevPipeline:
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _emit(self, text: str) -> None:
+        """Stream text to chat. Reserved for MARK's own executive-composed
+        messages — internal phase detail goes through ``_activity`` instead."""
         try:
             self._eb.publish(ServerEvents.STREAMING_TOKEN, text=text, source="mark")
         except Exception as exc:
             logger.warning("DevPipeline._emit: %s", exc)
+
+    def _activity(
+        self, kind: str, text: str, detail: str = "", success: bool = True,
+    ) -> None:
+        """Publish one Timeline/Activity Feed entry (technical detail — not chat)."""
+        try:
+            self._eb.publish(
+                ServerEvents.ACTIVITY_FEED_ENTRY,
+                type=kind, text=text, detail=detail, success=success,
+            )
+        except Exception as exc:
+            logger.warning("DevPipeline._activity: %s", exc)
+
+    def _synthesize(self, context: str, fallback: str) -> str:
+        """One LLM call: MARK-the-executive composes a short conversational
+        update from structured results. Falls back to a deterministic
+        sentence if the LLM call fails, so a run never goes silent."""
+        messages = [
+            {"role": "system", "content": _EXECUTIVE_SYSTEM},
+            {"role": "user",   "content": context},
+        ]
+        try:
+            chunks: list[str] = []
+            for chunk in self._mm.chat_stream(messages, max_tokens=200):
+                chunks.append(chunk)
+            text = "".join(chunks).strip()
+            return text or fallback
+        except Exception as exc:
+            logger.warning("DevPipeline._synthesize: LLM failed: %s", exc)
+            return fallback
+
+    def _synthesize_milestone_summary(
+        self, index: int, total: int, mr: MilestoneResult,
+    ) -> str:
+        files = mr.files_created + mr.files_modified
+        context = (
+            f"Milestone {index}/{total}: {mr.milestone}\n"
+            f"Outcome: {'succeeded' if mr.success else 'did not fully pass review'}\n"
+            f"Attempts: {mr.attempts}\n"
+            f"Files touched: {', '.join(files) or '(none)'}\n"
+            f"Tests: {'passed' if mr.tests_passed else ('failed' if mr.test_output else 'none run')}\n"
+            f"Review verdict: {mr.review[:150]}"
+        )
+        fallback = (
+            f"Milestone {index}/{total} ({mr.milestone}): "
+            f"{'done' if mr.success else 'needs another pass'} — "
+            f"{len(files)} file{'s' if len(files) != 1 else ''} touched."
+        )
+        return self._synthesize(context, fallback) + "\n\n"
+
+    def _synthesize_final_summary(self, goal: str, result: PipelineResult) -> str:
+        n_ms   = len(result.milestones)
+        n_pass = sum(1 for mr in result.milestone_results if mr.success)
+        context = (
+            f"Goal: {goal}\n"
+            f"Milestones completed: {n_pass}/{n_ms}\n"
+            f"Files created: {', '.join(result.files_created) or '(none)'}\n"
+            f"Files modified: {', '.join(result.files_modified) or '(none)'}\n"
+            f"Total time: {result.total_elapsed:.1f}s\n"
+            f"Overall outcome: {'all milestones passed' if result.success else 'some milestones need follow-up'}"
+        )
+        return self._synthesize(context, result.summary) + "\n"
 
 
 # ────────────────────────────────────────────────────────────────────────────

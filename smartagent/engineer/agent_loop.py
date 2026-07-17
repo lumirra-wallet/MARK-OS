@@ -20,8 +20,11 @@ Architecture:
     AgentLoopResult
 
 This loop runs synchronously (designed to be called from asyncio.to_thread).
-Every tool execution is published as a STREAMING_TOKEN event so the dashboard
-shows live progress: "⚙ write_file(test.py) …"
+Every tool execution publishes REASONING_STAGE / ACTIVITY_FEED_ENTRY events for
+the Timeline/Activity Feed (technical detail, not chat). The only text streamed
+to chat (STREAMING_TOKEN) is MARK's own final reply once tool use is done — this
+loop has no sub-workers to synthesize across, so MARK's own words are already
+the one voice the user hears.
 """
 
 from __future__ import annotations
@@ -311,15 +314,12 @@ def run_agent_loop(
             display = _format_args_display(name, args)
             logger.info("AgentLoop: tool call  %s", display)
 
-            # Emit reasoning stage for this tool
+            # Emit reasoning stage for this tool (Timeline detail — not chat)
             stage = _TOOL_STAGE.get(name, "running")
             try:
                 event_bus.publish(ServerEvents.REASONING_STAGE, stage=stage, tool=name)
             except Exception:
                 pass
-
-            # Publish live tool activity to dashboard
-            _publish(f"⚙ {display}\n")
 
             if requires_approval(name):
                 tool_result = (
@@ -373,10 +373,6 @@ def run_agent_loop(
                 )
             except Exception:
                 pass
-
-            # Show a brief result line in dashboard
-            result_preview = tool_result.split("\n")[0][:100]
-            _publish(f"  ↳ {result_preview}\n")
 
     else:
         # Hit max_turns without finishing

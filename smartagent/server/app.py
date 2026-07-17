@@ -18,10 +18,13 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from smartagent.server.api              import router
 from smartagent.server.api_system       import router as system_router
@@ -127,6 +130,45 @@ app.include_router(git_enhanced_router)
 app.include_router(providers_router)
 app.include_router(diagnostics_router)
 app.include_router(previews_router)
+
+# ---------------------------------------------------------------------------
+# Combined server — serve the built dashboard from this same process/port.
+#
+# `pnpm --filter @workspace/mark-dashboard run build` outputs to
+# artifacts/mark-dashboard/dist/public (see vite.config.ts). If that build
+# exists, mount its static assets and add a SPA-fallback route so client-side
+# routing (wouter) works on refresh/deep links. If it doesn't exist (e.g. a
+# fresh checkout, or split dev mode via `pnpm dev:backend` + `dev:frontend`),
+# this is a no-op — the API-only behaviour is unchanged.
+# ---------------------------------------------------------------------------
+_DASHBOARD_DIST = Path(__file__).resolve().parents[2] / "artifacts" / "mark-dashboard" / "dist" / "public"
+
+if _DASHBOARD_DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=_DASHBOARD_DIST / "assets"), name="dashboard-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def _serve_dashboard(full_path: str) -> FileResponse:
+        """Serve the built dashboard SPA; unmatched client-side routes fall back to index.html.
+
+        Resolves and checks ``is_relative_to()`` (not ``startswith()``) so a
+        path containing ``..`` segments can't escape ``_DASHBOARD_DIST``.
+        """
+        candidate = (_DASHBOARD_DIST / full_path).resolve()
+        if (
+            full_path
+            and candidate.is_file()
+            and candidate.is_relative_to(_DASHBOARD_DIST)
+        ):
+            return FileResponse(candidate)
+        return FileResponse(_DASHBOARD_DIST / "index.html")
+
+    logger.info("Serving built dashboard from %s (combined-server mode)", _DASHBOARD_DIST)
+else:
+    logger.info(
+        "No dashboard build at %s — running API-only. "
+        "Run `pnpm --filter @workspace/mark-dashboard build` for combined-server mode.",
+        _DASHBOARD_DIST,
+    )
 
 # ---------------------------------------------------------------------------
 # Path-prefix stripping — applied LAST so all add_middleware / include_router

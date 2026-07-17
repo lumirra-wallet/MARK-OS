@@ -1,0 +1,62 @@
+Perform a complete UX and architecture redesign of the MARK dashboard to transform it from a chat interface into an AI Software Engineering Workspace. Preserve all existing functionality while replacing the UI and interaction model.
+
+Workspace & Layout
+
+Replace the current sidebar with an Engineering Workspace panel containing: Current Project, Active Run, Active Workers, Timeline, Checkpoints, Git, Live Preview, and Settings.
+Create a persistent engineering timeline that records every action (Analyze → Plan → Write → Run → Test → Review → Commit → Deploy) with timestamps and status icons.
+Add collapsible worker cards showing each agent's current task, progress, runtime, files touched, and completion status.
+Merge execution logs into the conversation so the user sees one continuous story instead of separate chat and log panels.
+
+Live Preview Workspace
+
+Automatically detect running development servers (Vite, React, Next.js, FastAPI, Flask, Express, Storybook, etc.).
+Display all detected applications in a "Running Projects" panel.
+Allow one-click embedded previews inside MARK.
+Refresh previews automatically whenever files change.
+Show desktop and mobile preview modes.
+
+Narration & Voice
+
+Remove Push-to-Talk, Wake Word, Continuous mode, microphone recording UI, and all voice-recorder controls.
+Replace them with a lightweight Narration panel containing only:
+Voice Provider
+Voice Selection
+Speaking Status
+Volume
+Mute
+Integrate Kokoro TTS as the default narration engine.
+Create a Narration Engine that receives every agent event, converts technical logs into natural English, and sends the exact same narration to the chat, activity timeline, and Kokoro TTS. Never allow the spoken output to differ from the visible output.
+Stream narration sentence-by-sentence while MARK is working so users hear progress in real time.
+
+Engineering Experience
+
+Replace raw terminal output with human-readable engineering narration ("I'm analyzing the repository...", "Running the test suite...", "Found three issues...", "Updating the preview...").
+Add an Engineering Memory panel summarizing completed work, pending ideas, discovered issues, and today's accomplishments.
+Automatically analyze the repository when MARK starts and present a concise project summary.
+Display repository statistics (frameworks, languages, dependencies, tests, running services, branches, recent commits).
+
+Project Inspector
+
+Replace the current right panel with a Project Inspector showing:
+Running Applications
+Current Branch
+Recent Commits
+Files Changed
+Test Results
+Worker Status
+Performance Metrics
+Active Model and Provider
+
+Visual Improvements
+
+Adopt a modern IDE-inspired interface with smooth animations, collapsible panels, better spacing, consistent typography, and responsive layouts.
+Use progress animations for long-running tasks.
+Clearly distinguish completed, running, queued, and failed work.
+Ensure the interface feels like supervising an autonomous engineering team rather than chatting with a bot.
+
+Technical Requirements
+
+Preserve all existing APIs, WebSocket events, execution engine, tool calling, Git integration, and workspace safety.
+Keep the architecture modular using provider interfaces so additional TTS providers can be added later.
+Ensure Kokoro TTS is the default provider, with browser TTS available only as a fallback.
+Maintain backward compatibility and keep the existing automated test suite passing while adding comprehensive tests for the new UI, narration pipeline, preview detection, and workspace experience.
