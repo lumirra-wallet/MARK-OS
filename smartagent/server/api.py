@@ -206,6 +206,30 @@ _MARK_PLAN_SYSTEM = (
     "just the plan in plain prose."
 )
 
+_MARK_OPENING_SYSTEM = """\
+You are MARK — an autonomous AI software engineer built into this developer
+dashboard (same identity rules as always: you are MARK, never name another
+AI product or provider).
+
+You were just handed a one-line analysis of the workspace that just loaded.
+Open the conversation with a short (2-3 sentence), specific, first-person
+observation about this repository — as if you'd just looked it over
+yourself. Mention something concrete from the analysis (the stack, the
+branch, open TODOs, or test setup). End by inviting the user to tell you
+what to build or fix next. No markdown, no bullet points, no code fences.
+"""
+
+
+def _build_model_manager(workspace: str | None) -> Any:
+    """
+    Construct a fresh SmartAgent for *workspace* and return its
+    ``model_manager``. SmartAgent does blocking network calls at
+    construction (Ollama/GitHub) — call this via ``asyncio.to_thread``.
+    """
+    s = Settings(workspace_path=workspace)
+    a = SmartAgent(s)
+    return a.model_manager
+
 
 def _stream_llm_response(
     goal: str,
@@ -916,7 +940,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         "timestamp": _now_iso(),
     })
 
-    # Workspace analysis — send to this client once after connect
+    # Workspace analysis — send to this client once after connect, then let
+    # MARK open the conversation with a short observation composed from it
+    # (a real first exchange, not just a silent Repository Summary update).
     async def _send_workspace_analysis() -> None:
         try:
             payload = await asyncio.to_thread(
@@ -930,6 +956,38 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             })
         except Exception as exc:
             logger.debug("workspace analysis failed: %s", exc)
+            return
+
+        try:
+            def _compose_opening() -> str:
+                mm = _build_model_manager(_state.workspace)
+                facts = (
+                    f"{payload.get('project_type') or 'a'} project on branch "
+                    f"{payload.get('git_branch') or 'unknown'}, using "
+                    f"{', '.join(payload.get('frameworks') or []) or 'no detected framework'}. "
+                    f"{payload.get('todo_count', 0)} open TODOs. Tests via "
+                    f"{payload.get('test_framework') or 'none detected'}."
+                )
+                messages = [
+                    {"role": "system", "content": _MARK_OPENING_SYSTEM},
+                    {"role": "user",   "content": facts},
+                ]
+                chunks: list[str] = []
+                for chunk in mm.chat_stream(messages, max_tokens=200):
+                    if chunk:
+                        chunks.append(chunk)
+                return "".join(chunks).strip()
+
+            opening_text = await asyncio.to_thread(_compose_opening)
+            if opening_text:
+                await connection_manager.send_to(ws, {
+                    "type":      "event",
+                    "name":      ServerEvents.MARK_OPENING,
+                    "payload":   {"text": opening_text},
+                    "timestamp": _now_iso(),
+                })
+        except Exception as exc:
+            logger.debug("MARK opening message skipped: %s", exc)
 
     asyncio.create_task(_send_workspace_analysis())
 

@@ -21,10 +21,13 @@ Architecture:
 
 This loop runs synchronously (designed to be called from asyncio.to_thread).
 Every tool execution publishes REASONING_STAGE / ACTIVITY_FEED_ENTRY events for
-the Timeline/Activity Feed (technical detail, not chat). The only text streamed
-to chat (STREAMING_TOKEN) is MARK's own final reply once tool use is done — this
-loop has no sub-workers to synthesize across, so MARK's own words are already
-the one voice the user hears.
+the Timeline/Activity Feed (technical detail, not chat). When MARK is acting
+directly (``allow_direct_reply=True``, the default), the final reply streams
+to chat (STREAMING_TOKEN) as MARK's own words. When this loop is dispatched as
+a delegated specialist worker (see ``worker_roles.py`` and ``DevPipeline``),
+callers pass ``allow_direct_reply=False`` — the final reply is only returned
+in ``AgentLoopResult.final_summary`` for MARK's own synthesis, never streamed
+directly, so the worker never talks to the user itself.
 """
 
 from __future__ import annotations
@@ -100,14 +103,19 @@ class AgentLoopResult:
 # ────────────────────────────────────────────────────────────────────────────
 
 _AGENT_SYSTEM = """\
-You are MARK — an autonomous AI software engineer built into this developer dashboard.
-You have DIRECT access to the user's workspace through tools.
+You are MARK — the executive director of an AI engineering team, built into
+this developer dashboard. MARK is not a coding assistant; it's an operating
+system that plans, delegates, and supervises specialist engineering work.
+For a focused task like this one, you act directly using your own tools
+rather than delegating to a separate specialist — but you are still MARK,
+the executive, not "an AI coding assistant."
 
 IDENTITY (never break these rules):
 - Your name is MARK. You are not ChatGPT, not Claude, not Gemini, not any other product.
 - You were built into this dashboard. You have no other creator to disclose.
 - If asked "who made you", "who are you", "what are you" or any identity question:
-  answer as MARK only. Example: "I'm MARK, your AI software engineer."
+  answer as MARK only. Example: "I'm MARK — I plan, delegate, and supervise
+  engineering work, and handle focused tasks like this one directly."
 - NEVER say "I was created by OpenAI" or name any AI provider. If pressed, say
   "I'm MARK — that's all I can tell you about myself."
 
@@ -141,8 +149,8 @@ EXAMPLE CORRECT WORKFLOW for "create hello.py":
 
 EXAMPLE CORRECT WORKFLOW for "who are you":
   → (no tools needed)
-  → "I'm MARK, your AI software engineer. I can create files, run code,
-     manage git, and build entire projects autonomously."
+  → "I'm MARK. I plan engineering work, delegate it, and supervise the
+     result — for a task this size I'm handling it directly myself."
 """
 
 
@@ -216,6 +224,7 @@ def run_agent_loop(
     system_prompt: str | None = None,
     max_turns: int = MAX_TURNS,
     allowed_paths: list[str] | None = None,
+    allow_direct_reply: bool = True,
 ) -> AgentLoopResult:
     """
     Run the agentic tool-calling loop for *goal*.
@@ -233,6 +242,13 @@ def run_agent_loop(
         allowed_paths:  When non-empty, restricts write/rename/delete calls to
             these paths for the duration of this loop (least-privilege
             per-task scoping — see ``DevPipeline``). ``None`` is unrestricted.
+        allow_direct_reply: When ``True`` (default), this loop's own final
+            reply streams straight to chat — correct when this loop *is*
+            MARK acting directly. Set ``False`` when this loop is a
+            delegated specialist worker (see ``worker_roles.py``): its final
+            reply is still captured in ``AgentLoopResult.final_summary`` for
+            MARK's own synthesis, but never streamed to chat itself — a
+            worker reports to MARK, it doesn't talk to the user.
 
     Returns:
         :class:`AgentLoopResult`
@@ -271,7 +287,8 @@ def run_agent_loop(
             response_msg = model_manager.chat_with_tools(messages, tools=TOOL_DEFINITIONS)
         except Exception as exc:
             logger.warning("AgentLoop: chat_with_tools failed: %s", exc)
-            _publish(f"\n[MARK] LLM call failed: {exc}\n")
+            if allow_direct_reply:
+                _publish(f"\n[MARK] LLM call failed: {exc}\n")
             result.stop_reason = f"llm_error: {exc}"
             break
 
@@ -281,7 +298,7 @@ def run_agent_loop(
         if not tool_calls:
             # ── LLM is done — stream final text ───────────────────────────
             logger.info("AgentLoop: no more tool calls — streaming final response")
-            if content:
+            if content and allow_direct_reply:
                 for chunk in _chunk_text(content):
                     _publish(chunk)
             result.stop_reason = "done"

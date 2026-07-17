@@ -38,6 +38,9 @@ from typing import Any
 
 from smartagent.engineer.agent_loop import run_agent_loop, AgentLoopResult
 from smartagent.engineer.agent_tools import execute_tool
+from smartagent.engineer.worker_roles import (
+    ENGINEER, QA, DEBUGGER, REVIEWER, GIT, SECURITY, DOCS, PREVIEW,
+)
 from smartagent.logs.logger import get_logger
 from smartagent.server.events import ServerEvents
 
@@ -139,9 +142,31 @@ Reply with EXACTLY one of:
 No other text.  No bullet points.  Just PASS or FAIL followed by a colon and reason.
 """
 
-_FIXER_SYSTEM = """\
-You are MARK, an autonomous AI software engineer.  A previous execution
-attempt produced failures.  Fix the problems described below.
+_ENGINEER_SYSTEM = ENGINEER.prompt + """
+
+TOOLS AVAILABLE:
+• read_file(path)               — read any file
+• write_file(path, content)     — create or overwrite a file
+• list_directory(path, depth)   — explore project structure
+• search_workspace(query)       — grep through files
+• run_terminal(command)         — run pytest, npm, pip, cargo, git, etc.
+• git_status()                  — see current git status
+• git_diff()                    — see current changes
+• git_commit(message)           — stage all and commit
+• rename_file(src, dst)         — rename or move a file
+• delete_file(path)             — delete a file (requires prior approval)
+
+RULES:
+1. ALWAYS use list_directory first to understand the project before acting.
+2. ALWAYS use write_file to save code — showing code without writing it is wrong.
+3. NEVER produce code in your reply without also writing it to disk with write_file.
+4. Be precise and scoped to exactly what this milestone asks for.
+"""
+
+_DEBUGGER_SYSTEM = DEBUGGER.prompt + """
+
+A previous execution attempt produced failures. Fix the problems described
+in the goal below.
 
 Use your tools to:
 1. Read the relevant files.
@@ -149,7 +174,35 @@ Use your tools to:
 3. Write corrected versions.
 4. Re-run tests to verify.
 
-Be surgical — change only what is needed.  Do not rewrite unaffected files.
+Be surgical — change only what is needed. Do not rewrite unaffected files.
+"""
+
+_SECURITY_SYSTEM = SECURITY.prompt + """
+
+You will receive the milestone description and a git diff of its changes.
+Reply with EXACTLY one of:
+  CLEAR: <one sentence>
+  FLAG: <specific issue(s) found, one per line>
+
+No other text.
+"""
+
+_DOCS_SYSTEM = DOCS.prompt + """
+
+You will receive the milestone description and the list of files it
+touched. Reply with EXACTLY one of:
+
+  SKIP: <one sentence reason no doc update is needed>
+
+or
+
+  UPDATE: <path/to/doc.md>
+  ---
+  <full replacement content for that file>
+
+Only propose UPDATE for an existing docs file (README.md or a file under
+docs/) or a short new file directly relevant to this change. Keep content
+concise. No other text outside this format.
 """
 
 _EXECUTIVE_SYSTEM = """\
@@ -247,15 +300,25 @@ class DevPipeline:
             # this milestone's executive summary, never raw output to the user.
             preview_note = self._inspect_active_preview(i, len(milestones))
 
+            # Best-effort specialist checks — same non-blocking pattern as the
+            # preview inspection above; a failure here just means no note.
+            security_note = self._security_check(mr)
+            docs_note     = self._docs_check(mr)
+
             # One executive-composed message per milestone — the only chat text
             # the user sees for this milestone (full detail stays in Timeline).
-            summary_text = self._synthesize_milestone_summary(i, len(milestones), mr, preview_note)
+            summary_text = self._synthesize_milestone_summary(
+                i, len(milestones), mr, preview_note, security_note, docs_note,
+            )
             self._emit(summary_text)
 
         # ── 3. Final checkpoint commit ────────────────────────────────────────
         self._reasoning_stage("committing")
         commit_msg = f"MARK: {goal[:60]}"
-        commit_out = execute_tool("git_commit", {"message": commit_msg}, self._ws)
+        self._worker_started(GIT.name, f"Committing: {commit_msg}")
+        commit_out    = execute_tool("git_commit", {"message": commit_msg}, self._ws)
+        commit_ok     = "error" not in commit_out.lower()
+        self._worker_finished(GIT.name, success=commit_ok)
         self._activity("commit", "Created checkpoint commit", detail=commit_out.split("\n")[0][:120])
 
         # ── 4. Build result ───────────────────────────────────────────────────
@@ -328,25 +391,31 @@ class DevPipeline:
         for attempt in range(1, self._max_attempts + 1):
             mr.attempts = attempt
 
-            # Executor
+            # Executor → Engineer
+            self._worker_started(ENGINEER.name, milestone[:80])
             loop_result = run_agent_loop(
-                goal           = milestone,
-                model_manager  = self._mm,
-                event_bus      = self._eb,
-                workspace_path = self._ws,
-                max_turns      = MAX_MILESTONE_TURNS,
-                allowed_paths  = allowed_paths,
+                goal               = milestone,
+                model_manager      = self._mm,
+                event_bus          = self._eb,
+                workspace_path     = self._ws,
+                system_prompt      = _ENGINEER_SYSTEM,
+                max_turns          = MAX_MILESTONE_TURNS,
+                allowed_paths      = allowed_paths,
+                allow_direct_reply = False,
             )
+            self._worker_finished(ENGINEER.name, success=loop_result.success)
             mr.files_created  = loop_result.files_created
             mr.files_modified = loop_result.files_modified
             for f in mr.files_created + mr.files_modified:
                 if f not in allowed_paths:
                     allowed_paths.append(f)
 
-            # Tester
+            # Tester → QA
+            self._worker_started(QA.name, "Running tests")
             test_output, tests_passed = self._run_tests()
             mr.test_output  = test_output
             mr.tests_passed = tests_passed
+            self._worker_finished(QA.name, success=tests_passed)
 
             if test_output:
                 self._activity(
@@ -356,27 +425,32 @@ class DevPipeline:
 
             # Reviewer
             self._reasoning_stage("reviewing")
+            self._worker_started(REVIEWER.name, "Reviewing milestone")
             review = self._review(milestone, loop_result, test_output)
             mr.review = review
             passed   = review.upper().startswith("PASS")
+            self._worker_finished(REVIEWER.name, success=passed)
             self._activity("review", f"Review: {review[:100]}", success=passed)
 
             if passed or attempt >= self._max_attempts:
                 mr.success = passed or loop_result.success
                 break
 
-            # Fixer — build repair goal and retry
+            # Fixer → Debugger, build repair goal and retry
             self._activity("fix", f"Retrying (attempt {attempt + 1}/{self._max_attempts})")
             fix_goal = self._build_fix_goal(milestone, review, test_output)
-            _ = run_agent_loop(
-                goal           = fix_goal,
-                model_manager  = self._mm,
-                event_bus      = self._eb,
-                workspace_path = self._ws,
-                system_prompt  = _FIXER_SYSTEM,
-                max_turns      = 10,
-                allowed_paths  = allowed_paths,
+            self._worker_started(DEBUGGER.name, fix_goal[:80])
+            fix_result = run_agent_loop(
+                goal               = fix_goal,
+                model_manager      = self._mm,
+                event_bus          = self._eb,
+                workspace_path     = self._ws,
+                system_prompt      = _DEBUGGER_SYSTEM,
+                max_turns          = 10,
+                allowed_paths      = allowed_paths,
+                allow_direct_reply = False,
             )
+            self._worker_finished(DEBUGGER.name, success=fix_result.success)
 
         return mr
 
@@ -498,6 +572,20 @@ class DevPipeline:
         except Exception as exc:
             logger.warning("DevPipeline._activity: %s", exc)
 
+    def _worker_started(self, worker: str, task: str) -> None:
+        """Mark a named specialist (see ``worker_roles.py``) as active on
+        the Active Workers panel — real dispatch, not narration."""
+        try:
+            self._eb.publish(ServerEvents.WORKER_STARTED, worker=worker, task=task)
+        except Exception as exc:
+            logger.warning("DevPipeline._worker_started: %s", exc)
+
+    def _worker_finished(self, worker: str, success: bool = True) -> None:
+        try:
+            self._eb.publish(ServerEvents.WORKER_FINISHED, worker=worker, success=success)
+        except Exception as exc:
+            logger.warning("DevPipeline._worker_finished: %s", exc)
+
     def _synthesize(self, context: str, fallback: str) -> str:
         """One LLM call: MARK-the-executive composes a short conversational
         update from structured results. Falls back to a deterministic
@@ -517,7 +605,8 @@ class DevPipeline:
             return fallback
 
     def _synthesize_milestone_summary(
-        self, index: int, total: int, mr: MilestoneResult, preview_note: str = "",
+        self, index: int, total: int, mr: MilestoneResult,
+        preview_note: str = "", security_note: str = "", docs_note: str = "",
     ) -> str:
         files = mr.files_created + mr.files_modified
         context = (
@@ -528,6 +617,8 @@ class DevPipeline:
             f"Tests: {'passed' if mr.tests_passed else ('failed' if mr.test_output else 'none run')}\n"
             f"Review verdict: {mr.review[:150]}"
             + (f"\nPreview inspection: {preview_note}" if preview_note else "")
+            + (f"\nSecurity review: {security_note}" if security_note else "")
+            + (f"\nDocs review: {docs_note}" if docs_note else "")
         )
         fallback = (
             f"Milestone {index}/{total} ({mr.milestone}): "
@@ -537,6 +628,73 @@ class DevPipeline:
         )
         return self._synthesize(context, fallback) + "\n\n"
 
+    def _security_check(self, mr: MilestoneResult) -> str:
+        """
+        Best-effort Security worker: one LLM call over this milestone's diff
+        asking for obvious issues. Never blocks the pipeline — any failure
+        (LLM unavailable, tool error) just means no finding gets folded into
+        the milestone summary, matching ``_inspect_active_preview``'s pattern.
+        """
+        self._worker_started(SECURITY.name, f"Reviewing {mr.milestone[:60]}")
+        finding = ""
+        try:
+            diff = execute_tool("git_diff", {}, self._ws)
+            messages = [
+                {"role": "system", "content": _SECURITY_SYSTEM},
+                {"role": "user", "content": f"Milestone: {mr.milestone}\n\nDiff:\n{diff[:4000]}"},
+            ]
+            chunks: list[str] = []
+            for chunk in self._mm.chat_stream(messages, max_tokens=200):
+                chunks.append(chunk)
+            finding = "".join(chunks).strip()
+        except Exception as exc:
+            logger.debug("DevPipeline._security_check: skipped: %s", exc)
+
+        flagged = finding.upper().startswith("FLAG")
+        if finding:
+            self._activity("security", finding[:150], success=not flagged)
+        self._worker_finished(SECURITY.name, success=not flagged)
+        return finding
+
+    def _docs_check(self, mr: MilestoneResult) -> str:
+        """
+        Best-effort Docs worker: one LLM call deciding whether this
+        milestone's change needs a README/docs update, writing it directly
+        via ``write_file`` when warranted. Never blocks the pipeline.
+        """
+        self._worker_started(DOCS.name, f"Checking docs for {mr.milestone[:60]}")
+        note = ""
+        try:
+            files = mr.files_created + mr.files_modified
+            messages = [
+                {"role": "system", "content": _DOCS_SYSTEM},
+                {"role": "user", "content": (
+                    f"Milestone: {mr.milestone}\n"
+                    f"Files touched: {', '.join(files) or '(none)'}"
+                )},
+            ]
+            chunks: list[str] = []
+            for chunk in self._mm.chat_stream(messages, max_tokens=600):
+                chunks.append(chunk)
+            raw = "".join(chunks).strip()
+
+            if raw.upper().startswith("UPDATE:"):
+                body = raw[len("UPDATE:"):].strip()
+                path_line, _, content = body.partition("\n---\n")
+                path, content = path_line.strip(), content.strip()
+                if path and content:
+                    execute_tool("write_file", {"path": path, "content": content}, self._ws)
+                    note = f"Updated {path}"
+            else:
+                note = raw.removeprefix("SKIP:").strip()
+        except Exception as exc:
+            logger.debug("DevPipeline._docs_check: skipped: %s", exc)
+
+        if note:
+            self._activity("docs", note[:150])
+        self._worker_finished(DOCS.name, success=True)
+        return note
+
     def _inspect_active_preview(self, index: int, total: int) -> str:
         """
         If a live preview is registered, capture a screenshot + basic findings
@@ -545,6 +703,7 @@ class DevPipeline:
         means no preview_note gets fed into this milestone's summary — it
         never breaks the pipeline.
         """
+        started = False
         try:
             from smartagent.preview.browser_agent import browser_agent
             if not browser_agent.available:
@@ -556,8 +715,11 @@ class DevPipeline:
                 return ""
             preview = active[0]
 
+            self._worker_started(PREVIEW.name, f"Inspecting {preview['url']}")
+            started = True
             report = browser_agent.inspect(preview["url"], check_accessibility=True)
             if not report.success:
+                self._worker_finished(PREVIEW.name, success=False)
                 return ""
 
             if report.screenshot_path:
@@ -574,9 +736,12 @@ class DevPipeline:
                 except Exception as exc:
                     logger.warning("DevPipeline: failed to record milestone screenshot: %s", exc)
 
+            self._worker_finished(PREVIEW.name, success=True)
             return report.summary_text()
         except Exception as exc:
             logger.debug("DevPipeline: preview inspection skipped: %s", exc)
+            if started:
+                self._worker_finished(PREVIEW.name, success=False)
             return ""
 
     def _synthesize_final_summary(self, goal: str, result: PipelineResult) -> str:

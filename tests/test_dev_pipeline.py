@@ -307,9 +307,11 @@ class TestExecutiveSynthesis:
         eb = make_event_bus()
         mm = MagicMock()
         mm.chat_stream.side_effect = [
-            iter(["1. Create app.py"]),        # planner
-            iter(["PASS: looks good."]),        # reviewer
-            iter(["I shipped app.py cleanly."]),# milestone synthesis
+            iter(["1. Create app.py"]),          # planner
+            iter(["PASS: looks good."]),          # reviewer
+            iter(["CLEAR: no issues found."]),    # security
+            iter(["SKIP: no doc update needed."]),# docs
+            iter(["I shipped app.py cleanly."]),  # milestone synthesis
             iter(["All done — one file shipped."]),  # final synthesis
         ]
         mm.chat_with_tools.return_value = done_msg
@@ -410,6 +412,93 @@ class TestFixerGoalBuilder:
     def test_includes_milestone(self):
         goal = DevPipeline._build_fix_goal("Create app.py", "FAIL: x", "")
         assert "Create app.py" in goal
+
+
+# ── Named worker dispatch ──────────────────────────────────────────────────────
+
+class TestWorkerDispatch:
+    """
+    DevPipeline must dispatch real named workers (Engineer/QA/Reviewer/
+    Security/Docs/Git) with actual WorkerStarted/WorkerFinished events —
+    this is what drives the dashboard's Active Workers panel; before this,
+    those events were never published by the live pipeline at all.
+    """
+
+    def _run_simple_pipeline(self, ws):
+        write_tc = MagicMock()
+        write_tc.id = "tc1"
+        write_tc.function.name      = "write_file"
+        write_tc.function.arguments = '{"path": "hello.py", "content": "print(1)\\n"}'
+
+        done_msg = MagicMock()
+        done_msg.tool_calls = []
+        done_msg.content    = "Created hello.py."
+
+        write_msg = MagicMock()
+        write_msg.tool_calls = [write_tc]
+        write_msg.content    = ""
+
+        eb = make_event_bus()
+        mm = MagicMock()
+        mm.chat_stream.side_effect = [
+            iter(["1. Create hello.py"]),            # planner
+            iter(["PASS: file created correctly."]), # reviewer
+            iter(["CLEAR: no issues."]),              # security
+            iter(["SKIP: no docs needed."]),          # docs
+            iter(["Shipped it."]),                    # milestone synthesis
+            iter(["All done."]),                      # final synthesis
+        ]
+        mm.chat_with_tools.side_effect = [write_msg, done_msg]
+
+        dp = DevPipeline(mm, eb, ws)
+        dp.run("Build a hello world script")
+        return eb
+
+    def test_named_workers_fire_started_and_finished(self, ws):
+        eb = self._run_simple_pipeline(ws)
+
+        started = {
+            c.kwargs.get("worker") for c in eb.publish.call_args_list
+            if c.args and c.args[0] == "WorkerStarted"
+        }
+        finished = {
+            c.kwargs.get("worker") for c in eb.publish.call_args_list
+            if c.args and c.args[0] == "WorkerFinished"
+        }
+        expected = {"Engineer", "QA", "Reviewer", "Security", "Docs", "Git"}
+        assert expected.issubset(started)
+        assert expected.issubset(finished)
+        # MARK itself is the executive, never a dispatched worker.
+        assert "MARK" not in started
+
+    def test_every_started_worker_also_finishes(self, ws):
+        """A WorkerStarted with no matching WorkerFinished would leave a
+        dashboard card stuck 'running' forever."""
+        eb = self._run_simple_pipeline(ws)
+
+        started = [
+            c.kwargs.get("worker") for c in eb.publish.call_args_list
+            if c.args and c.args[0] == "WorkerStarted"
+        ]
+        finished = [
+            c.kwargs.get("worker") for c in eb.publish.call_args_list
+            if c.args and c.args[0] == "WorkerFinished"
+        ]
+        assert sorted(started) == sorted(finished)
+
+    def test_engineer_dispatch_suppresses_direct_reply(self, ws):
+        """The Executor/Fixer phases must not let a worker's own text stream
+        straight to chat — only MARK's executive-composed summaries should."""
+        eb = self._run_simple_pipeline(ws)
+
+        streamed_texts = [
+            c.kwargs.get("text", "") for c in eb.publish.call_args_list
+            if c.args and c.args[0] == "StreamingToken"
+        ]
+        # The Engineer's raw final reply ("Created hello.py.") must never
+        # reach chat directly — only the executive-composed milestone/final
+        # summaries (from the mocked "Shipped it."/"All done." responses).
+        assert not any("Created hello.py." == t.strip() for t in streamed_texts)
 
 
 # ── Full pipeline run (mocked LLM + real filesystem) ──────────────────────────

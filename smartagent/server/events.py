@@ -76,6 +76,9 @@ class ServerEvents:
     # Streaming
     STREAMING_TOKEN = "StreamingToken"
 
+    # MARK speaking outside of a run (e.g. the proactive opening message)
+    MARK_OPENING = "MarkOpening"
+
     # System
     ERROR          = "Error"
     STATUS_CHANGED = "StatusChanged"

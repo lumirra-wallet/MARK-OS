@@ -225,12 +225,15 @@ interface MarkState {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_WORKERS: WorkerState[] = [
-  { name: 'Research', status: 'idle' },
-  { name: 'Planning', status: 'idle' },
-  { name: 'Coding',   status: 'idle' },
-  { name: 'Testing',  status: 'idle' },
-  { name: 'Quality',  status: 'idle' },
-  { name: 'Review',   status: 'idle' },
+  { name: 'Engineer', status: 'idle' },
+  { name: 'QA',        status: 'idle' },
+  { name: 'Debugger',  status: 'idle' },
+  { name: 'Reviewer',  status: 'idle' },
+  { name: 'Git',       status: 'idle' },
+  { name: 'Research',  status: 'idle' },
+  { name: 'Security',  status: 'idle' },
+  { name: 'Docs',      status: 'idle' },
+  { name: 'Preview',   status: 'idle' },
 ];
 
 const DEFAULT_VOICE: VoiceState = {
@@ -476,7 +479,7 @@ export const useMarkStore = create<MarkState>((set, get) => {
                 timestamp: new Date().toISOString(),
                 blocks: [{
                   type: 'text',
-                  text: "Good morning. I'm MARK — your AI software engineer.\n\nType a goal or hold the microphone button to speak. I'll plan, write, test, and narrate everything as I build.",
+                  text: "Good morning. I'm MARK — the executive director of your engineering team.\n\nTell me what you want built, and I'll plan the work, delegate it to the right specialists, supervise execution, and report back.",
                 }],
                 isActive: false,
               }],
@@ -766,6 +769,25 @@ export const useMarkStore = create<MarkState>((set, get) => {
               case 'EvaluationComplete':
                 addTimeline(`Evaluation complete · run ${payload.run_id}`);
                 break;
+
+              // MARK speaking outside of a run — e.g. the proactive opening
+              // message composed from the workspace analysis on connect.
+              // Pushed as a whole, already-finished message (no streaming
+              // block, no currentMarkMsgId involvement — this isn't a run).
+              case 'MarkOpening': {
+                if (payload.text) {
+                  set(state => ({
+                    messages: [...state.messages, {
+                      id: _id(),
+                      role: 'mark' as const,
+                      timestamp,
+                      blocks: [{ type: 'text', text: payload.text }],
+                      isActive: false,
+                    }],
+                  }));
+                }
+                break;
+              }
 
               // ── Live Engineer panel ────────────────────────────────────────
               case 'WorkspaceAnalyzed': {

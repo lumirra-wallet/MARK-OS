@@ -1,18 +1,21 @@
 import { useMarkStore } from '@/store/markStore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle2, CircleDashed, Loader2, Play, Circle, Sparkles, Code2, TestTube2, BadgeCheck, Eye } from 'lucide-react';
+import { CheckCircle2, CircleDashed, Loader2, Play, Circle, Sparkles, Code2, TestTube2, Eye, GitBranch, Bug, Shield, FileText, Camera } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { TerminalPanel } from './TerminalPanel';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { format } from 'date-fns';
 
 const WORKER_ICONS = {
+  Engineer: Code2,
+  QA: TestTube2,
+  Debugger: Bug,
+  Reviewer: Eye,
+  Git: GitBranch,
   Research: Sparkles,
-  Planning: CircleDashed,
-  Coding: Code2,
-  Testing: TestTube2,
-  Quality: BadgeCheck,
-  Review: Eye,
+  Security: Shield,
+  Docs: FileText,
+  Preview: Camera,
 };
 
 export function ExecutionView() {

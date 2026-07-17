@@ -26,8 +26,9 @@ import {
   Send, Square, FolderOpen,
   CheckCircle2, XCircle, Loader2, FileCode2, FileMinus, FilePlus,
   TestTube2, Zap, Trash2,
-  Sparkles, Code2, BadgeCheck, Eye, CircleDashed,
+  Sparkles, Code2, Eye, CircleDashed,
   GitBranch, Plus, X,
+  Bug, Shield, FileText, Camera,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -42,12 +43,15 @@ import { format } from 'date-fns';
 // ── Worker icon map ───────────────────────────────────────────────────────────
 
 const WORKER_ICONS: Record<string, React.ComponentType<any>> = {
+  Engineer: Code2,
+  QA:       TestTube2,
+  Debugger: Bug,
+  Reviewer: Eye,
+  Git:      GitBranch,
   Research: Sparkles,
-  Planning: CircleDashed,
-  Coding:   Code2,
-  Testing:  TestTube2,
-  Quality:  BadgeCheck,
-  Review:   Eye,
+  Security: Shield,
+  Docs:     FileText,
+  Preview:  Camera,
 };
 
 // ── Block renderers ───────────────────────────────────────────────────────────
