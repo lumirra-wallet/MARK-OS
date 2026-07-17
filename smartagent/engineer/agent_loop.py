@@ -332,7 +332,7 @@ def run_agent_loop(
                 )
                 logger.info("AgentLoop: approval required for %r", name)
             else:
-                tool_result = execute_tool(name, args, workspace_path)
+                tool_result = execute_tool(name, args, workspace_path, allowed_paths=allowed_paths)
 
                 # Track written files
                 if name == "write_file" and "path" in args:
