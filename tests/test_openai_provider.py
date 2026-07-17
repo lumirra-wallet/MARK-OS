@@ -551,7 +551,9 @@ class TestFactoryOpenAIAnthropic:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         assert fac._auto_default_provider() == "anthropic"
 
-    def test_auto_detect_falls_back_to_ollama(self, monkeypatch, tmp_path):
+    def test_auto_detect_falls_back_to_nvidia(self, monkeypatch, tmp_path):
+        """With no key at all set, the unconditional fallback is 'nvidia' —
+        the product default (Ollama is not supported)."""
         import smartagent.llm.factory as fac
         monkeypatch.setattr(fac, "_STATE_FILE", tmp_path / ".state.json")
         monkeypatch.delenv("ACTIVE_PROVIDER",  raising=False)
@@ -559,7 +561,7 @@ class TestFactoryOpenAIAnthropic:
         monkeypatch.delenv("GITHUB_TOKEN",     raising=False)
         monkeypatch.delenv("OPENAI_API_KEY",   raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        assert fac._auto_default_provider() == "ollama"
+        assert fac._auto_default_provider() == "nvidia"
 
     def test_active_provider_env_overrides_all(self, monkeypatch, tmp_path):
         import smartagent.llm.factory as fac
