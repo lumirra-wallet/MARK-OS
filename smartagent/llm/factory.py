@@ -2,21 +2,22 @@
 ProviderFactory — creates and wires the active LLM provider into ModelManager.
 
 Provider selection order:
-    1. ACTIVE_PROVIDER environment variable (``"github"`` or ``"ollama"``).
+    1. ACTIVE_PROVIDER environment variable (``"nvidia"``, ``"github"``, or ``"ollama"``).
     2. Persisted state in ``.mark_provider_state.json`` (set by REST API).
-    3. Auto-detect: ``"github"`` when GITHUB_TOKEN is present, else ``"ollama"``.
+    3. Auto-detect: ``"nvidia"`` when NVIDIA_API_KEY is present, else
+       ``"github"`` when GITHUB_TOKEN is present, else ``"ollama"``.
 
 To switch providers at runtime call the REST API::
 
-    POST /providers/switch  {"provider": "github", "model": "gpt-4.1"}
+    POST /providers/switch  {"provider": "nvidia", "model": "nvidia/nemotron-3-ultra-550b-a55b"}
 
 Or set the env var before starting the server::
 
-    ACTIVE_PROVIDER=github uvicorn smartagent.server.app:app
+    ACTIVE_PROVIDER=nvidia uvicorn smartagent.server.app:app
 
 Architecture rule:
     Only ModelManager talks to providers.
-    Only this factory and ModelManager.load_github_models() import GitHubProvider.
+    Only this factory imports GitHubProvider/NvidiaProvider directly.
     Feature code (workers, RAG, etc.) calls ModelManager — never providers directly.
 """
 
@@ -40,31 +41,35 @@ GITHUB_FALLBACK_MODEL = "gpt-4o-mini"
 GITHUB_CODING_MODEL   = "gpt-4.1"
 GITHUB_EMBEDDING_MODEL = "text-embedding-3-small"
 
+NVIDIA_DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
+
 OLLAMA_DEFAULT_MODEL  = "llama3.1:8b"
 OLLAMA_CODING_MODEL   = "qwen2.5-coder:7b"
 
 _STATE_FILE = Path(".mark_provider_state.json")
 
-# GitHubProvider.chat()/chat_stream() deliberately swallow API exceptions and
-# return/yield this prefix as if it were real model content (see
-# github_provider.py's own tests — this is intentional so a raw exception
-# never crashes a caller mid-stream). That means callers must check for this
-# sentinel themselves before treating the text as genuine model output —
-# otherwise a rate-limit or outage message streams straight to the user as
-# if MARK had said it. Use ``is_llm_error_text()`` wherever chat_stream()/
-# chat() output is about to be published or parsed as real content.
-LLM_ERROR_PREFIX = "GitHub Models error: "
+# GitHubProvider/NvidiaProvider deliberately swallow API exceptions and
+# return/yield an error-prefixed string as if it were real model content
+# (see each provider's own tests — this is intentional so a raw exception
+# never crashes a caller mid-stream). That means callers must check for one
+# of these sentinels themselves before treating the text as genuine model
+# output — otherwise a rate-limit or outage message streams straight to the
+# user as if MARK had said it. Use ``is_llm_error_text()`` wherever
+# chat_stream()/chat() output is about to be published or parsed as real
+# content.
+LLM_ERROR_PREFIXES = ("GitHub Models error: ", "NVIDIA API error: ")
 
 
 def is_llm_error_text(text: str) -> bool:
     """True when *text* is a provider's swallowed-error sentinel, not real model output."""
-    return text.strip().startswith(LLM_ERROR_PREFIX)
+    stripped = text.strip()
+    return any(stripped.startswith(p) for p in LLM_ERROR_PREFIXES)
 
 # ---------------------------------------------------------------------------
 # State helpers
 # ---------------------------------------------------------------------------
 
-_VALID_PROVIDERS = {"github", "ollama", "openai", "anthropic"}
+_VALID_PROVIDERS = {"github", "nvidia", "ollama", "openai", "anthropic"}
 
 
 def _auto_default_provider() -> str:
@@ -72,14 +77,17 @@ def _auto_default_provider() -> str:
 
     Selection order:
       1. ACTIVE_PROVIDER env var (explicit override)
-      2. GITHUB_TOKEN present  → "github"
-      3. OPENAI_API_KEY present → "openai"
-      4. ANTHROPIC_API_KEY present → "anthropic"
-      5. Fallback               → "ollama"
+      2. NVIDIA_API_KEY present → "nvidia"
+      3. GITHUB_TOKEN present  → "github"
+      4. OPENAI_API_KEY present → "openai"
+      5. ANTHROPIC_API_KEY present → "anthropic"
+      6. Fallback               → "ollama"
     """
     explicit = os.environ.get("ACTIVE_PROVIDER", "").strip().lower()
     if explicit in _VALID_PROVIDERS:
         return explicit
+    if os.environ.get("NVIDIA_API_KEY"):
+        return "nvidia"
     if os.environ.get("GITHUB_TOKEN"):
         return "github"
     if os.environ.get("OPENAI_API_KEY"):
@@ -89,10 +97,12 @@ def _auto_default_provider() -> str:
     return "ollama"
 
 
-# Derive the allowed set directly from the catalogue so adding a model there
-# automatically allows it here — no duplicate maintenance required.
+# Derive the allowed sets directly from each catalogue so adding a model
+# there automatically allows it here — no duplicate maintenance required.
 from smartagent.llm.github_provider import _GITHUB_MODEL_CATALOGUE as _CAT  # noqa: E402
+from smartagent.llm.nvidia_provider import _NVIDIA_MODEL_CATALOGUE as _NCAT  # noqa: E402
 _KNOWN_GITHUB_MODELS: set[str] = {m["id"] for m in _CAT}
+_KNOWN_NVIDIA_MODELS: set[str] = {m["id"] for m in _NCAT}
 
 
 def _load_state() -> dict[str, Any]:
@@ -101,6 +111,7 @@ def _load_state() -> dict[str, Any]:
         "provider": _auto_default_provider(),
         "github_model": GITHUB_DEFAULT_MODEL,
         "github_coding_model": GITHUB_CODING_MODEL,
+        "nvidia_model": NVIDIA_DEFAULT_MODEL,
         "ollama_model": OLLAMA_DEFAULT_MODEL,
         "ollama_coding_model": OLLAMA_CODING_MODEL,
         "temperature": 0.7,
@@ -110,7 +121,7 @@ def _load_state() -> dict[str, Any]:
     try:
         if _STATE_FILE.exists():
             saved = json.loads(_STATE_FILE.read_text())
-            # Guard: reject unknown GitHub model names so a stale or hand-edited
+            # Guard: reject unknown model names so a stale or hand-edited
             # state file can't silently route every call to a 404 endpoint.
             # Persist the correction immediately — otherwise a bad on-disk
             # value gets silently "fixed" in memory on every load without
@@ -122,6 +133,14 @@ def _load_state() -> dict[str, Any]:
                     "— resetting to default %r", gm, GITHUB_DEFAULT_MODEL,
                 )
                 saved["github_model"] = GITHUB_DEFAULT_MODEL
+                _save_state({**state, **saved})
+            nm = saved.get("nvidia_model", "")
+            if nm and nm not in _KNOWN_NVIDIA_MODELS:
+                logger.warning(
+                    "ProviderFactory: ignoring unknown nvidia_model %r in state file "
+                    "— resetting to default %r", nm, NVIDIA_DEFAULT_MODEL,
+                )
+                saved["nvidia_model"] = NVIDIA_DEFAULT_MODEL
                 _save_state({**state, **saved})
             state.update(saved)
     except Exception as exc:  # noqa: BLE001
@@ -151,11 +170,14 @@ def get_model_for_role(role: str = "default") -> str | None:
 
     Returns ``None`` when the active provider is Ollama — the OllamaWorkerMixin
     then falls back to ``settings.ollama_*_model`` for backward compatibility.
-    Returns ``None`` if ACTIVE_PROVIDER is not set to ``"github"`` explicitly,
-    preserving all pre-existing test behaviour.
+    Returns ``None`` unless ACTIVE_PROVIDER is explicitly ``"github"`` or
+    ``"nvidia"``, preserving all pre-existing test behaviour.
     """
     state = _load_state()
     provider = state["provider"]
+    if provider == "nvidia":
+        # Nvidia doesn't have a separate coding model yet — same model for both roles.
+        return state.get("nvidia_model", NVIDIA_DEFAULT_MODEL)
     if provider != "github":
         return None  # mixin uses Ollama settings as before
     if role == "coding":
@@ -171,6 +193,9 @@ def get_llm_settings() -> dict[str, Any]:
     if provider == "github":
         model        = state.get("github_model",        GITHUB_DEFAULT_MODEL)
         coding_model = state.get("github_coding_model", GITHUB_CODING_MODEL)
+    elif provider == "nvidia":
+        model        = state.get("nvidia_model", NVIDIA_DEFAULT_MODEL)
+        coding_model = model
     elif provider == "openai":
         model        = state.get("openai_model",        os.environ.get("OPENAI_DEFAULT_MODEL", "gpt-4o-mini"))
         coding_model = state.get("openai_coding_model", "gpt-4o")
@@ -189,6 +214,7 @@ def get_llm_settings() -> dict[str, Any]:
         "max_tokens":         state.get("max_tokens", 4096),
         "streaming":          state.get("streaming", True),
         "github_available":   bool(os.environ.get("GITHUB_TOKEN")),
+        "nvidia_available":   bool(os.environ.get("NVIDIA_API_KEY")),
         "openai_available":   bool(os.environ.get("OPENAI_API_KEY")),
         "anthropic_available": bool(os.environ.get("ANTHROPIC_API_KEY")),
         "ollama_url":         os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
@@ -198,8 +224,8 @@ def get_llm_settings() -> dict[str, Any]:
 def update_llm_settings(updates: dict[str, Any]) -> dict[str, Any]:
     """Persist LLM setting changes and return the merged state."""
     state = _load_state()
-    # Sanitize before saving — reject unknown github model names so a bad
-    # dashboard payload can't permanently break the provider.
+    # Sanitize before saving — reject unknown model names so a bad dashboard
+    # payload can't permanently break the provider.
     gm = updates.get("github_model", "")
     if gm and gm not in _KNOWN_GITHUB_MODELS:
         logger.warning(
@@ -207,6 +233,13 @@ def update_llm_settings(updates: dict[str, Any]) -> dict[str, Any]:
             gm, state.get("github_model", GITHUB_DEFAULT_MODEL),
         )
         updates = {k: v for k, v in updates.items() if k != "github_model"}
+    nm = updates.get("nvidia_model", "")
+    if nm and nm not in _KNOWN_NVIDIA_MODELS:
+        logger.warning(
+            "update_llm_settings: ignoring unknown nvidia_model %r — keeping %r",
+            nm, state.get("nvidia_model", NVIDIA_DEFAULT_MODEL),
+        )
+        updates = {k: v for k, v in updates.items() if k != "nvidia_model"}
     state.update(updates)
     _save_state(state)
     return get_llm_settings()
@@ -231,7 +264,8 @@ def switch_provider(
     state = _load_state()
     state["provider"] = provider
     if model:
-        key = {"github": "github_model", "openai": "openai_model",
+        key = {"github": "github_model", "nvidia": "nvidia_model",
+               "openai": "openai_model",
                "anthropic": "anthropic_model"}.get(provider, "ollama_model")
         state[key] = model
     _save_state(state)
@@ -258,6 +292,8 @@ def wire_agent(model_manager: Any) -> None:
 def _default_model(provider: str, state: dict[str, Any]) -> str:
     if provider == "github":
         return state.get("github_model", GITHUB_DEFAULT_MODEL)
+    if provider == "nvidia":
+        return state.get("nvidia_model", NVIDIA_DEFAULT_MODEL)
     if provider == "openai":
         return state.get("openai_model", os.environ.get("OPENAI_DEFAULT_MODEL", "gpt-4o-mini"))
     if provider == "anthropic":
@@ -269,6 +305,8 @@ def _wire_provider(provider: str, model: str, model_manager: Any) -> None:
     """Register provider models in model_manager and switch to *model*."""
     if provider == "github":
         _load_github(model, model_manager)
+    elif provider == "nvidia":
+        _load_nvidia(model, model_manager)
     elif provider in ("openai", "anthropic"):
         # OpenAI / Anthropic don't register models with ModelManager yet —
         # they operate through the REST API layer directly. No-op here.
@@ -297,6 +335,26 @@ def _load_github(model: str, model_manager: Any) -> None:
         logger.info("ProviderFactory: active GitHub model → %s", model)
     except Exception as exc:
         logger.warning("ProviderFactory: failed to load GitHub provider: %s", exc)
+
+
+def _load_nvidia(model: str, model_manager: Any) -> None:
+    """Register NvidiaProvider instances in model_manager."""
+    api_key = os.environ.get("NVIDIA_API_KEY", "")
+    if not api_key:
+        logger.warning("ProviderFactory: NVIDIA_API_KEY not set — NVIDIA provider unavailable")
+        return
+    try:
+        from smartagent.llm.nvidia_provider import NvidiaProvider
+        for mid in dict.fromkeys([model, NVIDIA_DEFAULT_MODEL]):
+            if model_manager.registry.find(mid) is None:
+                p = NvidiaProvider(model_name=mid, api_key=api_key)
+                model_manager.registry.register(p)
+                logger.info("ProviderFactory: registered NVIDIA model %s", mid)
+        # Switch to the requested model
+        model_manager.switch(model)
+        logger.info("ProviderFactory: active NVIDIA model → %s", model)
+    except Exception as exc:
+        logger.warning("ProviderFactory: failed to load NVIDIA provider: %s", exc)
 
 
 def _load_ollama(model: str, model_manager: Any) -> None:

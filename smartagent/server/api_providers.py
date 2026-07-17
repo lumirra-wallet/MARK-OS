@@ -32,7 +32,7 @@ router = APIRouter()
 
 
 class SwitchProviderRequest(PydanticModel):
-    provider: str           # "github" | "ollama"
+    provider: str           # "nvidia" | "github" | "ollama"
     model: str | None = None
 
 
@@ -46,6 +46,7 @@ class LlmSettingsUpdate(PydanticModel):
     streaming: bool | None = None
     github_model: str | None = None
     github_coding_model: str | None = None
+    nvidia_model: str | None = None
     ollama_model: str | None = None
     ollama_coding_model: str | None = None
 
@@ -55,6 +56,16 @@ class LlmSettingsUpdate(PydanticModel):
 # ---------------------------------------------------------------------------
 
 _PROVIDER_CATALOGUE = [
+    {
+        "id":          "nvidia",
+        "name":        "NVIDIA",
+        "description": "Cloud-hosted models via NVIDIA's OpenAI-compatible inference API",
+        "base_url":    "https://integrate.api.nvidia.com/v1",
+        "requires_token": True,
+        "token_env":   "NVIDIA_API_KEY",
+        "capabilities": ["chat", "streaming", "tool_calling", "reasoning"],
+        "default_model": "nvidia/nemotron-3-ultra-550b-a55b",
+    },
     {
         "id":          "github",
         "name":        "GitHub Models",
@@ -126,8 +137,11 @@ async def list_providers() -> dict:
     result = []
     for p in _PROVIDER_CATALOGUE:
         entry = dict(p)
-        if p["id"] == "github":
-            entry["token_present"] = bool(os.environ.get("GITHUB_TOKEN"))
+        token_env = p.get("token_env")
+        if token_env:
+            # github / nvidia / openai / anthropic — availability is just
+            # "is the token/key present", same check `_auto_default_provider()` uses.
+            entry["token_present"] = bool(os.environ.get(token_env))
             entry["available"] = entry["token_present"]
         else:  # ollama
             # Quick Ollama health check
@@ -156,6 +170,7 @@ async def get_current_provider() -> dict:
         "max_tokens":   settings["max_tokens"],
         "streaming":    settings["streaming"],
         "github_available": settings["github_available"],
+        "nvidia_available": settings["nvidia_available"],
     }
 
 
@@ -226,6 +241,23 @@ async def llm_health() -> dict:
         try:
             from smartagent.llm.github_provider import GitHubProvider
             p = GitHubProvider(model_name=model_id, token=token)
+            p.load()
+            health = p.health()
+            result["available"] = health.healthy
+            result["latency_ms"] = round((time.monotonic() - t0) * 1000)
+            if not health.healthy:
+                result["error"] = health.message
+        except Exception as exc:
+            result["error"] = str(exc)
+    elif provider == "nvidia":
+        api_key = os.environ.get("NVIDIA_API_KEY", "")
+        result["token_valid"] = bool(api_key)
+        if not api_key:
+            result["error"] = "NVIDIA_API_KEY not set"
+            return result
+        try:
+            from smartagent.llm.nvidia_provider import NvidiaProvider
+            p = NvidiaProvider(model_name=model_id, api_key=api_key)
             p.load()
             health = p.health()
             result["available"] = health.healthy

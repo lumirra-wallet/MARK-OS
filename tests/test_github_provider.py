@@ -482,6 +482,7 @@ class TestProviderFactory:
     def test_get_active_provider_defaults_to_github_when_token_present(self, monkeypatch, tmp_path):
         """Without ACTIVE_PROVIDER, auto-detects 'github' when GITHUB_TOKEN is set."""
         monkeypatch.delenv("ACTIVE_PROVIDER", raising=False)
+        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
         monkeypatch.setenv("GITHUB_TOKEN", "fake-token-for-test")
         import smartagent.llm.factory as _fac
         monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / ".state.json")
@@ -491,6 +492,7 @@ class TestProviderFactory:
         """Without ACTIVE_PROVIDER or GITHUB_TOKEN, default falls back to 'ollama'."""
         monkeypatch.delenv("ACTIVE_PROVIDER", raising=False)
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
         import smartagent.llm.factory as _fac
         monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / ".state.json")
         assert _fac.get_active_provider() == "ollama"
@@ -689,6 +691,8 @@ class TestOllamaWorkerMixinFactoryIntegration:
     ):
         import smartagent.llm.factory as _fac
         monkeypatch.delenv("ACTIVE_PROVIDER", raising=False)
+        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / ".state.json")
         worker = self._make_mixin()
         context = self._make_context()

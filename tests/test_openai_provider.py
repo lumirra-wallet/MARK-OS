@@ -526,6 +526,7 @@ class TestFactoryOpenAIAnthropic:
         import smartagent.llm.factory as fac
         monkeypatch.setattr(fac, "_STATE_FILE", tmp_path / ".state.json")
         monkeypatch.delenv("ACTIVE_PROVIDER", raising=False)
+        monkeypatch.delenv("NVIDIA_API_KEY",  raising=False)
         monkeypatch.setenv("GITHUB_TOKEN",    "ghp_test")
         monkeypatch.setenv("OPENAI_API_KEY",  "sk-test")
         assert fac._auto_default_provider() == "github"
@@ -534,6 +535,7 @@ class TestFactoryOpenAIAnthropic:
         import smartagent.llm.factory as fac
         monkeypatch.setattr(fac, "_STATE_FILE", tmp_path / ".state.json")
         monkeypatch.delenv("ACTIVE_PROVIDER", raising=False)
+        monkeypatch.delenv("NVIDIA_API_KEY",  raising=False)
         monkeypatch.delenv("GITHUB_TOKEN",    raising=False)
         monkeypatch.setenv("OPENAI_API_KEY",  "sk-test")
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -543,6 +545,7 @@ class TestFactoryOpenAIAnthropic:
         import smartagent.llm.factory as fac
         monkeypatch.setattr(fac, "_STATE_FILE", tmp_path / ".state.json")
         monkeypatch.delenv("ACTIVE_PROVIDER",  raising=False)
+        monkeypatch.delenv("NVIDIA_API_KEY",   raising=False)
         monkeypatch.delenv("GITHUB_TOKEN",     raising=False)
         monkeypatch.delenv("OPENAI_API_KEY",   raising=False)
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -552,6 +555,7 @@ class TestFactoryOpenAIAnthropic:
         import smartagent.llm.factory as fac
         monkeypatch.setattr(fac, "_STATE_FILE", tmp_path / ".state.json")
         monkeypatch.delenv("ACTIVE_PROVIDER",  raising=False)
+        monkeypatch.delenv("NVIDIA_API_KEY",   raising=False)
         monkeypatch.delenv("GITHUB_TOKEN",     raising=False)
         monkeypatch.delenv("OPENAI_API_KEY",   raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

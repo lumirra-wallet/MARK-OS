@@ -146,17 +146,18 @@ class SmartAgent:
             default_model=getattr(settings, "ollama_default_model", "llama3.1:8b"),
             coding_model=getattr(settings, "ollama_coding_model", "qwen2.5-coder:7b"),
         )
-        # LLM Provider wiring — activated by ACTIVE_PROVIDER=github.
-        # The factory's _auto_default_provider() auto-detects from GITHUB_TOKEN
-        # for the REST API layer; here we require an explicit env var so that
-        # unit tests (which never set ACTIVE_PROVIDER) are not affected.
+        # LLM Provider wiring — activated by ACTIVE_PROVIDER=nvidia/github.
+        # The factory's _auto_default_provider() auto-detects from
+        # NVIDIA_API_KEY/GITHUB_TOKEN for the REST API layer; here we require
+        # an explicit env var so that unit tests (which never set
+        # ACTIVE_PROVIDER) are not affected.
         import os as _os
-        if _os.environ.get("ACTIVE_PROVIDER", "").strip().lower() == "github":
+        if _os.environ.get("ACTIVE_PROVIDER", "").strip().lower() in ("nvidia", "github"):
             try:
                 from smartagent.llm.factory import wire_agent as _wire_agent
                 _wire_agent(self.model_manager)
             except Exception as _exc:  # noqa: BLE001
-                _logger.warning("SmartAgent: GitHub provider wiring failed: %s", _exc)
+                _logger.warning("SmartAgent: provider wiring failed: %s", _exc)
 
         # Milestone 2 wires the previously-standalone planning/research/
         # voice/vision/automation packages into the agent so the Brain has

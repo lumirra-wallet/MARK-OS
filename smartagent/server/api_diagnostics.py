@@ -192,6 +192,23 @@ async def _check_llm_provider() -> dict[str, Any]:
                 "latency_ms": ms,
             }
 
+        elif provider_name == "nvidia":
+            api_key = os.environ.get("NVIDIA_API_KEY", "")
+            if not api_key:
+                return {"status": "error", "message": "NVIDIA_API_KEY not set", "provider": "nvidia"}
+            from smartagent.llm.nvidia_provider import NvidiaProvider
+            p      = NvidiaProvider(model_name=model, api_key=api_key)
+            p.load()
+            health = p.health()
+            ms     = round((time.monotonic() - t0) * 1000)
+            return {
+                "status":     "ok" if health.healthy else "error",
+                "message":    health.message,
+                "provider":   "nvidia",
+                "model":      model,
+                "latency_ms": ms,
+            }
+
         elif provider_name == "openai":
             import os as _os
             api_key = _os.environ.get("OPENAI_API_KEY", "")
@@ -258,6 +275,13 @@ async def _check_embeddings() -> dict[str, Any]:
             vec = p.embed("hello world test")
             ms  = round((time.monotonic() - t0) * 1000)
             return {"status": "ok", "message": f"GitHub embeddings OK — dim={len(vec)} ({ms}ms)"}
+
+        elif provider_name == "nvidia":
+            # nvidia/nemotron-* is a chat/reasoning model, not an embedding
+            # model — no network call to make, and none should be attempted
+            # (this check runs on every /diagnostics poll; a real call here
+            # would just burn quota for a capability that doesn't exist).
+            return {"status": "warn", "message": "NVIDIA: chat model, no embedding endpoint configured."}
 
         elif provider_name == "openai":
             api_key = os.environ.get("OPENAI_API_KEY", "")
