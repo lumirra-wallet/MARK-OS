@@ -263,6 +263,37 @@ async def list_models() -> dict:
         except Exception as exc:
             return {"models": [], "active": active, "provider": "github", "error": str(exc)}
 
+    if provider == "nvidia":
+        api_key = os.environ.get("NVIDIA_API_KEY", "")
+        active = settings.get("model", "nvidia/nemotron-3-ultra-550b-a55b")
+        if not api_key:
+            return {
+                "models": [], "active": active, "provider": "nvidia",
+                "error": "NVIDIA_API_KEY not set",
+            }
+        try:
+            from smartagent.llm.nvidia_provider import NvidiaProvider, _NVIDIA_MODEL_CATALOGUE
+            p = NvidiaProvider(api_key=api_key)
+            p.load()
+            raw_models = p.list_models()
+            _cat: dict[str, dict] = {m["id"]: m for m in _NVIDIA_MODEL_CATALOGUE}
+            models = [
+                {
+                    "name":     m["id"],
+                    "id":       m["id"],
+                    "size_gb":  _cat.get(m["id"], {}).get("size_gb", 0),
+                    "modified": _cat.get(m["id"], {}).get("modified", ""),
+                    "family":   m.get("family", _cat.get(m["id"], {}).get("family", "")),
+                    "params":   _cat.get(m["id"], {}).get("params", ""),
+                    "context":  m.get("context", _cat.get(m["id"], {}).get("context", 128_000)),
+                    "provider": "nvidia",
+                }
+                for m in raw_models
+            ]
+            return {"models": models, "active": active, "provider": "nvidia"}
+        except Exception as exc:
+            return {"models": [], "active": active, "provider": "nvidia", "error": str(exc)}
+
     if provider == "openai":
         active = settings.get("model", "gpt-4o-mini")
         try:
