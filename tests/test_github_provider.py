@@ -690,19 +690,20 @@ class TestOllamaWorkerMixinFactoryIntegration:
         ctx.metadata = {"settings": settings}
         return ctx
 
-    def test_resolve_returns_ollama_model_when_provider_is_ollama(
+    def test_resolve_returns_ollama_model_for_providers_without_a_branch(
         self, monkeypatch, tmp_path
     ):
+        """get_model_for_role() only has branches for nvidia/github — every
+        other explicit provider (openai here; Ollama is no longer a valid
+        provider at all) returns None, and the mixin falls back to its own
+        settings.ollama_default_model."""
         import smartagent.llm.factory as _fac
-        monkeypatch.delenv("ACTIVE_PROVIDER", raising=False)
-        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
-        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.setenv("ACTIVE_PROVIDER", "openai")
         monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / ".state.json")
         worker = self._make_mixin()
         context = self._make_context()
         model_id = worker._resolve_model_id(context)
-        # When provider is ollama, factory returns None → falls back to settings
-        # settings.ollama_default_model = "llama3.1:8b"
+        # factory returns None → falls back to settings.ollama_default_model = "llama3.1:8b"
         assert model_id == "llama3.1:8b"
 
     def test_resolve_returns_github_model_when_provider_is_github(
