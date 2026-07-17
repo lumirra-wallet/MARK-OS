@@ -161,7 +161,10 @@ smartagent/
   logs/              Logger
   automation/        TaskScheduler
   vision/            ImageAnalyzer
-  voice/             SpeechToText, TextToSpeech
+  voice/             SpeechToText, TextToSpeech (legacy stub — the live voice
+                     pipeline is smartagent/server/voice_manager.py)
+  tts/               TTSProvider factory — Kokoro (default) / Piper / OpenAI / browser
+  preview/           BrowserAgent — Playwright self-inspection of live previews
 ```
 
 ---
