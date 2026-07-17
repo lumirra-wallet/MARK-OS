@@ -409,7 +409,7 @@ export const markApi = {
     return res.json();
   },
 
-  // ── Provider management (GitHub Models / Ollama) ──────────────────────────
+  // ── Provider management (NVIDIA / GitHub Models / OpenAI / Anthropic) ─────
 
   getProviders: async (baseUrl: string) => {
     const res = await fetch(getMarkApiUrl(baseUrl, '/providers'));
@@ -507,7 +507,7 @@ export interface MemoryFilesResponse {
   exists:      boolean;
 }
 
-export interface OllamaModel {
+export interface ModelInfo {
   name:     string;
   id:       string;
   size_gb:  number;
@@ -519,11 +519,10 @@ export interface OllamaModel {
 }
 
 export interface ModelsResponse {
-  models:      OllamaModel[];
-  active:      string;
-  provider:    string;
-  ollama_url?: string;
-  error?:      string;
+  models:   ModelInfo[];
+  active:   string;
+  provider: string;
+  error?:   string;
 }
 
 export interface ProviderInfo {
@@ -541,14 +540,16 @@ export interface ProviderInfo {
 }
 
 export interface LlmSettings {
-  provider:         string;
-  model:            string;
-  coding_model:     string;
-  temperature:      number;
-  max_tokens:       number;
-  streaming:        boolean;
-  github_available: boolean;
-  ollama_url?:      string;
+  provider:            string;
+  model:               string;
+  coding_model:        string;
+  temperature:         number;
+  max_tokens:          number;
+  streaming:           boolean;
+  github_available:    boolean;
+  nvidia_available:    boolean;
+  openai_available:    boolean;
+  anthropic_available: boolean;
 }
 
 export interface LlmHealth {

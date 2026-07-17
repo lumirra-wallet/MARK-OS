@@ -109,6 +109,11 @@ def tmp_agent(tmp_path: Path) -> SmartAgent:
     tags_resp = _make_http_response(_tags_response(["llama3.1:8b", "qwen2.5-coder:7b"]))
     with patch("urllib.request.urlopen", return_value=tags_resp):
         agent = SmartAgent(settings=settings)
+        # SmartAgent.__init__ no longer auto-registers Ollama models (MARK's
+        # live agent doesn't use Ollama by default) — register them
+        # explicitly here so these Ollama-specific tests keep their expected
+        # fixture state.
+        agent.model_manager.load_ollama_models()
     # Keep the non-streaming path active so pre-M10 assertions on return
     # values continue to pass.  TestStreamingConsole tests the streaming path.
     agent.model_manager.settings.streaming_enabled = False
@@ -1410,6 +1415,9 @@ class TestStreamingConsole:
         tags_resp = _make_http_response(_tags_response(["llama3.1:8b", "qwen2.5-coder:7b"]))
         with patch("urllib.request.urlopen", return_value=tags_resp):
             agent = SmartAgent(settings=settings)
+            # SmartAgent.__init__ no longer auto-registers Ollama models —
+            # register them explicitly (see tmp_agent's fixture docstring above).
+            agent.model_manager.load_ollama_models()
         # Patch streaming settings on the model_manager.
         agent.model_manager.settings.streaming_enabled = True
         agent.model_manager.settings.show_generation_stats = False

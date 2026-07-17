@@ -1,7 +1,8 @@
 /**
  * ModelsPanel — Provider-agnostic model selector.
  *
- * Top section: Provider switcher (GitHub Models ↔ Ollama).
+ * Top section: Provider switcher, one pill per entry the backend reports
+ * (NVIDIA, GitHub Models, OpenAI, Anthropic — all cloud-hosted).
  * Middle section: Model list for the active provider, with ✓ Active badge.
  * Bottom section: Collapsible Model Router (per-worker overrides, Feature 15).
  */
@@ -9,11 +10,11 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Cpu, RefreshCw, CheckCircle2, Circle, Zap, HardDrive,
-  AlertTriangle, ExternalLink, Server, Cloud, ChevronDown,
+  AlertTriangle, ExternalLink, Cloud, ChevronDown,
   ChevronUp, Wifi, WifiOff, Activity,
 } from 'lucide-react';
 import { useMarkStore } from '@/store/markStore';
-import { markApi, type LlmSettings, type OllamaModel, type ProviderInfo } from '@/lib/markApi';
+import { markApi, type LlmSettings, type ModelInfo, type ProviderInfo } from '@/lib/markApi';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -41,6 +42,13 @@ const getFamilyClass = (family: string) => {
   return key ? familyColor[key] : 'text-muted-foreground bg-muted/20 border-border/50';
 };
 
+const PROVIDER_TOKEN_URLS: Record<string, string> = {
+  nvidia:    'https://build.nvidia.com',
+  github:    'https://github.com/settings/tokens',
+  openai:    'https://platform.openai.com/api-keys',
+  anthropic: 'https://console.anthropic.com/settings/keys',
+};
+
 const formatDate = (iso: string) => {
   if (!iso) return '';
   try {
@@ -51,19 +59,19 @@ const formatDate = (iso: string) => {
 // ── Provider pill ────────────────────────────────────────────────────────────
 
 function ProviderPill({
-  provider,
   label,
   icon: Icon,
   active,
   available,
+  unavailableHint,
   onClick,
   disabled,
 }: {
-  provider: string;
   label: string;
   icon: React.ElementType;
   active: boolean;
   available: boolean;
+  unavailableHint: string;
   onClick: () => void;
   disabled: boolean;
 }) {
@@ -71,7 +79,7 @@ function ProviderPill({
     <button
       onClick={onClick}
       disabled={disabled || !available}
-      title={!available ? (provider === 'github' ? 'GITHUB_TOKEN not set' : 'Ollama offline') : undefined}
+      title={!available ? unavailableHint : undefined}
       className={cn(
         'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border',
         active
@@ -96,7 +104,7 @@ function ModelCard({
   isSwitching,
   onSelect,
 }: {
-  model: OllamaModel;
+  model: ModelInfo;
   isActive: boolean;
   isSwitching: boolean;
   onSelect: () => void;
@@ -151,11 +159,6 @@ function ModelCard({
                   {Math.round(model.context / 1000)}k ctx
                 </Badge>
               )}
-              {model.provider === 'github' && (
-                <Badge variant="outline" className="text-[10px] h-4 px-1.5 text-emerald-400 border-emerald-400/30 bg-emerald-400/10">
-                  cloud
-                </Badge>
-              )}
             </div>
             {model.modified && (
               <p className="text-[10px] text-muted-foreground/50 mt-1">
@@ -190,9 +193,9 @@ function ModelCard({
 
 export function ModelsPanel() {
   const { serverUrl } = useMarkStore();
-  const [models,    setModels]    = useState<OllamaModel[]>([]);
+  const [models,    setModels]    = useState<ModelInfo[]>([]);
   const [active,    setActive]    = useState('');
-  const [provider,  setProvider]  = useState('ollama');
+  const [provider,  setProvider]  = useState('nvidia');
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState('');
@@ -214,7 +217,7 @@ export function ModelsPanel() {
       ]);
       setModels(modelsData.models ?? []);
       setActive(modelsData.active ?? '');
-      setProvider(modelsData.provider ?? 'ollama');
+      setProvider(modelsData.provider ?? 'nvidia');
       setProviders(providersData.providers ?? []);
       if (modelsData.error) setError(modelsData.error);
     } catch (err: any) {
@@ -255,10 +258,8 @@ export function ModelsPanel() {
     }
   };
 
-  const githubInfo  = providers.find(p => p.id === 'github');
-  const ollamaInfo  = providers.find(p => p.id === 'ollama');
-  const githubAvail = githubInfo?.available ?? false;
-  const ollamaAvail = ollamaInfo?.available ?? true; // optimistic
+  const activeProviderInfo = providers.find(p => p.id === provider);
+  const activeAvailable    = activeProviderInfo?.available ?? true; // optimistic until loaded
   const isSwitchingProvider = switching === '__provider__';
 
   return (
@@ -293,25 +294,19 @@ export function ModelsPanel() {
       {/* Provider selector */}
       <div className="px-4 py-3 border-b border-border/50 bg-card/20 shrink-0">
         <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Provider</p>
-        <div className="flex gap-2">
-          <ProviderPill
-            provider="github"
-            label="GitHub Models"
-            icon={Cloud}
-            active={provider === 'github'}
-            available={githubAvail || providers.length === 0}
-            onClick={() => switchToProvider('github')}
-            disabled={isSwitchingProvider}
-          />
-          <ProviderPill
-            provider="ollama"
-            label="Ollama"
-            icon={Server}
-            active={provider === 'ollama'}
-            available={ollamaAvail || providers.length === 0}
-            onClick={() => switchToProvider('ollama')}
-            disabled={isSwitchingProvider}
-          />
+        <div className="flex gap-2 flex-wrap">
+          {providers.map(p => (
+            <ProviderPill
+              key={p.id}
+              label={p.name}
+              icon={Cloud}
+              active={provider === p.id}
+              available={p.available || providers.length === 0}
+              unavailableHint={p.token_env ? `${p.token_env} not set` : 'unavailable'}
+              onClick={() => switchToProvider(p.id)}
+              disabled={isSwitchingProvider}
+            />
+          ))}
           {isSwitchingProvider && (
             <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
               <RefreshCw className="w-3 h-3 animate-spin" /> switching…
@@ -319,11 +314,13 @@ export function ModelsPanel() {
           )}
         </div>
 
-        {/* GitHub token missing hint */}
-        {provider === 'github' && !githubAvail && providers.length > 0 && (
+        {/* Missing token/key hint */}
+        {!activeAvailable && providers.length > 0 && (
           <p className="text-[10px] text-amber-400/80 mt-2 flex items-center gap-1">
             <AlertTriangle className="w-3 h-3" />
-            GITHUB_TOKEN env var not set — GitHub Models unavailable
+            {activeProviderInfo?.token_env
+              ? `${activeProviderInfo.token_env} env var not set — ${activeProviderInfo.name} unavailable`
+              : `${activeProviderInfo?.name ?? provider} unavailable`}
           </p>
         )}
       </div>
@@ -345,27 +342,17 @@ export function ModelsPanel() {
           <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
           <div>
             <p className="text-xs font-medium text-red-400">
-              {provider === 'github' ? 'GitHub Models error' : 'Ollama unreachable'}
+              {activeProviderInfo?.name ?? provider} error
             </p>
             <p className="text-[11px] text-red-400/70 mt-0.5">{error}</p>
-            {provider === 'ollama' && (
+            {!activeAvailable && PROVIDER_TOKEN_URLS[provider] && (
               <a
-                href="https://ollama.com/download"
+                href={PROVIDER_TOKEN_URLS[provider]}
                 target="_blank"
                 rel="noreferrer"
                 className="text-[11px] text-red-400 flex items-center gap-1 mt-1 hover:underline"
               >
-                <ExternalLink className="w-3 h-3" /> Get Ollama
-              </a>
-            )}
-            {provider === 'github' && !githubAvail && (
-              <a
-                href="https://github.com/settings/tokens"
-                target="_blank"
-                rel="noreferrer"
-                className="text-[11px] text-red-400 flex items-center gap-1 mt-1 hover:underline"
-              >
-                <ExternalLink className="w-3 h-3" /> Create GitHub token
+                <ExternalLink className="w-3 h-3" /> Get a {activeProviderInfo?.name ?? provider} key
               </a>
             )}
           </div>
@@ -376,18 +363,12 @@ export function ModelsPanel() {
       <ScrollArea className="flex-1">
         {models.length === 0 && !loading && !error && (
           <div className="flex flex-col items-center justify-center py-16 gap-3 text-center px-8">
-            {provider === 'github'
-              ? <Cloud className="w-10 h-10 text-muted-foreground/30" />
-              : <Server className="w-10 h-10 text-muted-foreground/30" />
-            }
-            <p className="text-sm text-muted-foreground">
-              {provider === 'github' ? 'No GitHub Models returned' : 'No local models installed'}
-            </p>
+            <Cloud className="w-10 h-10 text-muted-foreground/30" />
+            <p className="text-sm text-muted-foreground">No models returned</p>
             <p className="text-xs text-muted-foreground/60">
-              {provider === 'ollama'
-                ? <>Run <code className="text-accent">ollama pull llama3</code> to download a model.</>
-                : 'Ensure GITHUB_TOKEN is set with Models access.'
-              }
+              {activeProviderInfo?.token_env
+                ? `Ensure ${activeProviderInfo.token_env} is set with the right access.`
+                : 'Check the provider configuration.'}
             </p>
           </div>
         )}
@@ -479,10 +460,7 @@ export function ModelsPanel() {
       {/* Footer */}
       <div className="px-4 py-2 border-t border-border/50 bg-card/20 shrink-0">
         <p className="text-[10px] text-muted-foreground/50 text-center">
-          {provider === 'github'
-            ? 'GitHub Models · cloud inference · no local GPU needed'
-            : 'Ollama · local inference · your hardware, your data'
-          }
+          {activeProviderInfo?.name ?? provider} · cloud inference · no local GPU needed
         </p>
       </div>
     </div>

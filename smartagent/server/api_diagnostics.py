@@ -173,8 +173,6 @@ async def _check_llm_provider() -> dict[str, Any]:
         settings      = get_llm_settings()
         model         = settings.get("model", "unknown")
 
-        ollama_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-
         if provider_name == "github":
             token = os.environ.get("GITHUB_TOKEN", "")
             if not token:
@@ -244,16 +242,9 @@ async def _check_llm_provider() -> dict[str, Any]:
             }
 
         else:
-            # Ollama
-            import urllib.request, urllib.error
-            try:
-                req = urllib.request.Request(f"{ollama_url}/api/tags")
-                with urllib.request.urlopen(req, timeout=3) as resp:
-                    resp.read()
-                ms = round((time.monotonic() - t0) * 1000)
-                return {"status": "ok", "message": f"Ollama reachable ({ms}ms)", "provider": "ollama", "model": model}
-            except Exception as exc:
-                return {"status": "error", "message": f"Ollama unreachable: {exc}", "provider": "ollama"}
+            # Unreachable in practice — get_active_provider() only ever
+            # returns nvidia/github/openai/anthropic.
+            return {"status": "error", "message": f"Unknown provider {provider_name!r}", "provider": provider_name}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 
@@ -263,7 +254,6 @@ async def _check_embeddings() -> dict[str, Any]:
     try:
         from smartagent.llm.factory import get_active_provider
         provider_name = get_active_provider()
-        ollama_url    = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
         if provider_name == "github":
             token = os.environ.get("GITHUB_TOKEN", "")
@@ -306,23 +296,9 @@ async def _check_embeddings() -> dict[str, Any]:
             return {"status": "ok", "message": f"OpenAI fallback embeddings OK — dim={len(vec)} ({ms}ms)"}
 
         else:
-            # Ollama
-            import urllib.request, json as _json
-            model   = os.environ.get("OLLAMA_DEFAULT_MODEL", "llama3.1:8b")
-            payload = _json.dumps({"model": model, "input": "hello"}).encode()
-            req     = urllib.request.Request(
-                f"{ollama_url}/api/embed",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = _json.loads(resp.read())
-                ms  = round((time.monotonic() - t0) * 1000)
-                vec = (data.get("embeddings") or [[]])[0]
-                return {"status": "ok", "message": f"Ollama embeddings OK — dim={len(vec)} ({ms}ms)"}
-            except Exception as exc:
-                return {"status": "warn", "message": f"Ollama embeddings: {exc}"}
+            # Unreachable in practice — get_active_provider() only ever
+            # returns nvidia/github/openai/anthropic.
+            return {"status": "error", "message": f"Unknown provider {provider_name!r}"}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 

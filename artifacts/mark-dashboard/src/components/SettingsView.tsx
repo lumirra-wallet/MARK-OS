@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { markApi, type LlmSettings } from '@/lib/markApi';
 import { useMarkStore } from '@/store/markStore';
 import {
-  Loader2, CheckCircle2, XCircle, Cloud, Server, Sliders,
+  Loader2, CheckCircle2, XCircle, Cloud, Sliders,
   Zap, Activity, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -239,7 +239,7 @@ export function SettingsView() {
         {/* ── LLM Provider ────────────────────────────────────────────────────── */}
         <Section
           title="AI Provider"
-          description="Choose between GitHub Models (cloud) and Ollama (local). The selected provider is used for all chat, agents, and planning."
+          description="Choose which cloud provider MARK uses for all chat, agents, and planning."
         >
           {llmLoading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
@@ -250,7 +250,15 @@ export function SettingsView() {
           ) : llmSettings ? (
             <div className="space-y-5">
               {/* Provider selector */}
-              <div className="flex gap-3">
+              <div className="flex gap-3 flex-wrap">
+                <ProviderButton
+                  id="nvidia"
+                  label="NVIDIA"
+                  icon={Cloud}
+                  active={llmSettings.provider === 'nvidia'}
+                  available={llmSettings.nvidia_available}
+                  onClick={() => switchProvider('nvidia')}
+                />
                 <ProviderButton
                   id="github"
                   label="GitHub Models"
@@ -260,19 +268,28 @@ export function SettingsView() {
                   onClick={() => switchProvider('github')}
                 />
                 <ProviderButton
-                  id="ollama"
-                  label="Ollama"
-                  icon={Server}
-                  active={llmSettings.provider === 'ollama'}
-                  available={true}
-                  onClick={() => switchProvider('ollama')}
+                  id="openai"
+                  label="OpenAI"
+                  icon={Cloud}
+                  active={llmSettings.provider === 'openai'}
+                  available={llmSettings.openai_available}
+                  onClick={() => switchProvider('openai')}
+                />
+                <ProviderButton
+                  id="anthropic"
+                  label="Anthropic"
+                  icon={Cloud}
+                  active={llmSettings.provider === 'anthropic'}
+                  available={llmSettings.anthropic_available}
+                  onClick={() => switchProvider('anthropic')}
                 />
               </div>
 
-              {!llmSettings.github_available && (
+              {!llmSettings.nvidia_available && !llmSettings.github_available
+                && !llmSettings.openai_available && !llmSettings.anthropic_available && (
                 <p className="text-xs text-amber-500/80 flex items-center gap-1.5">
                   <Zap className="w-3.5 h-3.5" />
-                  GitHub Models requires a GITHUB_TOKEN env var with Models access.
+                  No provider key is set — add NVIDIA_API_KEY, GITHUB_TOKEN, OPENAI_API_KEY, or ANTHROPIC_API_KEY.
                 </p>
               )}
 

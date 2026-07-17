@@ -32,7 +32,7 @@ router = APIRouter()
 
 
 class SwitchProviderRequest(PydanticModel):
-    provider: str           # "nvidia" | "github" | "ollama"
+    provider: str           # "nvidia" | "github" | "openai" | "anthropic"
     model: str | None = None
 
 
@@ -47,8 +47,6 @@ class LlmSettingsUpdate(PydanticModel):
     github_model: str | None = None
     github_coding_model: str | None = None
     nvidia_model: str | None = None
-    ollama_model: str | None = None
-    ollama_coding_model: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -75,16 +73,6 @@ _PROVIDER_CATALOGUE = [
         "token_env":   "GITHUB_TOKEN",
         "capabilities": ["chat", "streaming", "embeddings", "tool_calling"],
         "default_model": "gpt-4.1",
-    },
-    {
-        "id":          "ollama",
-        "name":        "Ollama",
-        "description": "Locally-running open-source models via Ollama",
-        "base_url":    os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
-        "requires_token": False,
-        "token_env":   None,
-        "capabilities": ["chat", "streaming"],
-        "default_model": "llama3.1:8b",
     },
     {
         "id":          "openai",
@@ -137,21 +125,10 @@ async def list_providers() -> dict:
     result = []
     for p in _PROVIDER_CATALOGUE:
         entry = dict(p)
-        token_env = p.get("token_env")
-        if token_env:
-            # github / nvidia / openai / anthropic — availability is just
-            # "is the token/key present", same check `_auto_default_provider()` uses.
-            entry["token_present"] = bool(os.environ.get(token_env))
-            entry["available"] = entry["token_present"]
-        else:  # ollama
-            # Quick Ollama health check
-            try:
-                import httpx
-                async with httpx.AsyncClient(timeout=2) as client:
-                    resp = await client.get(f"{p['base_url']}/api/tags")
-                    entry["available"] = resp.status_code == 200
-            except Exception:
-                entry["available"] = False
+        # nvidia / github / openai / anthropic — availability is just
+        # "is the token/key present", same check `_auto_default_provider()` uses.
+        entry["token_present"] = bool(os.environ.get(p["token_env"]))
+        entry["available"] = entry["token_present"]
         entry["active"] = (p["id"] == current)
         result.append(entry)
     return {"providers": result}
@@ -267,15 +244,14 @@ async def llm_health() -> dict:
         except Exception as exc:
             result["error"] = str(exc)
     else:
-        ollama_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=5) as client:
-                resp = await client.get(f"{ollama_url}/api/tags")
-                result["available"] = resp.status_code == 200
-                result["token_valid"] = True  # no token needed
-        except Exception as exc:
-            result["error"] = str(exc)
+        # openai / anthropic don't have a dedicated health() probe wired up
+        # yet — report availability from key presence only, same signal
+        # `_auto_default_provider()` uses, rather than guessing.
+        token_env = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}.get(provider)
+        result["token_valid"] = bool(token_env and os.environ.get(token_env))
+        result["available"]   = result["token_valid"]
+        if not result["token_valid"]:
+            result["error"] = f"{token_env} not set" if token_env else f"Unknown provider {provider!r}"
         result["latency_ms"] = round((time.monotonic() - t0) * 1000)
 
     return result

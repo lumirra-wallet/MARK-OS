@@ -341,39 +341,11 @@ async def list_models() -> dict:
         except Exception as exc:
             return {"models": [], "active": active, "provider": "anthropic", "error": str(exc)}
 
-    # Ollama (default)
-    ollama_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-    active = _active_model
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(f"{ollama_url}/api/tags")
-            resp.raise_for_status()
-            data = resp.json()
-            models = [
-                {
-                    "name":     m.get("name", ""),
-                    "id":       m.get("name", ""),
-                    "size_gb":  round(m.get("size", 0) / 1e9, 1),
-                    "modified": m.get("modified_at", ""),
-                    "family":   m.get("details", {}).get("family", ""),
-                    "params":   m.get("details", {}).get("parameter_size", ""),
-                    "provider": "ollama",
-                }
-                for m in data.get("models", [])
-            ]
-    except Exception as exc:
-        return {"models": [], "active": active, "provider": "ollama",
-                "ollama_url": ollama_url, "error": str(exc)}
-
-    if not active:
-        try:
-            from smartagent.config.settings import Settings  # type: ignore
-            s = Settings()
-            active = getattr(s, "ollama_default_model", "") or ""
-        except Exception:
-            pass
-
-    return {"models": models, "active": active, "provider": "ollama", "ollama_url": ollama_url}
+    # Unreachable in practice — get_active_provider() only ever returns
+    # nvidia/github/openai/anthropic — but kept as a defensive default
+    # instead of letting an unexpected provider value 500.
+    return {"models": [], "active": settings.get("model", ""), "provider": provider,
+            "error": f"Unknown provider {provider!r}"}
 
 
 @router.post("/models/switch")

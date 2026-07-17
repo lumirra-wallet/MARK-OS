@@ -131,21 +131,10 @@ class SmartAgent:
         self.model_manager = ModelManager(
             settings=ModelSettings(
                 default_model_id=settings.default_model_id,
-                ollama_base_url=getattr(settings, "ollama_base_url", "") or __import__("os").environ.get("OLLAMA_HOST", "http://localhost:11434"),
-                ollama_default_model=getattr(settings, "ollama_default_model", "llama3.1:8b"),
-                ollama_coding_model=getattr(settings, "ollama_coding_model", "qwen2.5-coder:7b"),
             ),
             event_bus=self.events,
         )
         self.model_manager.discover_providers()
-        # Milestone 9: register Ollama model providers so console commands
-        # like ``model use llama3.1:8b`` work even if Ollama is offline.
-        # Discovery runs quickly (3 s timeout) and never blocks startup.
-        self.model_manager.load_ollama_models(
-            base_url=getattr(settings, "ollama_base_url", "") or __import__("os").environ.get("OLLAMA_HOST", "http://localhost:11434"),
-            default_model=getattr(settings, "ollama_default_model", "llama3.1:8b"),
-            coding_model=getattr(settings, "ollama_coding_model", "qwen2.5-coder:7b"),
-        )
         # LLM Provider wiring — activated by ACTIVE_PROVIDER=nvidia/github.
         # The factory's _auto_default_provider() auto-detects from
         # NVIDIA_API_KEY/GITHUB_TOKEN for the REST API layer; here we require
