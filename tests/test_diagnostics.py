@@ -831,37 +831,6 @@ class TestWorkspaceEndpoints:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestModelsEndpoints:
-    def _ollama_tags_response(self, models=None):
-        if models is None:
-            models = [
-                {"name": "llama3.1:8b", "size": 4_700_000_000,
-                 "modified_at": "2024-01-01", "details": {"family": "llama", "parameter_size": "8B"}},
-                {"name": "codellama:7b", "size": 3_800_000_000,
-                 "modified_at": "2024-01-02", "details": {"family": "codellama", "parameter_size": "7B"}},
-            ]
-        # AsyncMock attributes are awaitable by default; json() is sync here
-        resp = MagicMock()
-        resp.json.return_value = {"models": models}
-        resp.raise_for_status  = MagicMock()
-        return resp
-
-    def _httpx_client(self, get_return=None, get_side_effect=None):
-        """
-        Build an async context-manager mock for httpx.AsyncClient.
-
-        Pitfall: AsyncMock().__aenter__ returns a NEW AsyncMock by default,
-        NOT the instance.  That means `async with instance as client:` gives
-        a fresh `client` that has none of the attributes we configured on
-        `instance`.  We must explicitly pin __aenter__.return_value = instance.
-        """
-        instance = AsyncMock()
-        instance.__aenter__.return_value = instance   # client IS instance
-        if get_side_effect:
-            instance.get = AsyncMock(side_effect=get_side_effect)
-        else:
-            instance.get = AsyncMock(return_value=get_return)
-        return instance
-
     # ── nvidia path ───────────────────────────────────────────────────────────
 
     def test_models_nvidia_returns_list(self, client):
