@@ -51,21 +51,14 @@ from smartagent.server.models import (
     DenyRequest,
     ExecuteRequest,
     HealthResponse,
-    OpenAITTSRequest,
     PendingPermissionInfo,
     PermissionsResponse,
     ProjectFile,
     ProjectResponse,
     StatusResponse,
-    VoiceSettingsUpdateRequest,
-    VoiceSpeakRequest,
-    VoiceStartRequest,
-    VoiceStatusResponse,
-    VoiceTranscribeResponse,
     WorkerInfo,
 )
 from smartagent.server.permissions import permission_gate
-from smartagent.server.voice_manager import voice_manager
 from smartagent.server.websocket import connection_manager
 
 logger = logging.getLogger(__name__)
@@ -795,139 +788,6 @@ async def list_permissions() -> PermissionsResponse:
             for p in permission_gate.list_pending()
         ]
     )
-
-
-# ---------------------------------------------------------------------------
-# Voice
-# ---------------------------------------------------------------------------
-
-@router.get("/voice/status", response_model=VoiceStatusResponse)
-async def voice_status() -> VoiceStatusResponse:
-    """Return current voice pipeline state and settings."""
-    d = voice_manager.status_dict()
-    return VoiceStatusResponse(
-        state=d["state"],
-        running=d["running"],
-        settings=d["settings"],
-    )
-
-
-@router.post("/voice/start")
-async def voice_start(req: VoiceStartRequest) -> dict:
-    """Start the voice pipeline."""
-    loop = asyncio.get_running_loop()
-    voice_manager.settings.mode = req.mode
-    voice_manager.install(None, connection_manager, loop)  # re-wire to live connection_manager
-    success, err = voice_manager.start()
-    if not success:
-        raise HTTPException(status_code=500, detail=err)
-    return {"success": True, "state": voice_manager.state}
-
-
-@router.post("/voice/stop")
-async def voice_stop() -> dict:
-    """Stop the voice pipeline."""
-    voice_manager.stop()
-    return {"success": True, "state": voice_manager.state}
-
-
-@router.post("/voice/speak")
-async def voice_speak(req: VoiceSpeakRequest) -> dict:
-    """Synthesise text via Piper TTS (non-blocking)."""
-    voice_manager.speak(req.text)
-    return {"success": True}
-
-
-@router.post("/voice/speak-openai")
-async def voice_speak_openai(req: OpenAITTSRequest) -> Any:
-    """
-    Stream TTS audio synthesised by OpenAI tts-1-hd.
-
-    Returns raw MP3 bytes (audio/mpeg).  Falls back with HTTP 503 when
-    OPENAI_API_KEY is not set — the frontend silently uses browser TTS.
-    """
-    import os
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise HTTPException(status_code=503, detail="OPENAI_API_KEY not configured")
-
-    valid_voices = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
-    voice = req.voice if req.voice in valid_voices else "nova"
-
-    try:
-        from openai import OpenAI as _OpenAI
-        from fastapi.responses import Response as _Response
-        client = _OpenAI(api_key=api_key)
-        tts_response = await asyncio.to_thread(
-            lambda: client.audio.speech.create(
-                model="tts-1-hd",
-                voice=voice,   # type: ignore[arg-type]
-                input=req.text,
-                response_format="mp3",
-            )
-        )
-        audio_bytes = tts_response.content
-        return _Response(
-            content=audio_bytes,
-            media_type="audio/mpeg",
-            headers={"Cache-Control": "no-cache"},
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.warning("OpenAI TTS error: %s", exc)
-        raise HTTPException(status_code=503, detail=f"TTS unavailable: {exc}")
-
-
-@router.post("/voice/transcribe", response_model=VoiceTranscribeResponse)
-async def voice_transcribe_endpoint(request: Any) -> VoiceTranscribeResponse:
-    """
-    Transcribe raw audio uploaded by the browser (push-to-talk).
-
-    Accepts ``multipart/form-data`` with a single ``audio`` file field.
-    The file may be:
-    - Raw 16-bit PCM (16 kHz mono) — Content-Type: application/octet-stream
-    - WAV — Content-Type: audio/wav  (browser MediaRecorder default on most platforms)
-    - WebM / OGG — faster-whisper handles these via ffmpeg if available
-
-    Returns JSON ``{ text, duration_ms }``.
-    """
-    from fastapi import UploadFile, Form
-    # Read the raw body
-    body = await request.body()
-    content_type = request.headers.get("content-type", "")
-
-    t0 = time.monotonic()
-    try:
-        if "wav" in content_type or body[:4] == b"RIFF":
-            text = await asyncio.to_thread(voice_manager.transcribe_wav_bytes, body)
-        else:
-            # Treat as raw PCM 16-bit 16 kHz mono
-            text = await asyncio.to_thread(voice_manager.transcribe_bytes, body)
-        duration_ms = (time.monotonic() - t0) * 1000
-        if text:
-            voice_manager._voice_event("VoiceTranscribed", text=text, source="push_to_talk")
-        return VoiceTranscribeResponse(text=text, duration_ms=duration_ms)
-    except Exception as exc:
-        logger.error("voice_transcribe_endpoint: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@router.post("/voice/settings")
-async def voice_settings_update(req: VoiceSettingsUpdateRequest) -> dict:
-    """Partially update voice settings."""
-    s = voice_manager.settings
-    if req.mode           is not None: s.mode           = req.mode
-    if req.wake_phrase    is not None: s.wake_phrase     = req.wake_phrase
-    if req.whisper_model  is not None: s.whisper_model   = req.whisper_model
-    if req.language       is not None: s.language        = req.language
-    if req.tts_voice      is not None: s.tts_voice       = req.tts_voice
-    if req.tts_speed      is not None: s.tts_speed       = req.tts_speed
-    if req.muted          is not None: s.muted           = req.muted
-    if req.auto_submit    is not None: s.auto_submit      = req.auto_submit
-    if req.vad_threshold  is not None: s.vad_threshold   = req.vad_threshold
-    if req.silence_frames is not None: s.silence_frames  = req.silence_frames
-    return {"success": True, "settings": voice_manager.status_dict()["settings"]}
 
 
 # ---------------------------------------------------------------------------

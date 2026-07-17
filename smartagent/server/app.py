@@ -47,7 +47,6 @@ from smartagent.server.api_git_enhanced import router as git_enhanced_router
 from smartagent.server.api_providers    import router as providers_router
 from smartagent.server.api_diagnostics  import router as diagnostics_router
 from smartagent.server.api_previews     import router as previews_router, preview_manager
-from smartagent.server.voice_manager    import voice_manager
 from smartagent.server.websocket        import connection_manager
 
 logger = logging.getLogger(__name__)
@@ -80,10 +79,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         pass  # workspace detection is best-effort
 
-    # Wire the VoiceManager to the live connection_manager so voice events
-    # can broadcast over WebSocket even between build runs.
     loop = asyncio.get_running_loop()
-    voice_manager.install(None, connection_manager, loop)
 
     # Start the preview auto-detection loop
     import os as _os
@@ -93,8 +89,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
     logger.info("MARK server shutting down")
     preview_manager.stop_detection()
-    if voice_manager.running:
-        voice_manager.stop()
 
 
 app = FastAPI(
@@ -162,6 +156,14 @@ _DASHBOARD_DIST = Path(__file__).resolve().parents[2] / "artifacts" / "mark-dash
 if _DASHBOARD_DIST.is_dir():
     app.mount("/assets", StaticFiles(directory=_DASHBOARD_DIST / "assets"), name="dashboard-assets")
 
+    # index.html references the content-hashed JS/CSS filenames from the most
+    # recent build (e.g. index-CzsACkB-.js). If a browser caches index.html
+    # itself, it keeps requesting an old build's hashes forever and never
+    # learns a new one shipped — exactly the "still shows the old UI" symptom.
+    # The hashed /assets/* files are safe to cache indefinitely (a new build
+    # always gets a new filename); index.html must never be cached.
+    _NO_CACHE_HEADERS = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def _serve_dashboard(full_path: str) -> FileResponse:
         """Serve the built dashboard SPA; unmatched client-side routes fall back to index.html.
@@ -176,7 +178,7 @@ if _DASHBOARD_DIST.is_dir():
             and candidate.is_relative_to(_DASHBOARD_DIST)
         ):
             return FileResponse(candidate)
-        return FileResponse(_DASHBOARD_DIST / "index.html")
+        return FileResponse(_DASHBOARD_DIST / "index.html", headers=_NO_CACHE_HEADERS)
 
     logger.info("Serving built dashboard from %s (combined-server mode)", _DASHBOARD_DIST)
 else:

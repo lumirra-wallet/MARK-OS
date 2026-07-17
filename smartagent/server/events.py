@@ -138,23 +138,11 @@ class ServerEvents:
     ACTIVITY_FEED_ENTRY = "ActivityFeedEntry"   # one action in the live feed
     IDLE_SUGGESTION     = "IdleSuggestion"      # proactive improvement hint
     MEMORY_UPDATED      = "MemoryUpdated"       # engineering session memory
-    NARRATION           = "Narration"           # explicit TTS narration text
 
     # Previews (Task 19)
     PREVIEW_REGISTERED     = "PreviewRegistered"
     PREVIEW_UPDATED        = "PreviewUpdated"
     PREVIEW_CLOSED         = "PreviewClosed"
-
-    # Voice pipeline
-    VOICE_STARTED          = "VoiceStarted"
-    VOICE_STOPPED          = "VoiceStopped"
-    VOICE_STATE_CHANGED    = "VoiceStateChanged"
-    VOICE_WAKE_WORD        = "VoiceWakeWordDetected"
-    VOICE_TRANSCRIBED      = "VoiceTranscribed"
-    VOICE_SPEAKING_STARTED = "VoiceSpeakingStarted"
-    VOICE_SPEAKING_DONE    = "VoiceSpeakingDone"
-    VOICE_TTS_FALLBACK     = "VoiceTTSFallback"
-    VOICE_ERROR            = "VoiceError"
 
 
 # ---------------------------------------------------------------------------

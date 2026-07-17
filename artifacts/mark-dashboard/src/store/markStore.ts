@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { markApi, PermissionInfo, VoiceMode, VoiceSettings, VoiceStateValue } from '@/lib/markApi';
+import { markApi, PermissionInfo } from '@/lib/markApi';
 
 // ── Chat message model ────────────────────────────────────────────────────────
 
@@ -57,18 +57,6 @@ export interface OpenFile {
   content: string;
   isDiff: boolean;
   originalContent?: string;
-}
-
-export interface VoiceState {
-  state: VoiceStateValue;
-  running: boolean;
-  mode: VoiceMode;
-  muted: boolean;
-  autoSubmit: boolean;
-  whisperModel: string;
-  ttsSpeed: number;
-  wakePhraseEnabled: boolean;
-  transcript: string;
 }
 
 // ── Preview types ─────────────────────────────────────────────────────────────
@@ -173,9 +161,6 @@ interface MarkState {
   // Feature 13 — Token Budget
   tokenBudget: { used: number; window: number };
 
-  // Voice
-  voice: VoiceState;
-
   // Live Engineer panel
   activityFeed:        ActivityEntry[];
   reasoningStage:      ReasoningStage;
@@ -213,13 +198,6 @@ interface MarkState {
   createBranch:  (name: string) => void;
   switchBranch:  (name: string) => void;
   deleteBranch:  (name: string) => void;
-
-  // Voice
-  startVoice:           (mode: VoiceMode) => Promise<void>;
-  stopVoice:            () => Promise<void>;
-  toggleMute:           () => Promise<void>;
-  updateVoiceSettings:  (s: Partial<VoiceSettings>) => Promise<void>;
-  transcribeAudio:      (blob: Blob) => Promise<string>;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -235,12 +213,6 @@ const DEFAULT_WORKERS: WorkerState[] = [
   { name: 'Docs',      status: 'idle' },
   { name: 'Preview',   status: 'idle' },
 ];
-
-const DEFAULT_VOICE: VoiceState = {
-  state: 'idle', running: false, mode: 'push_to_talk',
-  muted: false, autoSubmit: true, whisperModel: 'base',
-  ttsSpeed: 1.0, wakePhraseEnabled: false, transcript: '',
-};
 
 // ── WebSocket singleton ───────────────────────────────────────────────────────
 
@@ -380,12 +352,10 @@ export const useMarkStore = create<MarkState>((set, get) => {
     branches:         { main: [] },
     activeBranch:     'main',
     tokenBudget:      { used: 0, window: 8192 },
-    voice:            { ...DEFAULT_VOICE },
 
     // Live Engineer panel defaults
     activityFeed:        [],
     reasoningStage:      'idle' as ReasoningStage,
-    narrationTranscript: [],
     workspaceContext:    null,
     idleSuggestions:     [],
     engineeringMemory: {
@@ -726,35 +696,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                 break;
               }
 
-              // ── Voice events ───────────────────────────────────────────────
-              case 'VoiceStateChanged':
-                set(state => ({ voice: { ...state.voice, state: payload.state as VoiceStateValue } }));
-                break;
-              case 'VoiceStarted':
-                set(state => ({ voice: { ...state.voice, running: true, mode: payload.mode as VoiceMode } }));
-                break;
-              case 'VoiceStopped':
-                set(state => ({ voice: { ...state.voice, running: false, state: 'idle' } }));
-                break;
-              case 'VoiceWakeWordDetected':
-                addTimeline('Wake word detected');
-                break;
-              case 'VoiceTranscribed':
-                set(state => ({ voice: { ...state.voice, transcript: payload.text } }));
-                break;
-              case 'VoiceSpeakingStarted':
-                set(state => ({ voice: { ...state.voice, state: 'speaking' } }));
-                break;
-              case 'VoiceSpeakingDone':
-                set(state => ({ voice: { ...state.voice, state: state.voice.running ? 'listening' : 'idle' } }));
-                break;
-              case 'VoiceTTSFallback':
-                break;
-              case 'VoiceError':
-                set(state => ({ voice: { ...state.voice, state: 'error' } }));
-                addTimeline(`Voice error: ${payload.error}`);
-                break;
-
               // ── Feature 13: Token Budget ───────────────────────────────────
               case 'TokenBudgetUpdate':
                 set({ tokenBudget: { used: payload.used ?? 0, window: payload.window ?? 8192 } });
@@ -1020,57 +961,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
     },
 
     setActiveFileTab: (path) => set({ activeFileTab: path }),
-
-    // ── Voice actions ────────────────────────────────────────────────────────
-
-    startVoice: async (mode) => {
-      try {
-        await markApi.startVoice(get().serverUrl, mode);
-        set(state => ({ voice: { ...state.voice, running: true, mode } }));
-      } catch (err) { console.error('startVoice', err); }
-    },
-
-    stopVoice: async () => {
-      try {
-        await markApi.stopVoice(get().serverUrl);
-        set(state => ({ voice: { ...state.voice, running: false, state: 'idle' } }));
-      } catch (err) { console.error('stopVoice', err); }
-    },
-
-    toggleMute: async () => {
-      const muted = !get().voice.muted;
-      try {
-        await markApi.updateVoiceSettings(get().serverUrl, { muted });
-        set(state => ({ voice: { ...state.voice, muted } }));
-      } catch (err) { console.error('toggleMute', err); }
-    },
-
-    updateVoiceSettings: async (settings) => {
-      try {
-        const res = await markApi.updateVoiceSettings(get().serverUrl, settings);
-        set(state => ({
-          voice: {
-            ...state.voice,
-            mode:         (res.settings.mode          as VoiceMode) ?? state.voice.mode,
-            muted:        res.settings.muted           ?? state.voice.muted,
-            autoSubmit:   res.settings.auto_submit     ?? state.voice.autoSubmit,
-            whisperModel: res.settings.whisper_model   ?? state.voice.whisperModel,
-            ttsSpeed:     res.settings.tts_speed       ?? state.voice.ttsSpeed,
-          },
-        }));
-      } catch (err) { console.error('updateVoiceSettings', err); }
-    },
-
-    transcribeAudio: async (blob) => {
-      try {
-        const text = await markApi.transcribeAudio(get().serverUrl, blob);
-        if (text) set(state => ({ voice: { ...state.voice, transcript: text } }));
-        return text;
-      } catch (err) {
-        console.error('transcribeAudio', err);
-        return '';
-      }
-    },
 
   };
 });
