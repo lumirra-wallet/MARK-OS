@@ -79,6 +79,11 @@ class ServerEvents:
     # MARK speaking outside of a run (e.g. the proactive opening message)
     MARK_OPENING = "MarkOpening"
 
+    # MARK speaking up mid-session, unprompted (e.g. idle-repo findings) —
+    # same "MARK opens a new chat message" contract as MARK_OPENING, just
+    # triggered later than connect time.
+    MARK_PROACTIVE = "MarkProactive"
+
     # System
     ERROR          = "Error"
     STATUS_CHANGED = "StatusChanged"

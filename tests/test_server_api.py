@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -422,6 +422,70 @@ class TestWebSocketOpeningMessage:
                 opening = ws.receive_json()
                 assert opening["name"] == ServerEvents.MARK_OPENING
                 assert opening["payload"]["text"]
+
+
+class TestIdleProactiveMessage:
+    """
+    MARK must actually speak up when it notices something while idle — not
+    just quietly populate the Idle Suggestions sidebar list. Same
+    "one LLM call, deterministic fallback on failure" contract as the
+    opening message.
+    """
+
+    def _run(self, coro):
+        import asyncio
+        return asyncio.run(coro)
+
+    _SUGGESTIONS = [
+        {"category": "security", "priority": "high", "title": "Possible hardcoded credential in auth.py",
+         "description": "Move secrets to environment variables.", "file": "auth.py"},
+    ]
+
+    def test_broadcasts_llm_composed_message(self):
+        from smartagent.server.api import _broadcast_idle_chat_message
+        broadcast = AsyncMock()
+        with patch("smartagent.server.api.connection_manager") as mock_cm, \
+             patch("smartagent.server.api._build_model_manager") as mock_build_mm:
+            mock_cm.broadcast = broadcast
+            mock_build_mm.return_value.chat_stream.return_value = iter(
+                ["While you were away, I found a hardcoded credential in auth.py."]
+            )
+            self._run(_broadcast_idle_chat_message(".", self._SUGGESTIONS))
+        sent = broadcast.call_args.args[0]
+        assert sent["name"] == ServerEvents.MARK_PROACTIVE
+        assert "hardcoded credential" in sent["payload"]["text"]
+
+    def test_falls_back_on_llm_error(self):
+        """A failed LLM call must still produce a deterministic message
+        built directly from the top finding — MARK never goes silent."""
+        from smartagent.server.api import _broadcast_idle_chat_message
+        broadcast = AsyncMock()
+        with patch("smartagent.server.api.connection_manager") as mock_cm, \
+             patch("smartagent.server.api._build_model_manager") as mock_build_mm:
+            mock_cm.broadcast = broadcast
+            mock_build_mm.return_value.chat_stream.side_effect = RuntimeError("rate limited")
+            self._run(_broadcast_idle_chat_message(".", self._SUGGESTIONS))
+        sent = broadcast.call_args.args[0]
+        assert sent["name"] == ServerEvents.MARK_PROACTIVE
+        assert "auth.py" in sent["payload"]["text"]
+
+    def test_falls_back_on_swallowed_provider_error(self):
+        """A provider that swallows its error (GitHub Models/NVIDIA style)
+        instead of raising must also trigger the fallback, not stream the
+        raw error text as if MARK had said it."""
+        from smartagent.server.api import _broadcast_idle_chat_message
+        broadcast = AsyncMock()
+        with patch("smartagent.server.api.connection_manager") as mock_cm, \
+             patch("smartagent.server.api._build_model_manager") as mock_build_mm:
+            mock_cm.broadcast = broadcast
+            mock_build_mm.return_value.chat_stream.return_value = iter(
+                ["GitHub Models error: Too many requests."]
+            )
+            self._run(_broadcast_idle_chat_message(".", self._SUGGESTIONS))
+        sent = broadcast.call_args.args[0]
+        assert sent["name"] == ServerEvents.MARK_PROACTIVE
+        assert "GitHub Models error" not in sent["payload"]["text"]
+        assert "auth.py" in sent["payload"]["text"]
 
 
 # ---------------------------------------------------------------------------

@@ -770,11 +770,15 @@ export const useMarkStore = create<MarkState>((set, get) => {
                 addTimeline(`Evaluation complete · run ${payload.run_id}`);
                 break;
 
-              // MARK speaking outside of a run — e.g. the proactive opening
-              // message composed from the workspace analysis on connect.
-              // Pushed as a whole, already-finished message (no streaming
-              // block, no currentMarkMsgId involvement — this isn't a run).
-              case 'MarkOpening': {
+              // MARK speaking outside of a run — the proactive opening
+              // message composed from the workspace analysis on connect
+              // (MarkOpening), or MARK speaking up unprompted mid-session
+              // after noticing something while idle (MarkProactive). Both
+              // are pushed as a whole, already-finished message (no
+              // streaming block, no currentMarkMsgId involvement — neither
+              // is a run).
+              case 'MarkOpening':
+              case 'MarkProactive': {
                 if (payload.text) {
                   set(state => ({
                     messages: [...state.messages, {

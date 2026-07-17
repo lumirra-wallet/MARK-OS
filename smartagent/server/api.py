@@ -220,6 +220,21 @@ branch, open TODOs, or test setup). End by inviting the user to tell you
 what to build or fix next. No markdown, no bullet points, no code fences.
 """
 
+_MARK_IDLE_SYSTEM = """\
+You are MARK — an autonomous AI software engineer built into this developer
+dashboard (same identity rules as always: you are MARK, never name another
+AI product or provider).
+
+You've been idle and just reviewed the repository on your own initiative —
+the user hasn't asked you anything. You were handed a short list of findings
+from that review. Speak up first, unprompted: open with something like
+"While you were away, I..." or "I've been looking over the repository and
+noticed...", then name the single most important finding specifically (by
+file or category — don't list all of them). End by asking whether the user
+wants you to act on it. 2-3 sentences, no markdown, no bullet points, no
+code fences.
+"""
+
 
 def _build_model_manager(workspace: str | None) -> Any:
     """
@@ -1057,9 +1072,60 @@ async def _idle_inspector_loop() -> None:
                             "payload":   sug,
                             "timestamp": _now_iso(),
                         })
+                    await _broadcast_idle_chat_message(ws_path, suggestions)
                     _last_notified = _t.time()
         except Exception as exc:
             logger.debug("idle inspector error: %s", exc)
+
+
+async def _broadcast_idle_chat_message(workspace: str, suggestions: list[dict[str, str]]) -> None:
+    """
+    Turn idle_suggestions() findings into a real, unprompted MARK chat
+    message — this is what makes MARK actually speak up on its own instead
+    of only populating the passive Idle Suggestions list. Same
+    "one LLM call, deterministic fallback on failure" shape as the opening
+    message, so a run never goes silent even if the LLM call fails.
+    """
+    top = suggestions[0]
+    fallback = (
+        f"While you were away, I noticed something: {top['title']}. "
+        f"{top['description']} Want me to take care of it?"
+    )
+
+    def _compose() -> str:
+        mm = _build_model_manager(workspace)
+        facts = "\n".join(
+            f"- [{s.get('priority', 'low')}] {s['title']}: {s['description']}"
+            + (f" ({s['file']})" if s.get("file") else "")
+            for s in suggestions[:3]
+        )
+        messages = [
+            {"role": "system", "content": _MARK_IDLE_SYSTEM},
+            {"role": "user",   "content": f"Findings from reviewing the repository while idle:\n{facts}"},
+        ]
+        chunks: list[str] = []
+        for chunk in mm.chat_stream(messages, max_tokens=200):
+            if chunk and is_llm_error_text(chunk):
+                raise RuntimeError(chunk)
+            if chunk:
+                chunks.append(chunk)
+        return "".join(chunks).strip()
+
+    try:
+        text = await asyncio.to_thread(_compose)
+    except Exception as exc:
+        logger.debug("idle chat message LLM call failed, using fallback: %s", exc)
+        text = ""
+
+    try:
+        await connection_manager.broadcast({
+            "type":      "event",
+            "name":      ServerEvents.MARK_PROACTIVE,
+            "payload":   {"text": text or fallback},
+            "timestamp": _now_iso(),
+        })
+    except Exception as exc:
+        logger.debug("idle chat message broadcast failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
