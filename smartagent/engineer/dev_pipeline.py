@@ -46,6 +46,29 @@ logger = get_logger(__name__)
 MAX_FIX_ATTEMPTS = 3
 MAX_MILESTONE_TURNS = 15
 
+# Filename-looking tokens in a milestone description, e.g. "app.py", "test_x.py".
+_FILE_TARGET_RE = re.compile(r'\b[\w][\w\-/]*\.[A-Za-z0-9]{1,10}\b')
+
+
+def extract_file_targets(text: str) -> list[str]:
+    """
+    Best-effort extraction of filenames a milestone description names.
+
+    Used to scope that milestone's write access to only the files it
+    declares — least privilege by declared intent, not a security boundary
+    (a determined worker could still request an unnamed path; this shapes
+    normal behaviour, it doesn't replace the real workspace sandbox in
+    ``agent_tools._safe_path``). Returns ``[]`` when the milestone reads as
+    abstract (e.g. "Refactor the auth module") — callers treat an empty list
+    as unrestricted rather than guessing and blocking legitimate work.
+    """
+    seen: list[str] = []
+    for m in _FILE_TARGET_RE.finditer(text):
+        token = m.group(0)
+        if token not in seen:
+            seen.append(token)
+    return seen
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # Result types
