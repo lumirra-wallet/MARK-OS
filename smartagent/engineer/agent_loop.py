@@ -37,7 +37,7 @@ from smartagent.engineer.agent_tools import (
     requires_approval,
 )
 from smartagent.logs.logger import get_logger
-from smartagent.server.server_events import ServerEvents
+from smartagent.server.events import ServerEvents
 
 logger = get_logger(__name__)
 

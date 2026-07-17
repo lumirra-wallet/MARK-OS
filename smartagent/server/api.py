@@ -467,6 +467,8 @@ async def execute(req: ExecuteRequest) -> dict:
                 # ── AGENT PATH — every non-chat request goes here ─────────────
                 # MARK uses tool calling to read/write files, run terminal
                 # commands, and manage git — never just generates text.
+                # Complex multi-step goals → DevPipeline (Planner+Exec+Test+Review+Fix)
+                # Simple file/command/query goals → agent_loop directly.
                 ticker_task = asyncio.create_task(
                     _status_ticker(), name="mark-status-ticker"
                 )
@@ -478,17 +480,37 @@ async def execute(req: ExecuteRequest) -> dict:
                     return
 
                 from smartagent.engineer.agent_loop import run_agent_loop
+                from smartagent.engineer.dev_pipeline import DevPipeline, is_complex_goal
 
-                def _run_agent() -> Any:
-                    return run_agent_loop(
-                        goal          = req.goal,
-                        model_manager = agent.model_manager,
-                        event_bus     = event_bus,
-                        workspace_path= _state.workspace,
-                    )
+                use_pipeline = is_complex_goal(req.goal)
+                logger.info(
+                    "MARK STATE routing  goal=%r  use_pipeline=%s",
+                    req.goal[:60], use_pipeline,
+                )
 
-                logger.info("MARK STATE executing  agent-loop starting")
-                result = await asyncio.to_thread(_run_agent)
+                if use_pipeline:
+                    def _run_pipeline() -> Any:
+                        pipeline = DevPipeline(
+                            model_manager  = agent.model_manager,
+                            event_bus      = event_bus,
+                            workspace_path = _state.workspace,
+                            test_cmd       = req.test_cmd or None,
+                        )
+                        return pipeline.run(req.goal)
+
+                    logger.info("MARK STATE executing  dev-pipeline starting")
+                    result = await asyncio.to_thread(_run_pipeline)
+                else:
+                    def _run_agent() -> Any:
+                        return run_agent_loop(
+                            goal           = req.goal,
+                            model_manager  = agent.model_manager,
+                            event_bus      = event_bus,
+                            workspace_path = _state.workspace,
+                        )
+
+                    logger.info("MARK STATE executing  agent-loop starting")
+                    result = await asyncio.to_thread(_run_agent)
 
                 logger.info(
                     "MARK STATE executing→complete  success=%s  elapsed=%.1fs  "

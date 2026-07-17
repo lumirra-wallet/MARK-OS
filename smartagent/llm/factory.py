@@ -181,6 +181,15 @@ def get_llm_settings() -> dict[str, Any]:
 def update_llm_settings(updates: dict[str, Any]) -> dict[str, Any]:
     """Persist LLM setting changes and return the merged state."""
     state = _load_state()
+    # Sanitize before saving — reject unknown github model names so a bad
+    # dashboard payload can't permanently break the provider.
+    gm = updates.get("github_model", "")
+    if gm and gm not in _KNOWN_GITHUB_MODELS:
+        logger.warning(
+            "update_llm_settings: ignoring unknown github_model %r — keeping %r",
+            gm, state.get("github_model", GITHUB_DEFAULT_MODEL),
+        )
+        updates = {k: v for k, v in updates.items() if k != "github_model"}
     state.update(updates)
     _save_state(state)
     return get_llm_settings()

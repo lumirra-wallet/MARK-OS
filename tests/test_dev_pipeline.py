@@ -1,0 +1,335 @@
+"""
+Tests for smartagent.engineer.dev_pipeline — Planner→Executor→Tester→Reviewer→Fixer loop.
+
+All tests mock the LLM and run against a temp workspace; no network calls.
+"""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+from unittest.mock import MagicMock, patch, call
+import pytest
+
+from smartagent.engineer.dev_pipeline import (
+    DevPipeline,
+    PipelineResult,
+    MilestoneResult,
+    is_complex_goal,
+)
+
+
+# ── Fixtures ──────────────────────────────────────────────────────────────────
+
+def make_event_bus():
+    bus = MagicMock()
+    bus.publish = MagicMock()
+    return bus
+
+
+def make_model_manager(chat_stream_chunks=None, tool_calls=None):
+    """
+    Returns a mock ModelManager.
+    chat_stream_chunks — iterable of strings for streaming calls (planner/reviewer).
+    tool_calls         — list of mock tool_call objects for chat_with_tools().
+    """
+    mm = MagicMock()
+
+    # chat_stream for planner and reviewer
+    if chat_stream_chunks is None:
+        chat_stream_chunks = ["PASS: milestone completed."]
+    mm.chat_stream.return_value = iter(chat_stream_chunks)
+
+    # chat_with_tools for agent_loop executor
+    if tool_calls is None:
+        msg = MagicMock()
+        msg.tool_calls = []
+        msg.content = "Done."
+    else:
+        msg = MagicMock()
+        msg.tool_calls = tool_calls
+        msg.content = ""
+    mm.chat_with_tools.return_value = msg
+
+    return mm
+
+
+@pytest.fixture()
+def ws(tmp_path: Path):
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, capture_output=True)
+    return str(tmp_path)
+
+
+# ── is_complex_goal ────────────────────────────────────────────────────────────
+
+class TestIsComplexGoal:
+    def test_short_goal_never_complex(self):
+        assert is_complex_goal("Create hello.py") is False
+
+    def test_create_file_not_complex(self):
+        assert is_complex_goal("Write a Python script that sorts a list") is False
+
+    def test_full_stack_is_complex(self):
+        assert is_complex_goal(
+            "Build a full-stack TODO app with React frontend and Flask backend"
+        ) is True
+
+    def test_project_keyword_is_complex(self):
+        assert is_complex_goal(
+            "Create a project with authentication, database models, and REST endpoints"
+        ) is True
+
+    def test_with_tests_is_complex(self):
+        assert is_complex_goal(
+            "Build a Flask REST API for a blog system with tests and documentation"
+        ) is True
+
+    def test_from_scratch_is_complex(self):
+        assert is_complex_goal(
+            "Build a microservice architecture from scratch with Docker and CI/CD"
+        ) is True
+
+    def test_simple_command_not_complex(self):
+        assert is_complex_goal("Run pytest and show me the output") is False
+
+    def test_empty_not_complex(self):
+        assert is_complex_goal("") is False
+
+
+# ── DevPipeline initialisation ────────────────────────────────────────────────
+
+class TestDevPipelineInit:
+    def test_init_stores_params(self, ws):
+        mm  = make_model_manager()
+        eb  = make_event_bus()
+        dp  = DevPipeline(mm, eb, ws, test_cmd="pytest", max_fix_attempts=2)
+        assert dp._ws           == ws
+        assert dp._test_cmd     == "pytest"
+        assert dp._max_attempts == 2
+
+
+# ── Planner ───────────────────────────────────────────────────────────────────
+
+class TestPlanner:
+    def test_plan_parses_numbered_list(self, ws):
+        chunks = ["1. Create app.py\n2. Create tests\n3. Write README"]
+        mm = make_model_manager(chat_stream_chunks=chunks)
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        milestones = dp._plan("Build something")
+        assert milestones == [
+            "Create app.py",
+            "Create tests",
+            "Write README",
+        ]
+
+    def test_plan_parses_dash_list(self, ws):
+        chunks = ["- First milestone\n- Second milestone"]
+        mm = make_model_manager(chat_stream_chunks=chunks)
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        milestones = dp._plan("Build something")
+        assert milestones == ["First milestone", "Second milestone"]
+
+    def test_plan_caps_at_5(self, ws):
+        chunks = ["1. A\n2. B\n3. C\n4. D\n5. E\n6. F\n7. G"]
+        mm = make_model_manager(chat_stream_chunks=chunks)
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        milestones = dp._plan("Long goal")
+        assert len(milestones) <= 5
+
+    def test_plan_falls_back_on_llm_error(self, ws):
+        mm = make_model_manager()
+        mm.chat_stream.side_effect = RuntimeError("LLM down")
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        milestones = dp._plan("Build something")
+        assert milestones == ["Build something"]
+
+    def test_plan_falls_back_on_empty_response(self, ws):
+        mm = make_model_manager(chat_stream_chunks=[""])
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        milestones = dp._plan("Build something")
+        assert milestones == ["Build something"]
+
+
+# ── Test detection ─────────────────────────────────────────────────────────────
+
+class TestDetectTestCmd:
+    def test_detects_pytest(self, tmp_path):
+        (tmp_path / "test_app.py").write_text("def test_ok(): pass")
+        mm = make_model_manager()
+        dp = DevPipeline(mm, make_event_bus(), str(tmp_path))
+        cmd = dp._detect_test_cmd()
+        assert cmd and "pytest" in cmd
+
+    def test_detects_npm(self, tmp_path):
+        (tmp_path / "package.json").write_text('{"scripts":{"test":"jest"}}')
+        dp = DevPipeline(make_model_manager(), make_event_bus(), str(tmp_path))
+        cmd = dp._detect_test_cmd()
+        assert cmd and "npm" in cmd
+
+    def test_no_tests_returns_none(self, tmp_path):
+        dp = DevPipeline(make_model_manager(), make_event_bus(), str(tmp_path))
+        cmd = dp._detect_test_cmd()
+        assert cmd is None
+
+
+# ── Reviewer ──────────────────────────────────────────────────────────────────
+
+class TestReviewer:
+    def _loop_result(self, files=None, summary="done"):
+        from smartagent.engineer.agent_loop import AgentLoopResult
+        r = AgentLoopResult(goal="test milestone")
+        r.files_created  = files or []
+        r.final_summary  = summary
+        r.success        = True
+        return r
+
+    def test_pass_review_returned(self, ws):
+        mm = make_model_manager(chat_stream_chunks=["PASS: code looks correct."])
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        lr = self._loop_result(files=["app.py"])
+        review = dp._review("Create app.py", lr, "")
+        assert review.startswith("PASS")
+
+    def test_fail_review_returned(self, ws):
+        mm = make_model_manager(chat_stream_chunks=["FAIL: missing error handling."])
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        lr = self._loop_result(files=["app.py"])
+        review = dp._review("Create app.py", lr, "FAILED test_app.py")
+        assert review.startswith("FAIL")
+
+    def test_no_files_auto_pass(self, ws):
+        mm = make_model_manager()
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        lr = self._loop_result(files=[])
+        lr.success = True
+        review = dp._review("Run git status", lr, "")
+        # No files → auto-pass (conversational / query task)
+        assert review.startswith("PASS")
+
+    def test_reviewer_llm_error_returns_pass(self, ws):
+        mm = make_model_manager()
+        mm.chat_stream.side_effect = RuntimeError("LLM error")
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        lr = self._loop_result(files=["x.py"])
+        review = dp._review("Create x.py", lr, "")
+        assert review.startswith("PASS")
+
+
+# ── Fixer goal builder ─────────────────────────────────────────────────────────
+
+class TestFixerGoalBuilder:
+    def test_includes_fail_reason(self):
+        goal = DevPipeline._build_fix_goal(
+            "Create app.py",
+            "FAIL: missing import statement.",
+            "ImportError: cannot import name 'foo'",
+        )
+        assert "missing import statement" in goal
+        assert "ImportError" in goal
+
+    def test_includes_milestone(self):
+        goal = DevPipeline._build_fix_goal("Create app.py", "FAIL: x", "")
+        assert "Create app.py" in goal
+
+
+# ── Full pipeline run (mocked LLM + real filesystem) ──────────────────────────
+
+class TestPipelineRun:
+    def test_single_milestone_pass(self, ws):
+        """Pipeline writes a file and reviewer says PASS — result is successful."""
+        # Prepare: chat_with_tools returns write_file tool call on first LLM call,
+        # then empty (done) on second call
+        write_tc = MagicMock()
+        write_tc.id = "tc1"
+        write_tc.function.name      = "write_file"
+        write_tc.function.arguments = '{"path": "hello.py", "content": "print(1)\\n"}'
+
+        done_msg = MagicMock()
+        done_msg.tool_calls = []
+        done_msg.content    = "Created hello.py."
+
+        write_msg = MagicMock()
+        write_msg.tool_calls = [write_tc]
+        write_msg.content    = ""
+
+        mm = MagicMock()
+        # chat_stream: first call = planner ("1. Create hello.py"), second call = reviewer ("PASS: ...")
+        mm.chat_stream.side_effect = [
+            iter(["1. Create hello.py"]),
+            iter(["PASS: file created correctly."]),
+        ]
+        # chat_with_tools: first call writes file, second call is final answer
+        mm.chat_with_tools.side_effect = [write_msg, done_msg]
+
+        dp     = DevPipeline(mm, make_event_bus(), ws)
+        result = dp.run("Build a hello world script")
+
+        assert isinstance(result, PipelineResult)
+        assert result.success is True
+        assert len(result.milestones) == 1
+        assert len(result.milestone_results) == 1
+        assert result.milestone_results[0].success is True
+        assert Path(ws, "hello.py").exists()
+
+    def test_no_milestones_fallback(self, ws):
+        """When planner returns nothing, the original goal is used as one milestone."""
+        done_msg = MagicMock()
+        done_msg.tool_calls = []
+        done_msg.content    = "Done."
+
+        mm = MagicMock()
+        mm.chat_stream.side_effect = [
+            iter([""]),                         # planner → empty → fallback
+            iter(["PASS: task completed."]),    # reviewer
+        ]
+        mm.chat_with_tools.return_value = done_msg
+
+        dp     = DevPipeline(mm, make_event_bus(), ws)
+        result = dp.run("Do something simple")
+
+        assert result.milestones == ["Do something simple"]
+
+    def test_pipeline_result_has_required_fields(self, ws):
+        done_msg = MagicMock()
+        done_msg.tool_calls = []
+        done_msg.content    = "Done."
+
+        mm = MagicMock()
+        mm.chat_stream.side_effect = [
+            iter(["1. Step one"]),
+            iter(["PASS: done."]),
+        ]
+        mm.chat_with_tools.return_value = done_msg
+
+        dp     = DevPipeline(mm, make_event_bus(), ws)
+        result = dp.run("Simple goal with complex trigger words project test")
+
+        assert result.goal          == "Simple goal with complex trigger words project test"
+        assert result.total_elapsed >= 0
+        assert isinstance(result.files_created,  list)
+        assert isinstance(result.files_modified, list)
+        assert result.final_summary != ""
+
+    def test_event_bus_receives_tokens(self, ws):
+        done_msg = MagicMock()
+        done_msg.tool_calls = []
+        done_msg.content    = "Done."
+
+        eb = make_event_bus()
+        mm = MagicMock()
+        mm.chat_stream.side_effect = [
+            iter(["1. Step one"]),
+            iter(["PASS: done."]),
+        ]
+        mm.chat_with_tools.return_value = done_msg
+
+        dp = DevPipeline(mm, eb, ws)
+        dp.run("Simple project goal test run create")
+
+        assert eb.publish.called, "event_bus.publish() was never called"
+        calls = eb.publish.call_args_list
+        # ServerEvents.STREAMING_TOKEN == "StreamingToken"
+        streaming_calls = [c for c in calls if "StreamingToken" in str(c)]
+        assert streaming_calls, "No STREAMING_TOKEN (StreamingToken) events emitted"
