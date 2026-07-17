@@ -862,43 +862,40 @@ class TestModelsEndpoints:
             instance.get = AsyncMock(return_value=get_return)
         return instance
 
-    # ── ollama path ───────────────────────────────────────────────────────────
+    # ── nvidia path ───────────────────────────────────────────────────────────
 
-    def test_models_200_ollama(self, client):
-        mc = self._httpx_client(get_return=self._ollama_tags_response())
-        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
-             patch("smartagent.llm.factory.get_llm_settings",    return_value={"model": "llama3.1:8b"}), \
-             patch("httpx.AsyncClient", return_value=mc):
-            resp = client.get("/models")
-        assert resp.status_code == 200
-
-    def test_models_returns_list(self, client):
-        mc = self._httpx_client(get_return=self._ollama_tags_response())
-        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
-             patch("smartagent.llm.factory.get_llm_settings",    return_value={"model": "llama3.1:8b"}), \
-             patch("httpx.AsyncClient", return_value=mc):
+    def test_models_nvidia_returns_list(self, client):
+        raw = [{"id": "nvidia/nemotron-3-ultra-550b-a55b", "family": "nemotron", "context": 128000}]
+        p = MagicMock(); p.list_models.return_value = raw
+        with patch("smartagent.llm.factory.get_active_provider", return_value="nvidia"), \
+             patch("smartagent.llm.factory.get_llm_settings",    return_value={"model": "nvidia/nemotron-3-ultra-550b-a55b"}), \
+             patch("os.environ.get", side_effect=lambda k, d="": "nvapi-test" if k == "NVIDIA_API_KEY" else d), \
+             patch("smartagent.llm.nvidia_provider.NvidiaProvider", return_value=p):
             data = client.get("/models").json()
-        assert isinstance(data["models"], list)
-        assert len(data["models"]) == 2
-
-    def test_models_shape_ollama(self, client):
-        mc = self._httpx_client(get_return=self._ollama_tags_response())
-        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
-             patch("smartagent.llm.factory.get_llm_settings",    return_value={"model": "llama3.1:8b"}), \
-             patch("httpx.AsyncClient", return_value=mc):
-            data = client.get("/models").json()
+        assert data["provider"] == "nvidia"
+        assert len(data["models"]) == 1
         m = data["models"][0]
         for field in ("name", "id", "size_gb", "family", "provider"):
             assert field in m, f"missing field: {field}"
-        assert m["provider"] == "ollama"
 
-    def test_models_ollama_unreachable_returns_error_key(self, client):
-        mc = self._httpx_client(get_side_effect=Exception("connection refused"))
-        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
-             patch("smartagent.llm.factory.get_llm_settings",    return_value={}), \
-             patch("httpx.AsyncClient", return_value=mc):
+    def test_models_nvidia_no_key_error(self, client):
+        with patch("smartagent.llm.factory.get_active_provider", return_value="nvidia"), \
+             patch("smartagent.llm.factory.get_llm_settings",    return_value={"model": "nvidia/nemotron-3-ultra-550b-a55b"}), \
+             patch("os.environ.get", return_value=""):
             data = client.get("/models").json()
         assert "error" in data
+        assert data["models"] == []
+
+    # ── unknown provider ─────────────────────────────────────────────────────
+    # Ollama is not supported — get_active_provider() never returns it in
+    # practice, but /models still degrades gracefully instead of 500ing.
+
+    def test_models_unknown_provider_returns_error_key(self, client):
+        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
+             patch("smartagent.llm.factory.get_llm_settings",    return_value={}):
+            data = client.get("/models").json()
+        assert "error" in data
+        assert data["models"] == []
 
     # ── github path ───────────────────────────────────────────────────────────
 
