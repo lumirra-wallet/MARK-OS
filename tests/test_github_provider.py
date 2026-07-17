@@ -488,14 +488,17 @@ class TestProviderFactory:
         monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / ".state.json")
         assert _fac.get_active_provider() == "github"
 
-    def test_get_active_provider_defaults_to_ollama_without_token(self, monkeypatch, tmp_path):
-        """Without ACTIVE_PROVIDER or GITHUB_TOKEN, default falls back to 'ollama'."""
+    def test_get_active_provider_defaults_to_nvidia_without_any_key(self, monkeypatch, tmp_path):
+        """Without ACTIVE_PROVIDER or any provider key, default falls back to
+        'nvidia' — the unconditional product default (Ollama is not supported)."""
         monkeypatch.delenv("ACTIVE_PROVIDER", raising=False)
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         import smartagent.llm.factory as _fac
         monkeypatch.setattr(_fac, "_STATE_FILE", tmp_path / ".state.json")
-        assert _fac.get_active_provider() == "ollama"
+        assert _fac.get_active_provider() == "nvidia"
 
     def test_get_active_provider_reads_env_var(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ACTIVE_PROVIDER", "github")
