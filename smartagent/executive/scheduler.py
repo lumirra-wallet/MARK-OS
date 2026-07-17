@@ -63,6 +63,8 @@ class Scheduler:
         self._worker_registry = worker_registry
         self._max_retries = max_retries
         self._show_progress = show_progress
+        # Subsystem isolation: track the last active subsystem for handoff logging.
+        self._current_subsystem: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -156,10 +158,22 @@ class Scheduler:
 
         Phase 11.5: retries the task up to ``_max_retries`` times before
         marking it failed.  Each retry attempt is logged to the console.
+
+        Subsystem Isolation: emits a handoff banner when the active subsystem
+        changes between consecutive tasks.
         """
+        # Subsystem handoff detection
+        task_subsystem = getattr(task, "subsystem", "generic")
+        if self._current_subsystem is not None and task_subsystem != self._current_subsystem:
+            banner = f"── switching subsystem: {self._current_subsystem} → {task_subsystem} ──"
+            logger.info("Scheduler: %s", banner)
+            self._print(banner)
+        self._current_subsystem = task_subsystem
+
         task.mark_running()
         logger.info(
-            "Scheduler: running %r  type=%s", task.title, task.task_type.value
+            "Scheduler: running %r  type=%s  subsystem=%s",
+            task.title, task.task_type.value, task_subsystem,
         )
         self._print_task_start(task)
 

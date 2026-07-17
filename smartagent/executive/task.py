@@ -102,6 +102,8 @@ class Task:
     completed_at: Optional[str] = None
     metadata: dict = field(default_factory=dict)
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    # Set by IsolationPlanner after classification; never set by Planner directly.
+    subsystem: str = "generic"
 
     # ------------------------------------------------------------------
     # Convenience predicates

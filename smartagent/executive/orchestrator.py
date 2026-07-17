@@ -23,6 +23,7 @@ from smartagent.executive.checkpoint_manager import CheckpointManager, Checkpoin
 _GUARD_DEFAULT     = object()  # sentinel: "create a default ArchitectureGuard"
 _CHECKPOINT_DEFAULT = object()  # sentinel: "create a default CheckpointManager"
 from smartagent.executive.execution_context import ExecutionContext
+from smartagent.executive.isolation_planner import IsolationPlanner
 from smartagent.executive.execution_state import ExecutionState
 from smartagent.executive.milestone_planner import Milestone, MilestonePlanner
 from smartagent.executive.planner import Planner
@@ -204,7 +205,12 @@ class Orchestrator:
             )
             context.metadata["active_milestone"] = milestone.phase
 
-            graph = self.build_task_graph(milestone.tasks)
+            # Task #9 — Subsystem Isolation: classify and reorder tasks so
+            # same-subsystem tasks are adjacent before building the graph.
+            isolation_planner = IsolationPlanner()
+            reordered = isolation_planner.reorder(milestone.tasks)
+
+            graph = self.build_task_graph(reordered)
             context.task_graph = graph
             context.task_queue = self.submit_to_queue(graph)
 
