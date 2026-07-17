@@ -74,6 +74,14 @@ def _auto_default_provider() -> str:
     return "ollama"
 
 
+_KNOWN_GITHUB_MODELS = {
+    "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o",
+    "o1-mini", "o3-mini", "Phi-4", "Phi-4-mini-instruct",
+    "Llama-3.3-70B-Instruct", "Llama-3.2-90B-Vision-Instruct",
+    "DeepSeek-V3", "Mistral-Large-2411", "Codestral-2501",
+}
+
+
 def _load_state() -> dict[str, Any]:
     """Load persisted provider state (falls back to env-var / defaults)."""
     state: dict[str, Any] = {
@@ -89,6 +97,15 @@ def _load_state() -> dict[str, Any]:
     try:
         if _STATE_FILE.exists():
             saved = json.loads(_STATE_FILE.read_text())
+            # Guard: reject unknown GitHub model names so a stale or hand-edited
+            # state file can't silently route every call to a 404 endpoint.
+            gm = saved.get("github_model", "")
+            if gm and gm not in _KNOWN_GITHUB_MODELS:
+                logger.warning(
+                    "ProviderFactory: ignoring unknown github_model %r in state file "
+                    "— resetting to default %r", gm, GITHUB_DEFAULT_MODEL,
+                )
+                saved["github_model"] = GITHUB_DEFAULT_MODEL
             state.update(saved)
     except Exception as exc:  # noqa: BLE001
         logger.debug("ProviderFactory: could not read state file: %s", exc)
@@ -241,7 +258,7 @@ def _load_github(model: str, model_manager: Any) -> None:
         logger.warning("ProviderFactory: GITHUB_TOKEN not set — GitHub provider unavailable")
         return
     try:
-        from smartagent.llm.github_provider import GitHubProvider, GITHUB_CODING_MODEL as _CM
+        from smartagent.llm.github_provider import GitHubProvider
         state = _load_state()
         coding = state.get("github_coding_model", GITHUB_CODING_MODEL)
         for mid in dict.fromkeys([model, coding, GITHUB_DEFAULT_MODEL, GITHUB_FALLBACK_MODEL]):
