@@ -390,6 +390,40 @@ class TestWebSocket:
             assert m2["name"] == ServerEvents.STATUS_CHANGED
 
 
+class TestWebSocketOpeningMessage:
+    """
+    MARK must proactively open the conversation from the real workspace
+    analysis the moment a client connects — not wait for the user to speak
+    first, and never go silent even if the LLM call itself fails.
+    """
+
+    def test_mark_opening_uses_llm_text(self, client, fresh_state):
+        with patch("smartagent.server.api.Settings", return_value=MagicMock()), \
+             patch("smartagent.server.api.SmartAgent") as mock_agent_cls:
+            mock_agent_cls.return_value.model_manager.chat_stream.return_value = iter(
+                ["I've looked over this repo — nice setup."]
+            )
+            with client.websocket_connect("/ws") as ws:
+                assert ws.receive_json()["name"] == ServerEvents.STATUS_CHANGED
+                assert ws.receive_json()["name"] == ServerEvents.WORKSPACE_ANALYZED
+                opening = ws.receive_json()
+                assert opening["name"] == ServerEvents.MARK_OPENING
+                assert "looked over this repo" in opening["payload"]["text"]
+
+    def test_mark_opening_falls_back_on_llm_error(self, client, fresh_state):
+        """A failed LLM call (rate limit, model unavailable, etc.) must still
+        produce a deterministic opening message — MARK never goes silent."""
+        with patch("smartagent.server.api.Settings", return_value=MagicMock()), \
+             patch("smartagent.server.api.SmartAgent") as mock_agent_cls:
+            mock_agent_cls.return_value.model_manager.chat_stream.side_effect = RuntimeError("rate limited")
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()  # StatusChanged
+                ws.receive_json()  # WorkspaceAnalyzed
+                opening = ws.receive_json()
+                assert opening["name"] == ServerEvents.MARK_OPENING
+                assert opening["payload"]["text"]
+
+
 # ---------------------------------------------------------------------------
 # 9. EventBus.subscribe_all / unsubscribe_all
 # ---------------------------------------------------------------------------

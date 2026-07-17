@@ -958,36 +958,47 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             logger.debug("workspace analysis failed: %s", exc)
             return
 
-        try:
-            def _compose_opening() -> str:
-                mm = _build_model_manager(_state.workspace)
-                facts = (
-                    f"{payload.get('project_type') or 'a'} project on branch "
-                    f"{payload.get('git_branch') or 'unknown'}, using "
-                    f"{', '.join(payload.get('frameworks') or []) or 'no detected framework'}. "
-                    f"{payload.get('todo_count', 0)} open TODOs. Tests via "
-                    f"{payload.get('test_framework') or 'none detected'}."
-                )
-                messages = [
-                    {"role": "system", "content": _MARK_OPENING_SYSTEM},
-                    {"role": "user",   "content": facts},
-                ]
-                chunks: list[str] = []
-                for chunk in mm.chat_stream(messages, max_tokens=200):
-                    if chunk:
-                        chunks.append(chunk)
-                return "".join(chunks).strip()
+        frameworks_text = ", ".join(payload.get("frameworks") or []) or "no detected framework"
+        fallback_opening = (
+            f"I've looked over this {payload.get('project_type') or 'repository'} — "
+            f"on branch {payload.get('git_branch') or 'unknown'}, using {frameworks_text}, "
+            f"with {payload.get('todo_count', 0)} open TODOs. "
+            "Tell me what you'd like built or fixed and I'll get the team on it."
+        )
 
+        def _compose_opening() -> str:
+            mm = _build_model_manager(_state.workspace)
+            facts = (
+                f"{payload.get('project_type') or 'a'} project on branch "
+                f"{payload.get('git_branch') or 'unknown'}, using {frameworks_text}. "
+                f"{payload.get('todo_count', 0)} open TODOs. Tests via "
+                f"{payload.get('test_framework') or 'none detected'}."
+            )
+            messages = [
+                {"role": "system", "content": _MARK_OPENING_SYSTEM},
+                {"role": "user",   "content": facts},
+            ]
+            chunks: list[str] = []
+            for chunk in mm.chat_stream(messages, max_tokens=200):
+                if chunk:
+                    chunks.append(chunk)
+            return "".join(chunks).strip()
+
+        try:
             opening_text = await asyncio.to_thread(_compose_opening)
-            if opening_text:
-                await connection_manager.send_to(ws, {
-                    "type":      "event",
-                    "name":      ServerEvents.MARK_OPENING,
-                    "payload":   {"text": opening_text},
-                    "timestamp": _now_iso(),
-                })
         except Exception as exc:
-            logger.debug("MARK opening message skipped: %s", exc)
+            logger.debug("MARK opening message LLM call failed, using fallback: %s", exc)
+            opening_text = ""
+
+        try:
+            await connection_manager.send_to(ws, {
+                "type":      "event",
+                "name":      ServerEvents.MARK_OPENING,
+                "payload":   {"text": opening_text or fallback_opening},
+                "timestamp": _now_iso(),
+            })
+        except Exception as exc:
+            logger.debug("MARK opening message send failed: %s", exc)
 
     asyncio.create_task(_send_workspace_analysis())
 
