@@ -225,7 +225,7 @@ def _build_model_manager(workspace: str | None) -> Any:
     """
     Construct a fresh SmartAgent for *workspace* and return its
     ``model_manager``. SmartAgent does blocking network calls at
-    construction (Ollama/GitHub) — call this via ``asyncio.to_thread``.
+    construction (NVIDIA/GitHub) — call this via ``asyncio.to_thread``.
     """
     s = Settings(workspace_path=workspace)
     a = SmartAgent(s)
@@ -468,7 +468,7 @@ async def execute(req: ExecuteRequest) -> dict:
                     })
 
             # ── Initialise agent in a thread (SmartAgent does blocking network ──
-            # calls to Ollama/GitHub at startup — keep the event loop free).
+            # calls to NVIDIA/GitHub at startup — keep the event loop free).
             def _init_agent() -> Any:
                 s = Settings(workspace_path=_state.workspace)
                 a = SmartAgent(s)

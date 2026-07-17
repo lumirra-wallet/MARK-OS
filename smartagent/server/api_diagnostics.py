@@ -33,8 +33,6 @@ from smartagent.logs.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter()
 
-_OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-
 
 # ── Individual checks ─────────────────────────────────────────────────────────
 

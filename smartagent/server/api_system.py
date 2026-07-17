@@ -7,7 +7,7 @@ Covers:
   GET  /git/diff            — diff for a commit ref
   GET  /memory              — list MARK memory files
   GET  /memory/file         — read a memory file
-  GET  /models              — list Ollama models
+  GET  /models              — list models for the active provider
   POST /models/switch       — change active model
   GET  /metrics             — CPU / RAM / disk snapshot
   GET  /workspace/detect    — detect workspace from CWD
@@ -199,7 +199,7 @@ async def memory_file(path: str, workspace: str | None = Query(None)) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Models (Ollama)
+# Models
 # ---------------------------------------------------------------------------
 
 class SwitchModelRequest(BaseModel):
@@ -213,22 +213,20 @@ _active_model: str = ""
 async def list_models() -> dict:
     """
     List available models for the active provider (NVIDIA, GitHub Models,
-    OpenAI, Anthropic, or Ollama).
+    OpenAI, or Anthropic — Ollama is not supported).
 
     Returns a unified shape regardless of provider so the frontend needs no
     special-casing:
         { models: [{name, id, size_gb, modified, family, params, provider}],
-          active, provider, ollama_url?, error? }
+          active, provider, error? }
     """
-    import httpx
-
     # Determine active provider
     try:
         from smartagent.llm.factory import get_active_provider, get_llm_settings
         provider = get_active_provider()
         settings = get_llm_settings()
     except Exception:
-        provider = "ollama"
+        provider = "nvidia"
         settings = {}
 
     if provider == "github":
