@@ -368,6 +368,7 @@ class DevPipeline:
                 workspace_path = self._ws,
                 system_prompt  = _FIXER_SYSTEM,
                 max_turns      = 10,
+                allowed_paths  = allowed_paths,
             )
 
         return mr
