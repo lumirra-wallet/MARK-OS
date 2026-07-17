@@ -251,7 +251,6 @@ class DevPipeline:
             # the user sees for this milestone (full detail stays in Timeline).
             summary_text = self._synthesize_milestone_summary(i, len(milestones), mr, preview_note)
             self._emit(summary_text)
-            self._speak(summary_text)
 
         # ── 3. Final checkpoint commit ────────────────────────────────────────
         self._reasoning_stage("committing")
@@ -277,7 +276,6 @@ class DevPipeline:
 
         final_text = self._synthesize_final_summary(goal, result)
         self._emit(final_text)
-        self._speak(final_text)
 
         logger.info(
             "DevPipeline done  success=%s  milestones=%d/%d  files=%d  elapsed=%.1fs",
@@ -480,22 +478,6 @@ class DevPipeline:
             self._eb.publish(ServerEvents.STREAMING_TOKEN, text=text, source="mark")
         except Exception as exc:
             logger.warning("DevPipeline._emit: %s", exc)
-
-    def _speak(self, text: str) -> None:
-        """
-        Publish MARK's own executive-composed text as a ``Narration`` event —
-        never a separate, re-generated string. "Never allow spoken output to
-        differ from visible output" means literally the same text that
-        ``_emit()`` just sent to chat.
-
-        The frontend's existing ``Narration`` WS handler (markStore.ts) then
-        speaks it via the active TTS provider (Kokoro by default) — this
-        event/handler pair already existed but had no producer before this.
-        """
-        try:
-            self._eb.publish(ServerEvents.NARRATION, text=text, narration_type="summary")
-        except Exception as exc:
-            logger.warning("DevPipeline._speak: %s", exc)
 
     def _reasoning_stage(self, stage: str) -> None:
         """Publish a phase change for the Timeline's stage stepper."""

@@ -1,5 +1,13 @@
 # MARK Architecture
 
+> **Read [`docs/mark-operating-system.md`](docs/mark-operating-system.md) first.**
+> MARK is an AI Operating System, not a coding agent — the Engineer, QA,
+> Debugger, and other specialist workers are applications that run *inside*
+> MARK, the same way Word runs inside Windows. MARK plans, delegates,
+> supervises, and reports; workers do the actual engineering and never speak
+> to the user directly. Everything below describes the code-organization
+> layers that vision runs on top of.
+
 ## Overview
 
 MARK is structured as a layered monolith — all subsystems live in the same Python package and communicate through direct method calls rather than message passing. This keeps the codebase simple while still maintaining clear boundaries.

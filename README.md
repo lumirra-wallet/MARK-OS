@@ -1,6 +1,12 @@
 # MARK — AI Operating System
 
-MARK is an autonomous Python AI agent that operates like a professional software engineer. It analyzes requirements, writes code, runs tests, fixes bugs, and commits changes — with no manual copy-paste.
+MARK is not a coding agent — it's the operating system a team of specialist
+engineering workers (Engineer, QA, Debugger, Reviewer, Git, and others) runs
+inside of. You talk to MARK; MARK plans the work, delegates it, supervises
+execution, reviews the result, and reports back — the same way an engineering
+manager runs a team, not the way a single coding assistant works alone. See
+[`docs/mark-operating-system.md`](docs/mark-operating-system.md) for the full
+architecture.
 
 ```
 mark> engineer Build a FastAPI Todo API with JWT authentication

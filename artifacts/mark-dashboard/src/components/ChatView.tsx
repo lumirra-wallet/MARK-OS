@@ -1,7 +1,7 @@
 /**
- * ChatView — the primary MARK interface.
- *
- * Design: ChatGPT Advanced Voice Mode meets Cursor.
+ * ChatView — MARK's live conversation. The only conversational surface in
+ * the system; workers never speak here directly (see ContentBlock's
+ * 'worker' variant — a status chip, never free text).
  *
  * Layout
  * ──────
@@ -15,8 +15,7 @@
  * │                              User ·  goal text      │
  * │                                                      │
  * ├─────────────────────────────────────────────────────┤
- * │ [🎤 PTT] [text input…]                   [SEND ▶]  │
- * │ voice state indicator overlay when active            │
+ * │ [text input…]                            [SEND ▶]  │
  * └─────────────────────────────────────────────────────┘
  */
 import React, {
@@ -24,10 +23,10 @@ import React, {
 } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Mic, MicOff, Send, Square, FolderOpen,
+  Send, Square, FolderOpen,
   CheckCircle2, XCircle, Loader2, FileCode2, FileMinus, FilePlus,
-  TestTube2, Zap, Trash2, Volume2, VolumeX,
-  Sparkles, Code2, BadgeCheck, Eye, CircleDashed, AudioWaveform,
+  TestTube2, Zap, Trash2,
+  Sparkles, Code2, BadgeCheck, Eye, CircleDashed,
   GitBranch, Plus, X,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -418,95 +417,12 @@ function MarkBubble({ msg }: { msg: ChatMessage }) {
   );
 }
 
-// ── PTT recording hook ────────────────────────────────────────────────────────
-
-function usePTT() {
-  const { transcribeAudio, voice } = useMarkStore();
-  const [recording, setRecording] = useState(false);
-  const [durationMs, setDuration] = useState(0);
-  const mrRef     = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const timerRef  = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const start = useCallback(async () => {
-    if (recording || voice.muted) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
-      chunksRef.current = [];
-      mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.start(100);
-      mrRef.current = mr;
-      setRecording(true);
-      setDuration(0);
-      timerRef.current = setInterval(() => setDuration(d => d + 100), 100);
-    } catch (err) {
-      console.error('Mic access denied', err);
-    }
-  }, [recording, voice.muted]);
-
-  const stop = useCallback(async (): Promise<string> => {
-    if (!recording || !mrRef.current) return '';
-    const mr = mrRef.current;
-    if (timerRef.current) clearInterval(timerRef.current);
-    setRecording(false);
-    setDuration(0);
-
-    const text = await new Promise<string>(resolve => {
-      mr.onstop = async () => {
-        if (chunksRef.current.length === 0) { resolve(''); return; }
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        const t = await transcribeAudio(blob);
-        resolve(t);
-      };
-      mr.stop();
-      mr.stream.getTracks().forEach(t => t.stop());
-    });
-    return text;
-  }, [recording, transcribeAudio]);
-
-  return { recording, durationMs, start, stop };
-}
-
-// ── Voice state indicator (floating) ─────────────────────────────────────────
-
-function VoiceIndicator() {
-  const { voice } = useMarkStore();
-  if (!voice.running || voice.state === 'idle') return null;
-
-  const meta: Record<string, { label: string; color: string }> = {
-    listening:    { label: 'Listening…',    color: 'bg-emerald-500' },
-    transcribing: { label: 'Transcribing…', color: 'bg-accent' },
-    speaking:     { label: 'Speaking…',     color: 'bg-blue-500' },
-    error:        { label: 'Voice error',   color: 'bg-destructive' },
-  };
-  const m = meta[voice.state] ?? { label: voice.state, color: 'bg-muted' };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 8 }}
-      className="flex items-center gap-2 bg-card/90 backdrop-blur border border-border/50 rounded-full px-3 py-1.5 shadow-md text-xs font-medium"
-    >
-      <motion.div
-        className={cn('w-2 h-2 rounded-full', m.color)}
-        animate={{ opacity: [1, 0.4, 1] }}
-        transition={{ duration: 1, repeat: Infinity }}
-      />
-      <AudioWaveform className="w-3.5 h-3.5 text-emerald-400" />
-      {m.label}
-    </motion.div>
-  );
-}
-
 // ── Composer ──────────────────────────────────────────────────────────────────
 
 function Composer({ workspace }: { workspace: string }) {
-  const { sendUserMessage, cancelRun, running, voice, startVoice, stopVoice, toggleMute } = useMarkStore();
+  const { sendUserMessage, cancelRun, running } = useMarkStore();
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const ptt = usePTT();
 
   // Auto-resize textarea as content grows
   useEffect(() => {
@@ -515,17 +431,6 @@ function Composer({ workspace }: { workspace: string }) {
     ta.style.height = 'auto';
     ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
   }, [input]);
-
-  // When voice transcript fires in continuous/wake mode, fill input
-  useEffect(() => {
-    if (voice.transcript && !ptt.recording) {
-      setInput(voice.transcript);
-      if (voice.autoSubmit && voice.mode !== 'push_to_talk' && workspace) {
-        sendUserMessage(voice.transcript, workspace);
-        setInput('');
-      }
-    }
-  }, [voice.transcript]); // eslint-disable-line
 
   const handleSend = useCallback(() => {
     const text = input.trim();
@@ -541,65 +446,9 @@ function Composer({ workspace }: { workspace: string }) {
     }
   };
 
-  const handlePTTMouseDown = async () => {
-    await ptt.start();
-  };
-
-  const handlePTTMouseUp = async () => {
-    const text = await ptt.stop();
-    if (text) {
-      setInput(text);
-      if (voice.autoSubmit && workspace) {
-        sendUserMessage(text, workspace);
-        setInput('');
-      } else {
-        textareaRef.current?.focus();
-      }
-    }
-  };
-
-  const voiceToggle = voice.running
-    ? () => stopVoice()
-    : () => startVoice(voice.mode);
-
   return (
     <div className="border-t border-border/50 bg-card/60 backdrop-blur px-4 py-3 space-y-2">
-      {/* Voice indicator */}
-      <AnimatePresence>
-        {voice.running && <VoiceIndicator />}
-      </AnimatePresence>
-
-      <div className={cn(
-        'flex items-end gap-2 rounded-2xl border bg-background/80 p-2 transition-all',
-        ptt.recording ? 'border-red-500/50 shadow-[0_0_0_2px_rgba(239,68,68,0.15)]' : 'border-border/50 focus-within:border-accent/50',
-      )}>
-
-        {/* PTT mic button */}
-        <button
-          onMouseDown={handlePTTMouseDown}
-          onMouseUp={handlePTTMouseUp}
-          onTouchStart={handlePTTMouseDown}
-          onTouchEnd={handlePTTMouseUp}
-          disabled={voice.muted}
-          className={cn(
-            'shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all relative',
-            ptt.recording
-              ? 'bg-red-500 text-white shadow-lg shadow-red-500/30'
-              : voice.muted
-                ? 'text-muted-foreground/40 cursor-not-allowed'
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-          )}
-          title={ptt.recording ? `Recording (${(ptt.durationMs / 1000).toFixed(1)}s)` : 'Hold to speak'}
-        >
-          {ptt.recording && (
-            <motion.div
-              className="absolute inset-0 rounded-xl bg-red-500/30"
-              animate={{ scale: [1, 1.3, 1], opacity: [0.5, 0, 0.5] }}
-              transition={{ duration: 1, repeat: Infinity }}
-            />
-          )}
-          {voice.muted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4 relative z-10" />}
-        </button>
+      <div className="flex items-end gap-2 rounded-2xl border border-border/50 focus-within:border-accent/50 bg-background/80 p-2 transition-all">
 
         {/* Text input */}
         <textarea
@@ -607,20 +456,9 @@ function Composer({ workspace }: { workspace: string }) {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={
-            ptt.recording
-              ? `Recording… ${(ptt.durationMs / 1000).toFixed(1)}s`
-              : !workspace
-                ? 'Set a workspace above first…'
-                : 'Type a goal or hold 🎤 to speak — e.g. "Build a Flask API"'
-          }
-          disabled={ptt.recording}
+          placeholder={!workspace ? 'Set a workspace above first…' : 'Type a goal for MARK — e.g. "Build a Flask API"'}
           rows={1}
-          className={cn(
-            'flex-1 resize-none bg-transparent text-sm placeholder:text-muted-foreground/50',
-            'focus:outline-none min-h-[36px] max-h-[120px] py-2 leading-relaxed',
-            ptt.recording && 'opacity-50',
-          )}
+          className="flex-1 resize-none bg-transparent text-sm placeholder:text-muted-foreground/50 focus:outline-none min-h-[36px] max-h-[120px] py-2 leading-relaxed"
         />
 
         {/* Send / Stop */}
@@ -649,28 +487,10 @@ function Composer({ workspace }: { workspace: string }) {
         )}
       </div>
 
-      {/* Composer footer hints */}
+      {/* Composer footer hint */}
       <div className="flex items-center gap-3 px-1">
-        <button
-          onClick={voiceToggle}
-          className={cn(
-            'text-[10px] flex items-center gap-1 transition-colors',
-            voice.running ? 'text-emerald-400' : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          {voice.running ? <AudioWaveform className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
-          {voice.running ? `Voice on · ${voice.mode.replace(/_/g, ' ')}` : 'Enable voice'}
-        </button>
-
-        {voice.running && (
-          <button onClick={toggleMute} className="text-[10px] flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
-            {voice.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
-            {voice.muted ? 'Unmute' : 'Mute'}
-          </button>
-        )}
-
         <span className="ml-auto text-[10px] text-muted-foreground/50">
-          Enter to send · Shift+Enter for new line · Hold 🎤 for voice
+          Enter to send · Shift+Enter for new line
         </span>
       </div>
     </div>

@@ -1,32 +1,32 @@
 /**
- * LiveEngineerPanel — MARK's persistent engineering partner panel.
+ * RepositorySummary — "Repository Summary" + "Current Engineering Activity",
+ * two of the always-visible mission-control panels (see docs/mark-operating-
+ * system.md and Dashboard.tsx). Extracted from the retired LiveEngineerPanel.tsx
+ * (Narration transcript dropped — see that doc's narration removal).
  *
  * Sections:
- *   Voice bar          — mute, pause/resume, voice selector, speed
  *   Workspace context  — project type, git branch, test status, TODOs
- *   Reasoning stage    — visual phase stepper
- *   Narration          — live scrolling transcript of what MARK is saying
+ *   Reasoning stage    — visual phase stepper (current engineering activity)
  *   Activity feed      — real-time action log
  *   Memory             — goals, milestones, blockers
  *   Suggestions        — proactive idle improvements
  */
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Volume2, VolumeX, Pause, Play, ChevronDown, ChevronUp,
-  FolderGit2, GitBranch, TestTube2, MessageSquare, Cpu,
+  ChevronDown, ChevronUp,
+  FolderGit2, GitBranch, TestTube2, Cpu,
   CheckCircle2, Circle, Loader2, AlertTriangle,
   Zap, FileText, Terminal, GitCommit, Search, FilePlus,
   Trash2, Pencil, Shield, Lightbulb, Activity, Brain,
   RefreshCw, X, Bug, Eye, Rocket,
 } from 'lucide-react';
-import { useMarkStore, ActivityEntry, NarrationEntry, ReasoningStage } from '@/store/markStore';
+import { useMarkStore, ReasoningStage } from '@/store/markStore';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { ApprovalsSidebar } from './ApprovalsSidebar';
 
 // ── Stage config ──────────────────────────────────────────────────────────────
 
@@ -76,126 +76,7 @@ const SUGGESTION_CONFIG: Record<string, { icon: React.ComponentType<any>; color:
   'dependency':    { icon: AlertTriangle, color: 'text-yellow-400'  },
 };
 
-// ── OpenAI voice options ───────────────────────────────────────────────────────
-
-const OPENAI_VOICES = [
-  { value: 'nova',    label: 'Nova — warm, conversational' },
-  { value: 'alloy',   label: 'Alloy — neutral, clear' },
-  { value: 'echo',    label: 'Echo — deep, confident' },
-  { value: 'fable',   label: 'Fable — expressive, British' },
-  { value: 'onyx',    label: 'Onyx — authoritative' },
-  { value: 'shimmer', label: 'Shimmer — bright, energetic' },
-];
-
-// ── Voice controls ────────────────────────────────────────────────────────────
-
-function VoiceBar() {
-  const { voice, toggleMute, setTtsProvider, setOpenaiVoice, speak } = useMarkStore();
-  const [paused, setPaused] = useState(false);
-
-  const handlePauseResume = () => {
-    if (paused) { speechSynthesis.resume(); setPaused(false); }
-    else        { speechSynthesis.pause();  setPaused(true);  }
-  };
-
-  const stateIcon = voice.state === 'speaking'
-    ? <Volume2 className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
-    : voice.muted
-      ? <VolumeX className="w-3.5 h-3.5 text-muted-foreground" />
-      : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />;
-
-  const isOpenAI = voice.ttsProvider === 'openai';
-  const isBrowser = voice.ttsProvider === 'browser';
-
-  return (
-    <div className="border-b border-border/40 bg-card/50 text-xs">
-      {/* Top row: status + provider toggle + controls */}
-      <div className="flex items-center gap-2 px-3 py-1.5">
-        <div className="flex items-center gap-1.5 text-muted-foreground shrink-0">
-          {stateIcon}
-          <span className="font-medium text-foreground/70">Narration</span>
-        </div>
-
-        {/* Provider toggle — Kokoro is the default; Browser is fallback-only */}
-        <div className="flex items-center bg-muted/40 border border-border/40 rounded overflow-hidden text-[10px] shrink-0">
-          {(['kokoro', 'openai', 'browser'] as const).map(p => (
-            <button
-              key={p}
-              onClick={() => setTtsProvider(p)}
-              className={cn(
-                "px-2 py-0.5 transition-colors capitalize",
-                voice.ttsProvider === p ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex-1" />
-
-        {/* Pause/resume (browser only) */}
-        {isBrowser && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={handlePauseResume}
-                className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {paused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">{paused ? 'Resume' : 'Pause'}</TooltipContent>
-          </Tooltip>
-        )}
-
-        {/* Mute */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => toggleMute()}
-              className={cn(
-                "p-1 rounded hover:bg-muted/60 transition-colors",
-                voice.muted ? "text-destructive/70" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {voice.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">{voice.muted ? 'Unmute' : 'Mute'}</TooltipContent>
-        </Tooltip>
-      </div>
-
-      {/* OpenAI voice selector row */}
-      {isOpenAI && (
-        <div className="flex items-center gap-2 px-3 pb-1.5">
-          <select
-            value={voice.openaiVoice}
-            onChange={e => setOpenaiVoice(e.target.value)}
-            className="flex-1 bg-muted/40 border border-border/40 rounded px-1.5 py-0.5 text-[10px] text-foreground/80"
-          >
-            {OPENAI_VOICES.map(v => (
-              <option key={v.value} value={v.value}>{v.label}</option>
-            ))}
-          </select>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => speak('Hello, I\'m MARK, your AI software engineer.')}
-                className="shrink-0 px-2 py-0.5 rounded bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors text-[10px]"
-              >
-                Test
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">Play a test phrase</TooltipContent>
-          </Tooltip>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Workspace context card ────────────────────────────────────────────────────
+// ── Workspace context card (Repository Summary) ───────────────────────────────
 
 function WorkspaceCard() {
   const { workspaceContext } = useMarkStore();
@@ -263,7 +144,7 @@ function WorkspaceCard() {
   );
 }
 
-// ── Reasoning stage stepper ───────────────────────────────────────────────────
+// ── Reasoning stage stepper (current engineering activity, at a glance) ──────
 
 function ReasoningStepper() {
   const { reasoningStage, running } = useMarkStore();
@@ -319,69 +200,6 @@ function ReasoningStepper() {
           );
         })}
       </div>
-    </div>
-  );
-}
-
-// ── Narration transcript ──────────────────────────────────────────────────────
-
-function NarrationTranscript() {
-  const { narrationTranscript } = useMarkStore();
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [collapsed, setCollapsed] = useState(false);
-
-  useEffect(() => {
-    if (scrollRef.current && !collapsed) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [narrationTranscript, collapsed]);
-
-  if (narrationTranscript.length === 0) return null;
-
-  return (
-    <div className="mx-3 mt-3 rounded-xl border border-border/50 overflow-hidden bg-card/40">
-      <button
-        onClick={() => setCollapsed(c => !c)}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-muted/20 transition-colors text-xs"
-      >
-        <div className="flex items-center gap-2 font-medium text-foreground/70">
-          <MessageSquare className="w-3.5 h-3.5 text-blue-400" />
-          <span>Narration</span>
-          <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 font-mono">
-            {narrationTranscript.length}
-          </Badge>
-        </div>
-        {collapsed ? <ChevronDown className="w-3 h-3 text-muted-foreground" /> : <ChevronUp className="w-3 h-3 text-muted-foreground" />}
-      </button>
-      <AnimatePresence initial={false}>
-        {!collapsed && (
-          <motion.div
-            initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }}
-            transition={{ duration: 0.2 }} className="overflow-hidden"
-          >
-            <div ref={scrollRef} className="overflow-y-auto max-h-32 px-3 pb-2 space-y-1">
-              {narrationTranscript.slice(-8).map(entry => (
-                <motion.div
-                  key={entry.id}
-                  initial={{ opacity: 0, x: -4 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className={cn(
-                    "text-[11px] leading-snug",
-                    entry.type === 'stage'      && "text-accent font-medium",
-                    entry.type === 'summary'    && "text-emerald-400 font-medium",
-                    entry.type === 'suggestion' && "text-amber-400",
-                    entry.type === 'action'     && "text-foreground/70",
-                  )}
-                >
-                  {entry.type === 'stage' && '▸ '}
-                  {entry.type === 'summary' && '✓ '}
-                  {entry.text}
-                </motion.div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
@@ -606,43 +424,16 @@ function IdleSuggestions() {
 
 // ── Main panel ────────────────────────────────────────────────────────────────
 
-export function LiveEngineerPanel() {
-  const { pendingPermissions, running } = useMarkStore();
-
+export function RepositorySummary() {
   return (
-    <div className="h-full flex flex-col bg-sidebar/30 overflow-hidden">
-      {/* Voice bar */}
-      <VoiceBar />
-
-      {/* Scrollable content */}
-      <ScrollArea className="flex-1">
-        <div className="pb-3">
-          {/* Workspace context */}
-          <WorkspaceCard />
-
-          {/* Reasoning stage */}
-          <ReasoningStepper />
-
-          {/* Narration transcript */}
-          <NarrationTranscript />
-
-          {/* Activity feed */}
-          <ActivityFeed />
-
-          {/* Engineering memory */}
-          <MemorySection />
-
-          {/* Idle suggestions */}
-          <IdleSuggestions />
-        </div>
-      </ScrollArea>
-
-      {/* Approvals overlay — shows when permissions are pending */}
-      {pendingPermissions.length > 0 && (
-        <div className="border-t border-destructive/30 bg-destructive/5">
-          <ApprovalsSidebar />
-        </div>
-      )}
-    </div>
+    <ScrollArea className="h-full">
+      <div className="pb-3">
+        <WorkspaceCard />
+        <ReasoningStepper />
+        <ActivityFeed />
+        <MemorySection />
+        <IdleSuggestions />
+      </div>
+    </ScrollArea>
   );
 }

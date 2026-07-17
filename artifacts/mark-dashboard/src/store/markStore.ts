@@ -66,16 +66,9 @@ export interface VoiceState {
   muted: boolean;
   autoSubmit: boolean;
   whisperModel: string;
-  ttsVoice: string;
   ttsSpeed: number;
-  ttsVolume: number;
   wakePhraseEnabled: boolean;
   transcript: string;
-  isBrowserTTSFallback: boolean;
-  /** Which TTS engine to use for narration — kokoro is the default; browser is fallback-only. */
-  ttsProvider: 'kokoro' | 'piper' | 'openai' | 'browser';
-  /** OpenAI voice ID (alloy | echo | fable | onyx | nova | shimmer) — only used when ttsProvider is 'openai' */
-  openaiVoice: string;
 }
 
 // ── Preview types ─────────────────────────────────────────────────────────────
@@ -109,13 +102,6 @@ export interface ActivityEntry {
 export type ReasoningStage =
   | 'idle' | 'analyzing' | 'planning' | 'writing'
   | 'running' | 'testing' | 'reviewing' | 'committing' | 'deploying' | 'done';
-
-export interface NarrationEntry {
-  id: string;
-  timestamp: string;
-  text: string;
-  type: 'stage' | 'action' | 'summary' | 'suggestion';
-}
 
 export interface WorkspaceContext {
   projectType: string;
@@ -193,7 +179,6 @@ interface MarkState {
   // Live Engineer panel
   activityFeed:        ActivityEntry[];
   reasoningStage:      ReasoningStage;
-  narrationTranscript: NarrationEntry[];
   workspaceContext:    WorkspaceContext | null;
   idleSuggestions:     IdleSuggestion[];
   engineeringMemory:   EngineeringMemoryState;
@@ -235,11 +220,6 @@ interface MarkState {
   toggleMute:           () => Promise<void>;
   updateVoiceSettings:  (s: Partial<VoiceSettings>) => Promise<void>;
   transcribeAudio:      (blob: Blob) => Promise<string>;
-  speak:                (text: string) => Promise<void>;
-  setTtsProvider:       (provider: 'kokoro' | 'piper' | 'openai' | 'browser') => void;
-  setOpenaiVoice:       (voice: string) => void;
-  setTtsVoice:          (voice: string) => void;
-  setTtsVolume:         (volume: number) => void;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -256,51 +236,8 @@ const DEFAULT_WORKERS: WorkerState[] = [
 const DEFAULT_VOICE: VoiceState = {
   state: 'idle', running: false, mode: 'push_to_talk',
   muted: false, autoSubmit: true, whisperModel: 'base',
-  ttsVoice: 'af_sarah', ttsSpeed: 1.0, ttsVolume: 1.0,
-  wakePhraseEnabled: false, transcript: '', isBrowserTTSFallback: false,
-  ttsProvider: 'kokoro', openaiVoice: 'nova',
+  ttsSpeed: 1.0, wakePhraseEnabled: false, transcript: '',
 };
-
-// ── Browser TTS ───────────────────────────────────────────────────────────────
-
-function browserSpeak(text: string, speed = 1.0, volume = 1.0): void {
-  if (!('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  const utt = new SpeechSynthesisUtterance(text);
-  utt.rate = Math.max(0.5, Math.min(2.0, speed));
-  utt.volume = Math.max(0, Math.min(1, volume));
-  window.speechSynthesis.speak(utt);
-}
-
-// ── Unified TTS provider endpoint (kokoro / piper / openai) ────────────────────
-//
-// Backend dispatch lives in smartagent/tts/factory.py — whichever provider is
-// active there (kept in sync via setTtsProvider below) is what actually
-// synthesizes. The frontend doesn't need per-provider branching any more.
-
-async function ttsSpeak(
-  text: string, voice: string, speed: number, serverUrl: string, volume = 1.0,
-): Promise<void> {
-  const res = await fetch(`${serverUrl}/tts/speak`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, voice, speed }),
-  });
-  if (!res.ok) throw new Error(`TTS ${res.status}`);
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const audio = new Audio(url);
-  audio.volume = Math.max(0, Math.min(1, volume));
-  await new Promise<void>((resolve, reject) => {
-    audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-    audio.onerror = () => { URL.revokeObjectURL(url); reject(new Error('audio error')); };
-    audio.play().catch(reject);
-  });
-}
-
-function _voiceForProvider(voice: VoiceState): string {
-  return voice.ttsProvider === 'openai' ? voice.openaiVoice : voice.ttsVoice;
-}
 
 // ── WebSocket singleton ───────────────────────────────────────────────────────
 
@@ -402,41 +339,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
         }),
       };
     });
-  };
-
-  /** Add an entry to the live narration transcript. */
-  const _addNarration = (text: string, type: NarrationEntry['type'] = 'action') => {
-    if (!text?.trim()) return;
-    set(state => ({
-      narrationTranscript: [
-        { id: _id(), timestamp: new Date().toISOString(), text: text.trim(), type },
-        ...state.narrationTranscript,
-      ].slice(0, 100),
-    }));
-  };
-
-  /** Speak text via TTS unless muted, and track in narration transcript.
-   *  Kokoro is the default provider; browser speechSynthesis is fallback-only.
-   *  Narration is gated only by mute — it doesn't require an STT "listening"
-   *  session, since speaking MARK's own summaries and listening for the
-   *  user's voice are independent concerns. */
-  const _narrate = (text: string) => {
-    if (!text?.trim()) return;
-    _addNarration(text, 'action');
-    const { voice, serverUrl } = get();
-    if (voice.muted) return;
-    set(state => ({ voice: { ...state.voice, state: 'speaking' } }));
-    const done = () => set(state => ({
-      voice: { ...state.voice, state: state.voice.state === 'speaking' ? 'idle' : state.voice.state },
-    }));
-    if (voice.ttsProvider === 'browser' || voice.isBrowserTTSFallback) {
-      browserSpeak(text, voice.ttsSpeed, voice.ttsVolume);
-      done();
-      return;
-    }
-    ttsSpeak(text, _voiceForProvider(voice), voice.ttsSpeed, serverUrl, voice.ttsVolume)
-      .catch(() => browserSpeak(text, voice.ttsSpeed, voice.ttsVolume))
-      .finally(done);
   };
 
   // ── Return the store ───────────────────────────────────────────────────────
@@ -566,8 +468,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
         ws.onopen = () => {
           set({ connectionStatus: 'connected' });
           if (reconnectTimer) clearTimeout(reconnectTimer);
-          // Auto-enable browser TTS narration (zero config, instant)
-          set(state => ({ voice: { ...state.voice, running: true, isBrowserTTSFallback: true } }));
           // Greeting on first connect
           if (get().messages.length === 0) {
             set(state => ({
@@ -624,7 +524,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                 addTimeline(`Run started: ${payload.goal}`);
                 _startMarkMsg(timestamp);
                 _pushBlock({ type: 'text', text: `I'll get started on that right away.\n` });
-                _narrate('On it — analyzing the workspace.');
                 break;
               }
 
@@ -645,7 +544,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   type: 'summary', text: summaryText, success: payload.success,
                   filesCreated: created, filesModified: modified, elapsed: payload.elapsed,
                 }]);
-                _narrate(summaryText);
                 break;
               }
 
@@ -661,7 +559,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                 set({ running: false, lastError: failMsg });
                 addTimeline(`Run failed: ${failMsg}`);
                 _finaliseMsg([{ type: 'error', text: failMsg }]);
-                _narrate('The run encountered an error.');
                 break;
               }
 
@@ -698,15 +595,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   }));
                   addTimeline(`Worker started: ${payload.worker}`);
                   _pushBlock({ type: 'worker', name: payload.worker, status: 'running', task: payload.task });
-                  const phrases: Record<string, string> = {
-                    Planning:  'Planning the implementation…',
-                    Research:  'Researching the codebase…',
-                    Coding:    'Writing code…',
-                    Testing:   'Running tests…',
-                    Quality:   'Checking code quality…',
-                    Review:    'Reviewing the work…',
-                  };
-                  if (phrases[payload.worker]) _narrate(phrases[payload.worker]);
                 }
                 break;
               }
@@ -790,7 +678,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   b => ({ ...b, status: 'passed' } as ContentBlock),
                 );
                 set({ lastTestRun: { status: 'passed', output: payload.output, timestamp: new Date().toISOString() } });
-                _narrate('Tests passed!');
                 break;
               }
               case 'TestsFailed': {
@@ -800,7 +687,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   b => ({ ...b, status: 'failed', output: payload.output } as ContentBlock),
                 );
                 set({ lastTestRun: { status: 'failed', output: payload.output, timestamp: new Date().toISOString() } });
-                _narrate('Tests failed. Attempting to fix…');
                 break;
               }
 
@@ -817,7 +703,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                 set(state => ({ pendingPermissions: [...state.pendingPermissions, payload] }));
                 addTimeline(`Permission requested: ${payload.operation} on ${payload.path}`);
                 _pushBlock({ type: 'approval', requestId: payload.request_id, operation: payload.operation, path: payload.path, diff: payload.diff });
-                _narrate(`I need your approval to ${payload.operation} ${payload.path.split('/').pop()}`);
                 break;
               }
 
@@ -861,8 +746,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                 set(state => ({ voice: { ...state.voice, state: state.voice.running ? 'listening' : 'idle' } }));
                 break;
               case 'VoiceTTSFallback':
-                set(state => ({ voice: { ...state.voice, isBrowserTTSFallback: true } }));
-                browserSpeak(payload.text, get().voice.ttsSpeed);
                 break;
               case 'VoiceError':
                 set(state => ({ voice: { ...state.voice, state: 'error' } }));
@@ -899,8 +782,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   workspace:     payload.workspace ?? '',
                 };
                 set({ workspaceContext: ctx });
-                _addNarration(ctx.summary || `${ctx.projectType} workspace ready`, 'stage');
-                _narrate(ctx.summary || `${ctx.projectType} project ready`);
                 break;
               }
 
@@ -935,7 +816,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                 set(state => ({
                   idleSuggestions: [sug, ...state.idleSuggestions].slice(0, 30),
                 }));
-                _addNarration(`Suggestion: ${sug.title}`, 'suggestion');
                 break;
               }
 
@@ -950,15 +830,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   },
                 });
                 break;
-
-              case 'Narration': {
-                const text = payload.text ?? '';
-                if (text) {
-                  _addNarration(text, (payload.narration_type ?? 'action') as NarrationEntry['type']);
-                  _narrate(text);
-                }
-                break;
-              }
 
               // ── Preview Workspace events ───────────────────────────────────
               case 'PreviewRegistered': {
@@ -989,7 +860,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   success: true,
                 };
                 set(state => ({ activityFeed: [feedEntry, ...state.activityFeed].slice(0, 300) }));
-                _narrate(`Your app is now live in the preview — ${preview.title}`);
                 break;
               }
 
@@ -1010,7 +880,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   success: true,
                 };
                 set(state => ({ activityFeed: [updateEntry, ...state.activityFeed].slice(0, 300) }));
-                _narrate('Preview has been updated — hot-reloading now.');
                 break;
               }
 
@@ -1160,7 +1029,6 @@ export const useMarkStore = create<MarkState>((set, get) => {
             muted:        res.settings.muted           ?? state.voice.muted,
             autoSubmit:   res.settings.auto_submit     ?? state.voice.autoSubmit,
             whisperModel: res.settings.whisper_model   ?? state.voice.whisperModel,
-            ttsVoice:     res.settings.tts_voice       ?? state.voice.ttsVoice,
             ttsSpeed:     res.settings.tts_speed       ?? state.voice.ttsSpeed,
           },
         }));
@@ -1178,37 +1046,5 @@ export const useMarkStore = create<MarkState>((set, get) => {
       }
     },
 
-    speak: async (text) => {
-      const { voice, serverUrl } = get();
-      if (voice.ttsProvider === 'browser' || voice.isBrowserTTSFallback) {
-        browserSpeak(text, voice.ttsSpeed, voice.ttsVolume);
-        return;
-      }
-      try {
-        await ttsSpeak(text, _voiceForProvider(voice), voice.ttsSpeed, serverUrl, voice.ttsVolume);
-      } catch {
-        browserSpeak(text, voice.ttsSpeed, voice.ttsVolume);
-      }
-    },
-
-    setTtsProvider: (provider) => {
-      set(state => ({ voice: { ...state.voice, ttsProvider: provider } }));
-      if (provider === 'browser') return;
-      const { serverUrl } = get();
-      fetch(`${serverUrl}/tts/provider`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider }),
-      }).catch(() => { /* best-effort — /tts/speak will just use whatever the backend still has active */ });
-    },
-
-    setOpenaiVoice: (voice) =>
-      set(state => ({ voice: { ...state.voice, openaiVoice: voice } })),
-
-    setTtsVoice: (voice) =>
-      set(state => ({ voice: { ...state.voice, ttsVoice: voice } })),
-
-    setTtsVolume: (volume) =>
-      set(state => ({ voice: { ...state.voice, ttsVolume: Math.max(0, Math.min(1, volume)) } })),
   };
 });

@@ -1,23 +1,20 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
 import { useMarkStore } from '@/store/markStore';
 import {
-  MessageSquare, Activity, FolderGit2, Folder, FileText, Cpu,
+  Activity, FolderGit2,
   LineChart, Settings, Clock, Plug, Unplug, Zap,
-  Mic, AudioWaveform, Volume2, Square,
-  GitBranch, Brain, Box, Workflow,
+  Square, GitBranch, Brain, Box, Workflow,
   Bookmark, Terminal, Briefcase, Wrench, Code2, Award, Stethoscope,
-  Globe, LayoutDashboard, Share2,
+  Folder, FileText, Share2, MoreHorizontal,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { ChatView }          from './components/ChatView';
-import { LiveEngineerPanel } from './components/LiveEngineerPanel';
+import { ApprovalsSidebar }  from './components/ApprovalsSidebar';
 import { ExecutionView }     from './components/ExecutionView';
 import { SettingsView }      from './components/SettingsView';
 import { FilesView }         from './components/FilesView';
 import { LogsView }          from './components/LogsView';
 import { PerformanceView }   from './components/PerformanceView';
 import { WorkersView }       from './components/WorkersView';
-import { VoicePanel }        from './components/VoicePanel';
 import { PipelineView }      from './components/PipelineView';
 import { GitPanel }          from './components/GitPanel';
 import { MemoryPanel }       from './components/MemoryPanel';
@@ -33,44 +30,11 @@ import { TaskGraphView }     from './components/TaskGraphView';
 import { CodeIndexPanel }    from './components/CodeIndexPanel';
 import { PreviewWorkspace }  from './components/PreviewWorkspace';
 import { ProjectInspector }  from './components/ProjectInspector';
+import { RepositorySummary } from './components/RepositorySummary';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { markApi, SystemMetrics } from '@/lib/markApi';
-
-// ── Voice TopNav indicator ────────────────────────────────────────────────────
-
-function VoiceMicIndicator() {
-  const { voice } = useMarkStore();
-  if (!voice.running) return null;
-
-  const stateColors: Record<string, string> = {
-    idle:         'text-muted-foreground',
-    listening:    'text-emerald-400',
-    transcribing: 'text-accent',
-    speaking:     'text-blue-400',
-    error:        'text-destructive',
-  };
-  const color = stateColors[voice.state] ?? 'text-muted-foreground';
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div className={`flex items-center gap-1.5 text-xs font-medium ${color} select-none cursor-default`}>
-          {voice.state === 'speaking'
-            ? <Volume2       className="w-3.5 h-3.5 animate-pulse" />
-            : voice.muted
-              ? <Mic         className="w-3.5 h-3.5 opacity-40" />
-              : <AudioWaveform className={`w-3.5 h-3.5 ${voice.state === 'listening' ? 'animate-pulse' : ''}`} />
-          }
-          <span className="hidden sm:inline capitalize">{voice.state}</span>
-        </div>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="text-xs">
-        Voice · {voice.mode.replace(/_/g, ' ')} · {voice.state}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
 
 // ── Token Budget pill (Feature 13) ───────────────────────────────────────────
 
@@ -127,17 +91,95 @@ function MetricsPill({ metrics }: { metrics: SystemMetrics | null }) {
   );
 }
 
+// ── Secondary tools drawer ────────────────────────────────────────────────────
+//
+// Everything that isn't one of the seven always-visible mission-control
+// panels (MARK's conversation, Active Workers, Engineering Timeline, Live
+// Preview, Project Inspector, Repository Summary, Current Activity) lives
+// here instead — not deleted, just not competing for primary screen space.
+// See docs/mark-operating-system.md's "what still doesn't match" section.
+
+const SECONDARY_TOOLS = [
+  { id: 'execution',   label: 'Execution',          icon: Activity,     Component: ExecutionView },
+  { id: 'taskgraph',   label: 'Task Graph',         icon: Share2,       Component: TaskGraphView },
+  { id: 'pipeline',    label: 'Pipeline Graph',     icon: Workflow,     Component: PipelineView },
+  { id: 'jobs',        label: 'Long Running Jobs',  icon: Briefcase,    Component: JobsPanel },
+  { id: 'files',       label: 'Files',              icon: Folder,      Component: FilesView },
+  { id: 'git',         label: 'Git (full detail)',  icon: GitBranch,    Component: GitPanel },
+  { id: 'logs',        label: 'Logs',               icon: FileText,     Component: LogsView },
+  { id: 'terminal',    label: 'Terminal',           icon: Terminal,     Component: LiveTerminal },
+  { id: 'checkpoints', label: 'Checkpoints',        icon: Bookmark,     Component: CheckpointsPanel },
+  { id: 'memory',      label: 'Engineering Memory', icon: Brain,        Component: MemoryPanel },
+  { id: 'models',      label: 'Models',             icon: Box,          Component: ModelsPanel },
+  { id: 'codeindex',   label: 'Codebase Index + RAG', icon: Code2,      Component: CodeIndexPanel },
+  { id: 'tools',       label: 'Tools & Plugins',    icon: Wrench,       Component: ToolsPanel },
+  { id: 'evaluation',  label: 'Run Evaluations',    icon: Award,        Component: EvaluationPanel },
+  { id: 'performance', label: 'Performance',        icon: LineChart,    Component: PerformanceView },
+  { id: 'diagnostics', label: 'Diagnostics',        icon: Stethoscope,  Component: DiagnosticsView },
+  { id: 'settings',    label: 'Settings',           icon: Settings,     Component: SettingsView },
+] as const;
+
+function SecondaryToolsDrawer() {
+  const [active, setActive] = useState<string>(SECONDARY_TOOLS[0].id);
+  const Active = SECONDARY_TOOLS.find(t => t.id === active)?.Component ?? ExecutionView;
+
+  return (
+    <Sheet>
+      <SheetTrigger asChild>
+        <button
+          className="flex items-center gap-1.5 text-xs font-mono bg-muted/40 hover:bg-muted/60 px-2.5 py-1.5 rounded border border-border/40 transition-colors"
+          title="More tools — Files, Logs, Terminal, Models, and other deep-dive views"
+        >
+          <MoreHorizontal className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">More</span>
+        </button>
+      </SheetTrigger>
+      <SheetContent side="right" className="w-[85vw] sm:w-[720px] sm:max-w-none p-0 flex">
+        {/* Mini icon rail — secondary tools only, not the primary workspace */}
+        <div className="w-14 shrink-0 border-r border-border/50 bg-sidebar flex flex-col items-center py-3 gap-1 overflow-y-auto">
+          {SECONDARY_TOOLS.map(tool => (
+            <Tooltip key={tool.id}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setActive(tool.id)}
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shrink-0 ${
+                    active === tool.id
+                      ? 'bg-accent text-accent-foreground shadow-md shadow-accent/20'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  }`}
+                >
+                  <tool.icon style={{ width: 18, height: 18 }} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="text-xs">{tool.label}</TooltipContent>
+            </Tooltip>
+          ))}
+        </div>
+        <div className="flex-1 min-w-0 flex flex-col">
+          <SheetHeader className="px-4 py-3 border-b border-border/50">
+            <SheetTitle className="text-sm">
+              {SECONDARY_TOOLS.find(t => t.id === active)?.label}
+            </SheetTitle>
+          </SheetHeader>
+          <div className="flex-1 min-h-0">
+            <Active />
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const {
     connectWebSocket, connectionStatus,
     running, goal, workspace, elapsed,
-    cancelRun, cancelRequested, voice,
-    serverUrl,
+    cancelRun, cancelRequested,
+    serverUrl, pendingPermissions,
   } = useMarkStore();
 
-  const [activeTab,   setActiveTab]   = React.useState<string>('chat');
   const [liveElapsed, setLiveElapsed] = React.useState(elapsed);
   const [metrics,     setMetrics]     = React.useState<SystemMetrics | null>(null);
 
@@ -196,11 +238,10 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Right: metrics + voice + timer + status + stop */}
+        {/* Right: metrics + timer + status + more-tools + stop */}
         <div className="flex items-center gap-2.5 shrink-0">
           <MetricsPill metrics={metrics} />
           <TokenBudgetPill />
-          <VoiceMicIndicator />
           <div className="flex items-center gap-1.5 text-xs font-mono bg-muted/40 px-2.5 py-1 rounded border border-border/40">
             <Clock className={`w-3.5 h-3.5 ${running ? 'text-accent animate-pulse' : 'text-muted-foreground'}`} />
             {formatTime(liveElapsed)}
@@ -214,6 +255,7 @@ export default function Dashboard() {
               <span className="flex items-center gap-1 text-muted-foreground"><Unplug className="w-3.5 h-3.5" /><span className="hidden sm:inline">Disconnected</span></span>
             )}
           </div>
+          <SecondaryToolsDrawer />
           {running && (
             <button
               onClick={cancelRun}
@@ -227,165 +269,66 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* ── MAIN LAYOUT ────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* ── MISSION-CONTROL WORKSPACE ─────────────────────────────────────────
+           All seven panels are simultaneously mounted — no tab-switching, no
+           navigation required to see what's happening. See
+           docs/mark-operating-system.md. */}
+      <PanelGroup direction="horizontal" className="flex-1 bg-background">
 
-        {/* Left icon rail — grouped as an Engineering Workspace, not a chat sidebar */}
-        <aside className="w-14 shrink-0 border-r border-border/50 bg-sidebar flex flex-col items-center py-3 gap-1 overflow-y-auto">
-
-          {/* Active Run — the conversation with MARK, the executive */}
-          <NavIcon icon={MessageSquare} active={activeTab === 'chat'} onClick={() => setActiveTab('chat')} tooltip="Active Run" glow={running} />
-
-          <Divider />
-
-          {/* Engineering team: workers, timeline, checkpoints, git, live preview */}
-          <NavIcon icon={Cpu}        active={activeTab === 'workers'}     onClick={() => setActiveTab('workers')}     tooltip="Active Workers" />
-          <NavIcon icon={Clock}      active={activeTab === 'timeline'}    onClick={() => setActiveTab('timeline')}    tooltip="Timeline" />
-          <NavIcon icon={Bookmark}   active={activeTab === 'checkpoints'} onClick={() => setActiveTab('checkpoints')} tooltip="Checkpoints" />
-          <NavIcon icon={GitBranch}  active={activeTab === 'git'}         onClick={() => setActiveTab('git')}         tooltip="Git" />
-          <NavIcon icon={Globe}      active={activeTab === 'preview'}     onClick={() => setActiveTab('preview')}     tooltip="Live Preview" />
-
-          <Divider />
-
-          {/* Project Inspector — the composite status view */}
-          <NavIcon icon={LayoutDashboard} active={activeTab === 'inspector'} onClick={() => setActiveTab('inspector')} tooltip="Project Inspector" />
-
-          <Divider />
-
-          {/* Intelligence group */}
-          <NavIcon icon={Brain}  active={activeTab === 'memory'}    onClick={() => setActiveTab('memory')}    tooltip="Engineering Memory" />
-          <NavIcon icon={Box}    active={activeTab === 'models'}    onClick={() => setActiveTab('models')}    tooltip="Models" />
-          <NavIcon icon={Code2}  active={activeTab === 'codeindex'} onClick={() => setActiveTab('codeindex')} tooltip="Codebase Index + RAG" />
-          <NavIcon icon={Wrench} active={activeTab === 'tools'}     onClick={() => setActiveTab('tools')}     tooltip="Tools & Plugins" />
-
-          <Divider />
-
-          {/* Advanced / everything else — preserved, not front-and-center */}
-          <NavIcon icon={Activity}    active={activeTab === 'execution'}   onClick={() => setActiveTab('execution')}   tooltip="Execution" />
-          <NavIcon icon={Share2}      active={activeTab === 'taskgraph'}   onClick={() => setActiveTab('taskgraph')}   tooltip="Task Graph" />
-          <NavIcon icon={Workflow}    active={activeTab === 'pipeline'}    onClick={() => setActiveTab('pipeline')}    tooltip="Pipeline Graph" />
-          <NavIcon icon={Briefcase}   active={activeTab === 'jobs'}        onClick={() => setActiveTab('jobs')}        tooltip="Long Running Jobs" />
-          <NavIcon icon={Folder}      active={activeTab === 'files'}       onClick={() => setActiveTab('files')}       tooltip="Files" />
-          <NavIcon icon={FileText}    active={activeTab === 'logs'}        onClick={() => setActiveTab('logs')}        tooltip="Logs" />
-          <NavIcon icon={Terminal}    active={activeTab === 'terminal'}    onClick={() => setActiveTab('terminal')}    tooltip="Terminal" />
-          <NavIcon icon={Award}       active={activeTab === 'evaluation'}  onClick={() => setActiveTab('evaluation')}  tooltip="Run Evaluations" />
-          <NavIcon icon={LineChart}   active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} tooltip="Performance" />
-          <NavIcon icon={Stethoscope} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} tooltip="Diagnostics" />
-
-          {/* Narration (voice, simplified) */}
-          <NavIcon
-            icon={voice.running ? AudioWaveform : Mic}
-            active={activeTab === 'voice'}
-            onClick={() => setActiveTab('voice')}
-            tooltip="Narration"
-            pulse={voice.running && voice.state === 'listening'}
-            accent={voice.running}
-          />
-
-          <div className="mt-auto pt-2">
-            <NavIcon icon={Settings} active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} tooltip="Settings" />
-          </div>
-        </aside>
-
-        {/* Workspace panels */}
-        <PanelGroup direction="horizontal" className="flex-1 bg-background">
-          <Panel defaultSize={70} minSize={30} className="flex flex-col relative z-0">
-            <div className="flex-1 overflow-hidden relative">
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.div
-                  key={activeTab}
-                  className="absolute inset-0"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.1 }}
-                >
-                  {activeTab === 'chat'        && <ChatView />}
-                  {activeTab === 'execution'   && <ExecutionView />}
-                  {activeTab === 'taskgraph'   && <TaskGraphView />}
-                  {activeTab === 'pipeline'    && <PipelineView />}
-                  {activeTab === 'workers'     && <WorkersView />}
-                  {activeTab === 'jobs'        && <JobsPanel />}
-                  {activeTab === 'files'       && <FilesView />}
-                  {activeTab === 'git'         && <GitPanel />}
-                  {activeTab === 'logs'        && <LogsView />}
-                  {activeTab === 'terminal'    && <LiveTerminal />}
-                  {activeTab === 'checkpoints' && <CheckpointsPanel />}
-                  {activeTab === 'memory'      && <MemoryPanel />}
-                  {activeTab === 'models'      && <ModelsPanel />}
-                  {activeTab === 'codeindex'   && <CodeIndexPanel />}
-                  {activeTab === 'tools'       && <ToolsPanel />}
-                  {activeTab === 'timeline'    && <TimelineView />}
-                  {activeTab === 'evaluation'  && <EvaluationPanel />}
-                  {activeTab === 'performance'  && <PerformanceView />}
-                  {activeTab === 'diagnostics'  && <DiagnosticsView />}
-                  {activeTab === 'preview'       && <PreviewWorkspace />}
-                  {activeTab === 'inspector'    && <ProjectInspector />}
-                  {activeTab === 'voice'        && <VoicePanel />}
-                  {activeTab === 'settings'     && <SettingsView />}
-                </motion.div>
-              </AnimatePresence>
+        {/* Column 1 — MARK's live conversation (the only conversational entity) */}
+        <Panel defaultSize={40} minSize={26} className="flex flex-col relative z-0">
+          {pendingPermissions.length > 0 && (
+            <div className="border-b border-destructive/30 bg-destructive/5 shrink-0">
+              <ApprovalsSidebar />
             </div>
-          </Panel>
-
-          <PanelResizeHandle className="w-1 bg-border/50 hover:bg-accent/50 transition-colors cursor-col-resize z-10">
-            <div className="h-full w-full flex flex-col justify-center items-center">
-              <div className="h-8 w-1 rounded-full bg-border" />
-            </div>
-          </PanelResizeHandle>
-
-          <Panel defaultSize={30} minSize={20} className="flex flex-col border-l border-border/50 bg-card/30">
-            <LiveEngineerPanel />
-          </Panel>
-        </PanelGroup>
-      </div>
-    </div>
-  );
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function Divider() {
-  return <div className="w-6 h-px bg-border/40 my-1 shrink-0" />;
-}
-
-function NavIcon({
-  icon: Icon, active, onClick, tooltip, pulse = false, accent = false, glow = false,
-}: {
-  icon: React.ComponentType<any>;
-  active: boolean;
-  onClick: () => void;
-  tooltip: string;
-  pulse?: boolean;
-  accent?: boolean;
-  glow?: boolean;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          onClick={onClick}
-          className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition-all shrink-0
-            ${active
-              ? 'bg-accent text-accent-foreground shadow-md shadow-accent/20'
-              : glow
-                ? 'text-accent bg-accent/10 shadow-sm shadow-accent/10'
-                : accent
-                  ? 'text-emerald-400 hover:bg-emerald-400/10'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-            }`}
-        >
-          <Icon style={{ width: 18, height: 18 }} />
-          {pulse && (
-            <motion.span
-              className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400"
-              animate={{ scale: [1, 1.5, 1], opacity: [1, 0.4, 1] }}
-              transition={{ duration: 1.2, repeat: Infinity }}
-            />
           )}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="right" className="text-xs">{tooltip}</TooltipContent>
-    </Tooltip>
+          <div className="flex-1 min-h-0">
+            <ChatView />
+          </div>
+        </Panel>
+
+        <PanelResizeHandle className="w-1 bg-border/50 hover:bg-accent/50 transition-colors cursor-col-resize z-10">
+          <div className="h-full w-full flex flex-col justify-center items-center">
+            <div className="h-8 w-1 rounded-full bg-border" />
+          </div>
+        </PanelResizeHandle>
+
+        {/* Column 2 — Live Preview + Project Inspector */}
+        <Panel defaultSize={30} minSize={20} className="flex flex-col border-l border-border/50 bg-card/20">
+          <PanelGroup direction="vertical">
+            <Panel defaultSize={60} minSize={25}>
+              <PreviewWorkspace />
+            </Panel>
+            <PanelResizeHandle className="h-1 bg-border/50 hover:bg-accent/50 transition-colors cursor-row-resize" />
+            <Panel defaultSize={40} minSize={20}>
+              <ProjectInspector />
+            </Panel>
+          </PanelGroup>
+        </Panel>
+
+        <PanelResizeHandle className="w-1 bg-border/50 hover:bg-accent/50 transition-colors cursor-col-resize z-10">
+          <div className="h-full w-full flex flex-col justify-center items-center">
+            <div className="h-8 w-1 rounded-full bg-border" />
+          </div>
+        </PanelResizeHandle>
+
+        {/* Column 3 — Active Workers · Engineering Timeline · Repository Summary */}
+        <Panel defaultSize={30} minSize={20} className="flex flex-col border-l border-border/50 bg-card/30">
+          <PanelGroup direction="vertical">
+            <Panel defaultSize={34} minSize={15}>
+              <WorkersView />
+            </Panel>
+            <PanelResizeHandle className="h-1 bg-border/50 hover:bg-accent/50 transition-colors cursor-row-resize" />
+            <Panel defaultSize={33} minSize={15}>
+              <TimelineView />
+            </Panel>
+            <PanelResizeHandle className="h-1 bg-border/50 hover:bg-accent/50 transition-colors cursor-row-resize" />
+            <Panel defaultSize={33} minSize={15}>
+              <RepositorySummary />
+            </Panel>
+          </PanelGroup>
+        </Panel>
+      </PanelGroup>
+    </div>
   );
 }
