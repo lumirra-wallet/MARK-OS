@@ -23,6 +23,8 @@ POST   /previews               — manually register a preview
 DELETE /previews/{id}          — unregister / close a preview
 POST   /previews/refresh       — trigger a full auto-detection scan
 POST   /previews/{id}/refresh  — re-probe a single preview
+POST   /previews/{id}/inspect  — self-inspect via Playwright (screenshot, console
+                                  errors, accessibility) — see smartagent/preview/
 GET    /previews/proxy/{id}/{path:path}  — proxy request to preview (iframe)
 """
 from __future__ import annotations
@@ -44,6 +46,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from smartagent.server.events import ServerEvents
+from smartagent.preview.browser_agent import browser_agent
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -209,6 +212,18 @@ class FrameworkHeuristics:
         if "vue" in b and ("<div id=" in b or "__vue" in b):
             return "vue"
 
+        # ── Flutter Web ────────────────────────────────────────────────────
+        if "flutter.js" in b or "flutter_service_worker" in b or "flt-glass-pane" in b:
+            return "flutter"
+
+        # ── Electron (remote-debugging / devtools endpoint) ────────────────
+        if "electron" in h.get("user-agent", "") or "electron" in b:
+            return "electron"
+
+        # ── React Native Web ────────────────────────────────────────────────
+        if "react-native-web" in b or "data-rnw" in b:
+            return "react-native-web"
+
         # ── React (CRA / generic) ─────────────────────────────────────────
         if "react-dom" in b or "react.development" in b or "react.production" in b:
             return "react"
@@ -231,6 +246,9 @@ class FrameworkHeuristics:
             "flask":     "Flask App",
             "django":    "Django App",
             "streamlit": "Streamlit App",
+            "flutter":   "Flutter Web App",
+            "electron":  "Electron App",
+            "react-native-web": "React Native Web App",
             "unknown":   "Dev Server",
         }
         name = _names.get(framework, "Dev Server")
@@ -658,6 +676,59 @@ async def unregister_preview(preview_id: str) -> dict:
     if rec is None:
         raise HTTPException(404, f"Preview not found: {preview_id}")
     return {"success": True, "closed": preview_id}
+
+
+class InspectPreviewRequest(BaseModel):
+    actions:              list[dict[str, Any]] | None = None
+    check_accessibility:  bool = True
+    check_responsiveness: bool = False
+
+
+def _screenshot_url(path: str | None) -> str | None:
+    """Map a local screenshot file path to the URL app.py serves it under."""
+    if not path:
+        return None
+    return f"/screenshots/{Path(path).name}"
+
+
+@router.post("/previews/{preview_id}/inspect")
+async def inspect_preview(preview_id: str, req: InspectPreviewRequest | None = None) -> dict:
+    """
+    Self-inspect a running preview via Playwright: navigate, optionally
+    click/fill, screenshot, and collect console errors + accessibility
+    findings. Runs the (blocking) Playwright call in a worker thread so it
+    doesn't block the event loop.
+    """
+    rec = preview_manager.get(preview_id)
+    if rec is None:
+        raise HTTPException(404, f"Preview not found: {preview_id}")
+    if not browser_agent.available:
+        raise HTTPException(
+            503,
+            "Browser automation is unavailable — Playwright or a Chromium "
+            "executable was not found on this machine.",
+        )
+
+    req = req or InspectPreviewRequest()
+    report = await asyncio.to_thread(
+        browser_agent.inspect,
+        rec["url"],
+        actions=req.actions,
+        check_accessibility=req.check_accessibility,
+        check_responsiveness=req.check_responsiveness,
+    )
+    return {
+        "success":                report.success,
+        "error":                  report.error,
+        "url":                    report.url,
+        "screenshot_url":         _screenshot_url(report.screenshot_path),
+        "console_errors":         report.console_errors,
+        "findings":               [f.__dict__ for f in report.findings],
+        "responsive_screenshots": {
+            device: _screenshot_url(p) for device, p in report.responsive_screenshots.items()
+        },
+        "summary": report.summary_text(),
+    }
 
 
 @router.post("/previews/{preview_id}/refresh")

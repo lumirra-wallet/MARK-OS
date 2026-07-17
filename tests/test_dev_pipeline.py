@@ -270,6 +270,33 @@ class TestExecutiveSynthesis:
         text = dp._synthesize_milestone_summary(1, 1, mr)
         assert "app.py" in text or "1/1" in text
 
+    def test_emits_reviewing_and_committing_reasoning_stages(self, ws):
+        """Timeline's 8-stage stepper needs 'reviewing'/'committing' REASONING_STAGE
+        events — DevPipeline didn't emit any REASONING_STAGE before this milestone."""
+        done_msg = MagicMock()
+        done_msg.tool_calls = []
+        done_msg.content    = "Done."
+
+        eb = make_event_bus()
+        mm = MagicMock()
+        mm.chat_stream.side_effect = [
+            iter(["1. Create app.py"]),
+            iter(["PASS: looks good."]),
+            iter(["Shipped it."]),
+            iter(["All done."]),
+        ]
+        mm.chat_with_tools.return_value = done_msg
+
+        dp = DevPipeline(mm, eb, ws)
+        dp.run("Create app.py")
+
+        stages = [
+            c.kwargs.get("stage") for c in eb.publish.call_args_list
+            if c.args and c.args[0] == "ReasoningStage"
+        ]
+        assert "reviewing" in stages
+        assert "committing" in stages
+
     def test_internal_phase_text_goes_to_activity_not_chat(self, ws):
         """Raw phase banners must publish ACTIVITY_FEED_ENTRY, not StreamingToken —
         chat only sees the one executive-composed message per milestone."""
@@ -306,6 +333,66 @@ class TestExecutiveSynthesis:
         assert any("Planning" in t for t in activity_texts)
         # And the executive-composed text is what reaches chat.
         assert any("shipped app.py cleanly" in t for t in streamed_texts)
+
+
+# ── Preview self-inspection (M8) ────────────────────────────────────────────────
+
+class TestInspectActivePreview:
+    def test_no_active_preview_returns_empty(self, ws):
+        dp = DevPipeline(make_model_manager(), make_event_bus(), ws)
+        with patch("smartagent.preview.browser_agent.browser_agent") as mock_agent:
+            mock_agent.available = True
+            with patch("smartagent.server.api_previews.preview_manager") as mock_mgr:
+                mock_mgr.all_previews.return_value = []
+                note = dp._inspect_active_preview(1, 1)
+        assert note == ""
+
+    def test_unavailable_returns_empty(self, ws):
+        dp = DevPipeline(make_model_manager(), make_event_bus(), ws)
+        with patch("smartagent.preview.browser_agent.browser_agent") as mock_agent:
+            mock_agent.available = False
+            note = dp._inspect_active_preview(1, 1)
+        assert note == ""
+
+    def test_active_preview_inspected_and_recorded(self, ws):
+        from smartagent.preview.browser_agent import InspectionReport
+
+        dp = DevPipeline(make_model_manager(), make_event_bus(), ws)
+        fake_report = InspectionReport(
+            url="http://localhost:3000",
+            screenshot_path="/tmp/x/shot.png",
+            success=True,
+        )
+        with patch("smartagent.preview.browser_agent.browser_agent") as mock_agent:
+            mock_agent.available = True
+            mock_agent.inspect.return_value = fake_report
+            with patch("smartagent.server.api_previews.preview_manager") as mock_mgr:
+                mock_mgr.all_previews.return_value = [
+                    {"status": "active", "url": "http://localhost:3000"},
+                ]
+                with patch("smartagent.server.api_timeline.record_event") as mock_record:
+                    note = dp._inspect_active_preview(2, 3)
+
+        mock_agent.inspect.assert_called_once_with("http://localhost:3000", check_accessibility=True)
+        mock_record.assert_called_once()
+        assert mock_record.call_args.args[0] == "MilestoneScreenshot"
+        assert mock_record.call_args.args[1]["screenshot_url"] == "/screenshots/shot.png"
+        assert "Inspected" in note
+
+    def test_failed_inspection_returns_empty(self, ws):
+        from smartagent.preview.browser_agent import InspectionReport
+
+        dp = DevPipeline(make_model_manager(), make_event_bus(), ws)
+        fake_report = InspectionReport(url="http://localhost:3000", success=False, error="timeout")
+        with patch("smartagent.preview.browser_agent.browser_agent") as mock_agent:
+            mock_agent.available = True
+            mock_agent.inspect.return_value = fake_report
+            with patch("smartagent.server.api_previews.preview_manager") as mock_mgr:
+                mock_mgr.all_previews.return_value = [
+                    {"status": "active", "url": "http://localhost:3000"},
+                ]
+                note = dp._inspect_active_preview(1, 1)
+        assert note == ""
 
 
 # ── Fixer goal builder ─────────────────────────────────────────────────────────

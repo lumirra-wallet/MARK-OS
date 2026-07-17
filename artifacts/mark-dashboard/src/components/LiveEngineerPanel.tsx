@@ -19,7 +19,7 @@ import {
   CheckCircle2, Circle, Loader2, AlertTriangle,
   Zap, FileText, Terminal, GitCommit, Search, FilePlus,
   Trash2, Pencil, Shield, Lightbulb, Activity, Brain,
-  RefreshCw, X, Bug,
+  RefreshCw, X, Bug, Eye, Rocket,
 } from 'lucide-react';
 import { useMarkStore, ActivityEntry, NarrationEntry, ReasoningStage } from '@/store/markStore';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -31,12 +31,14 @@ import { ApprovalsSidebar } from './ApprovalsSidebar';
 // ── Stage config ──────────────────────────────────────────────────────────────
 
 const STAGES: { id: ReasoningStage; label: string; icon: React.ComponentType<any> }[] = [
-  { id: 'analyzing',   label: 'Analyze',  icon: Search    },
-  { id: 'planning',    label: 'Plan',     icon: Brain     },
-  { id: 'writing',     label: 'Write',    icon: FilePlus  },
-  { id: 'running',     label: 'Run',      icon: Terminal  },
-  { id: 'testing',     label: 'Test',     icon: TestTube2 },
-  { id: 'committing',  label: 'Commit',   icon: GitCommit },
+  { id: 'analyzing',   label: 'Analyze',  icon: Search       },
+  { id: 'planning',    label: 'Plan',     icon: Brain        },
+  { id: 'writing',     label: 'Write',    icon: FilePlus     },
+  { id: 'running',     label: 'Run',      icon: Terminal     },
+  { id: 'testing',     label: 'Test',     icon: TestTube2    },
+  { id: 'reviewing',   label: 'Review',   icon: Eye          },
+  { id: 'committing',  label: 'Commit',   icon: GitCommit    },
+  { id: 'deploying',   label: 'Deploy',   icon: Rocket       },
   { id: 'done',        label: 'Done',     icon: CheckCircle2 },
 ];
 
@@ -103,6 +105,7 @@ function VoiceBar() {
       : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />;
 
   const isOpenAI = voice.ttsProvider === 'openai';
+  const isBrowser = voice.ttsProvider === 'browser';
 
   return (
     <div className="border-b border-border/40 bg-card/50 text-xs">
@@ -113,32 +116,26 @@ function VoiceBar() {
           <span className="font-medium text-foreground/70">Narration</span>
         </div>
 
-        {/* Provider toggle */}
+        {/* Provider toggle — Kokoro is the default; Browser is fallback-only */}
         <div className="flex items-center bg-muted/40 border border-border/40 rounded overflow-hidden text-[10px] shrink-0">
-          <button
-            onClick={() => setTtsProvider('browser')}
-            className={cn(
-              "px-2 py-0.5 transition-colors",
-              !isOpenAI ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            Browser
-          </button>
-          <button
-            onClick={() => setTtsProvider('openai')}
-            className={cn(
-              "px-2 py-0.5 transition-colors",
-              isOpenAI ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            OpenAI
-          </button>
+          {(['kokoro', 'openai', 'browser'] as const).map(p => (
+            <button
+              key={p}
+              onClick={() => setTtsProvider(p)}
+              className={cn(
+                "px-2 py-0.5 transition-colors capitalize",
+                voice.ttsProvider === p ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {p}
+            </button>
+          ))}
         </div>
 
         <div className="flex-1" />
 
         {/* Pause/resume (browser only) */}
-        {!isOpenAI && (
+        {isBrowser && (
           <Tooltip>
             <TooltipTrigger asChild>
               <button

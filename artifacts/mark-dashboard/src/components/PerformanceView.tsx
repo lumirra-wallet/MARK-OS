@@ -3,31 +3,25 @@ import { useMarkStore } from '@/store/markStore';
 import { useMemo } from 'react';
 
 export function PerformanceView() {
-  const { timeline, streamingTokens, elapsed } = useMarkStore();
+  const { streamingTokens, elapsed, tokenTimestamps } = useMarkStore();
 
-  // Very basic mock performance data derivation from timeline length or tokens
+  // Real tokens/sec series — bucket actual StreamingToken arrival timestamps
+  // (markStore.tokenTimestamps) into 1-second windows over the last 60s.
   const data = useMemo(() => {
-    // Generate synthetic data points across elapsed time to look like a chart
-    // Real app would track actual tokens/s array in store
-    const points = [];
-    let count = 0;
-    
-    // Create up to 60 points based on elapsed
-    const maxPoints = Math.max(10, Math.min(60, elapsed));
-    
-    for (let i = 0; i < maxPoints; i++) {
-      const isRecent = i > maxPoints - 5;
-      const noise = Math.random() * 20;
-      count += (streamingTokens.length > 0 && isRecent) ? 50 + noise : (Math.random() > 0.8 ? noise : 0);
-      points.push({
-        time: i,
-        tokensPerSecond: Math.floor(Math.random() * 100 * (i/maxPoints)),
-        totalTokens: Math.floor(count)
-      });
+    const now = Date.now();
+    const windowSeconds = 60;
+    const buckets = new Array(windowSeconds).fill(0);
+    for (const t of tokenTimestamps) {
+      const secAgo = Math.floor((now - t) / 1000);
+      if (secAgo >= 0 && secAgo < windowSeconds) {
+        buckets[windowSeconds - 1 - secAgo] += 1;
+      }
     }
-    
-    return points.length > 0 ? points : [{time:0, tokensPerSecond:0, totalTokens:0}];
-  }, [timeline.length, streamingTokens.length, elapsed]);
+    return buckets.map((count, i) => ({
+      time: i - windowSeconds,
+      tokensPerSecond: count,
+    }));
+  }, [tokenTimestamps]);
 
   return (
     <div className="h-full p-6 flex flex-col bg-background gap-6">

@@ -242,12 +242,19 @@ class DevPipeline:
                 success=mr.success,
             )
 
+            # Best-effort self-inspection of any running preview — a screenshot
+            # + console/accessibility findings feed both the Timeline (M5) and
+            # this milestone's executive summary, never raw output to the user.
+            preview_note = self._inspect_active_preview(i, len(milestones))
+
             # One executive-composed message per milestone — the only chat text
             # the user sees for this milestone (full detail stays in Timeline).
-            summary_text = self._synthesize_milestone_summary(i, len(milestones), mr)
+            summary_text = self._synthesize_milestone_summary(i, len(milestones), mr, preview_note)
             self._emit(summary_text)
+            self._speak(summary_text)
 
         # ── 3. Final checkpoint commit ────────────────────────────────────────
+        self._reasoning_stage("committing")
         commit_msg = f"MARK: {goal[:60]}"
         commit_out = execute_tool("git_commit", {"message": commit_msg}, self._ws)
         self._activity("commit", "Created checkpoint commit", detail=commit_out.split("\n")[0][:120])
@@ -270,6 +277,7 @@ class DevPipeline:
 
         final_text = self._synthesize_final_summary(goal, result)
         self._emit(final_text)
+        self._speak(final_text)
 
         logger.info(
             "DevPipeline done  success=%s  milestones=%d/%d  files=%d  elapsed=%.1fs",
@@ -349,6 +357,7 @@ class DevPipeline:
                 )
 
             # Reviewer
+            self._reasoning_stage("reviewing")
             review = self._review(milestone, loop_result, test_output)
             mr.review = review
             passed   = review.upper().startswith("PASS")
@@ -472,6 +481,29 @@ class DevPipeline:
         except Exception as exc:
             logger.warning("DevPipeline._emit: %s", exc)
 
+    def _speak(self, text: str) -> None:
+        """
+        Publish MARK's own executive-composed text as a ``Narration`` event —
+        never a separate, re-generated string. "Never allow spoken output to
+        differ from visible output" means literally the same text that
+        ``_emit()`` just sent to chat.
+
+        The frontend's existing ``Narration`` WS handler (markStore.ts) then
+        speaks it via the active TTS provider (Kokoro by default) — this
+        event/handler pair already existed but had no producer before this.
+        """
+        try:
+            self._eb.publish(ServerEvents.NARRATION, text=text, narration_type="summary")
+        except Exception as exc:
+            logger.warning("DevPipeline._speak: %s", exc)
+
+    def _reasoning_stage(self, stage: str) -> None:
+        """Publish a phase change for the Timeline's stage stepper."""
+        try:
+            self._eb.publish(ServerEvents.REASONING_STAGE, stage=stage, tool=None)
+        except Exception as exc:
+            logger.warning("DevPipeline._reasoning_stage: %s", exc)
+
     def _activity(
         self, kind: str, text: str, detail: str = "", success: bool = True,
     ) -> None:
@@ -503,7 +535,7 @@ class DevPipeline:
             return fallback
 
     def _synthesize_milestone_summary(
-        self, index: int, total: int, mr: MilestoneResult,
+        self, index: int, total: int, mr: MilestoneResult, preview_note: str = "",
     ) -> str:
         files = mr.files_created + mr.files_modified
         context = (
@@ -513,13 +545,57 @@ class DevPipeline:
             f"Files touched: {', '.join(files) or '(none)'}\n"
             f"Tests: {'passed' if mr.tests_passed else ('failed' if mr.test_output else 'none run')}\n"
             f"Review verdict: {mr.review[:150]}"
+            + (f"\nPreview inspection: {preview_note}" if preview_note else "")
         )
         fallback = (
             f"Milestone {index}/{total} ({mr.milestone}): "
             f"{'done' if mr.success else 'needs another pass'} — "
             f"{len(files)} file{'s' if len(files) != 1 else ''} touched."
+            + (f" {preview_note}" if preview_note else "")
         )
         return self._synthesize(context, fallback) + "\n\n"
+
+    def _inspect_active_preview(self, index: int, total: int) -> str:
+        """
+        If a live preview is registered, capture a screenshot + basic findings
+        via BrowserAgent and persist them to the Timeline. Best-effort: any
+        failure (no preview, Playwright unavailable, navigation error) just
+        means no preview_note gets fed into this milestone's summary — it
+        never breaks the pipeline.
+        """
+        try:
+            from smartagent.preview.browser_agent import browser_agent
+            if not browser_agent.available:
+                return ""
+
+            from smartagent.server.api_previews import preview_manager
+            active = [p for p in preview_manager.all_previews() if p.get("status") == "active"]
+            if not active:
+                return ""
+            preview = active[0]
+
+            report = browser_agent.inspect(preview["url"], check_accessibility=True)
+            if not report.success:
+                return ""
+
+            if report.screenshot_path:
+                try:
+                    from pathlib import Path as _Path
+                    from smartagent.server.api_timeline import record_event
+                    record_event("MilestoneScreenshot", {
+                        "milestone_index": index,
+                        "milestone_total": total,
+                        "preview_url":     preview["url"],
+                        "screenshot_url":  f"/screenshots/{_Path(report.screenshot_path).name}",
+                        "console_errors":  report.console_errors,
+                    })
+                except Exception as exc:
+                    logger.warning("DevPipeline: failed to record milestone screenshot: %s", exc)
+
+            return report.summary_text()
+        except Exception as exc:
+            logger.debug("DevPipeline: preview inspection skipped: %s", exc)
+            return ""
 
     def _synthesize_final_summary(self, goal: str, result: PipelineResult) -> str:
         n_ms   = len(result.milestones)

@@ -11,14 +11,14 @@ import { useMarkStore } from '@/store/markStore';
 import {
   Clock, ChevronRight, ChevronDown, RefreshCw, Trash2, Filter,
   Play, CheckCircle, XCircle, Zap, GitCommit, FileEdit, Terminal,
-  MessageSquare, Cpu, Activity,
+  MessageSquare, Cpu, Activity, X, Columns2, Camera,
 } from 'lucide-react';
 
 interface TimelineEvent {
   id:        string;
   run_id:    string;
   name:      string;
-  payload:   Record<string, unknown>;
+  payload:   Record<string, unknown> & { screenshot_url?: string };
   timestamp: string;
 }
 
@@ -39,6 +39,7 @@ const EVENT_ICONS: Record<string, React.ReactElement> = {
   StreamingToken: <Terminal    className="w-3 h-3 text-muted-foreground" />,
   AgentMessage:   <MessageSquare className="w-3 h-3 text-amber-300" />,
   EvaluationComplete: <Activity className="w-3 h-3 text-accent" />,
+  MilestoneScreenshot: <Camera  className="w-3 h-3 text-cyan-400" />,
 };
 
 const FILTER_GROUPS = [
@@ -49,6 +50,7 @@ const FILTER_GROUPS = [
   { label: 'Files',    values: ['FileCreated','FileModified','FileDeleted'] },
   { label: 'Tests',    values: ['TestsStarted','TestsPassed','TestsFailed'] },
   { label: 'AI',       values: ['AgentMessage','ReflectionComplete','EvaluationComplete'] },
+  { label: 'Screenshots', values: ['MilestoneScreenshot'] },
 ];
 
 export function TimelineView() {
@@ -59,6 +61,9 @@ export function TimelineView() {
   const [filter,  setFilter]  = useState<string[] | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareSelection, setCompareSelection] = useState<string[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
@@ -99,6 +104,16 @@ export function TimelineView() {
           <span className="text-xs text-muted-foreground">({visible.length} events)</span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => { setCompareMode(m => !m); setCompareSelection([]); }}
+            className={cn(
+              'flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors',
+              compareMode ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/40 text-muted-foreground',
+            )}
+          >
+            <Columns2 className="w-3.5 h-3.5" />
+            Compare
+          </button>
           <button onClick={load}  className="p-1 hover:bg-muted/40 rounded">
             <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
           </button>
@@ -184,6 +199,30 @@ export function TimelineView() {
                       </div>
                     </button>
 
+                    {/* Milestone screenshot thumbnail */}
+                    {ev.payload.screenshot_url && (
+                      <button
+                        onClick={() => {
+                          if (compareMode) {
+                            setCompareSelection(sel =>
+                              sel.includes(ev.id) ? sel.filter(id => id !== ev.id)
+                                : sel.length < 2 ? [...sel, ev.id] : [sel[1], ev.id],
+                            );
+                          } else {
+                            setLightbox(ev.payload.screenshot_url!);
+                          }
+                        }}
+                        className={cn(
+                          'mt-1.5 block rounded border overflow-hidden w-24 h-16 shrink-0',
+                          compareMode && compareSelection.includes(ev.id)
+                            ? 'border-accent ring-2 ring-accent/50'
+                            : 'border-border/40 hover:border-accent/50',
+                        )}
+                      >
+                        <img src={ev.payload.screenshot_url} alt="milestone screenshot" className="w-full h-full object-cover" />
+                      </button>
+                    )}
+
                     {isOpen && (
                       <div className="mt-2 bg-muted/20 border border-border/40 rounded p-2">
                         <pre className="text-[10px] font-mono whitespace-pre-wrap break-all text-foreground/80 max-h-48 overflow-y-auto">
@@ -202,6 +241,56 @@ export function TimelineView() {
         )}
         <div ref={bottomRef} />
       </div>
+
+      {/* Compare bar */}
+      {compareMode && compareSelection.length > 0 && (
+        <div className="border-t border-border/40 px-3 py-2 text-xs text-muted-foreground shrink-0">
+          {compareSelection.length}/2 selected for comparison
+          {compareSelection.length === 2 && (
+            <button
+              onClick={() => setLightbox('compare')}
+              className="ml-2 text-accent hover:text-accent/80"
+            >
+              View comparison →
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Lightbox / comparison overlay */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-8"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            onClick={() => setLightbox(null)}
+            className="absolute top-4 right-4 text-white/70 hover:text-white"
+          >
+            <X className="w-6 h-6" />
+          </button>
+          {lightbox === 'compare' ? (
+            <div className="flex gap-4 max-w-full max-h-full" onClick={e => e.stopPropagation()}>
+              {compareSelection.map(id => {
+                const ev = events.find(e => e.id === id);
+                return ev?.payload.screenshot_url ? (
+                  <div key={id} className="flex flex-col gap-1">
+                    <span className="text-white/60 text-xs font-mono">{ev.timestamp.slice(11, 19)}</span>
+                    <img src={ev.payload.screenshot_url} alt="" className="max-h-[70vh] rounded border border-white/20" />
+                  </div>
+                ) : null;
+              })}
+            </div>
+          ) : (
+            <img
+              src={lightbox}
+              alt="milestone screenshot"
+              className="max-w-full max-h-full rounded border border-white/20"
+              onClick={e => e.stopPropagation()}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -61,3 +61,8 @@ venv/
 vault/*/*.md
 .mark_jobs.json
 .mark_previews.json
+
+# Kokoro TTS model weights (downloaded on demand, not source — see
+# smartagent/tts/kokoro_provider.py). ~115MB, doesn't belong in git.
+.mark_tts_models/
+.mark_storage/screenshots/

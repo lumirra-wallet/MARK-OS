@@ -40,6 +40,7 @@ from smartagent.server.api_git_enhanced import router as git_enhanced_router
 from smartagent.server.api_providers    import router as providers_router
 from smartagent.server.api_diagnostics  import router as diagnostics_router
 from smartagent.server.api_previews     import router as previews_router, preview_manager
+from smartagent.server.api_tts          import router as tts_router
 from smartagent.server.voice_manager    import voice_manager
 from smartagent.server.websocket        import connection_manager
 
@@ -130,6 +131,16 @@ app.include_router(git_enhanced_router)
 app.include_router(providers_router)
 app.include_router(diagnostics_router)
 app.include_router(previews_router)
+app.include_router(tts_router)
+
+# ---------------------------------------------------------------------------
+# Preview self-inspection screenshots (smartagent/preview/browser_agent.py).
+# Mounted before the dashboard SPA catch-all below so /screenshots/* resolves
+# here first regardless of registration order.
+# ---------------------------------------------------------------------------
+_SCREENSHOT_DIR = Path(".mark_storage") / "screenshots"
+_SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/screenshots", StaticFiles(directory=_SCREENSHOT_DIR), name="preview-screenshots")
 
 # ---------------------------------------------------------------------------
 # Combined server — serve the built dashboard from this same process/port.

@@ -48,16 +48,25 @@ const DEVICES: Record<DeviceMode, DeviceConfig> = {
 // ── Framework badge colours ───────────────────────────────────────────────────
 
 const FRAMEWORK_COLORS: Record<string, string> = {
-  react:   'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
-  vite:    'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  next:    'bg-white/10 text-white/70 border-white/20',
-  vue:     'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-  svelte:  'bg-orange-500/20 text-orange-400 border-orange-500/30',
-  angular: 'bg-red-500/20 text-red-400 border-red-500/30',
-  express: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  flask:   'bg-gray-500/20 text-gray-400 border-gray-500/30',
-  fastapi: 'bg-teal-500/20 text-teal-400 border-teal-500/30',
-  unknown: 'bg-muted/40 text-muted-foreground border-border/40',
+  react:    'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
+  vite:     'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  // Backend classify() emits "nextjs" (see api_previews.py FrameworkHeuristics) —
+  // "next" kept as an alias so a manually-registered/legacy label still styles correctly.
+  nextjs:   'bg-white/10 text-white/70 border-white/20',
+  next:     'bg-white/10 text-white/70 border-white/20',
+  vue:      'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  svelte:   'bg-orange-500/20 text-orange-400 border-orange-500/30',
+  angular:  'bg-red-500/20 text-red-400 border-red-500/30',
+  express:  'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+  flask:    'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  fastapi:  'bg-teal-500/20 text-teal-400 border-teal-500/30',
+  django:      'bg-lime-500/20 text-lime-400 border-lime-500/30',
+  storybook:   'bg-pink-500/20 text-pink-400 border-pink-500/30',
+  streamlit:   'bg-red-400/20 text-red-300 border-red-400/30',
+  flutter:     'bg-sky-500/20 text-sky-400 border-sky-500/30',
+  electron:    'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
+  'react-native-web': 'bg-cyan-400/20 text-cyan-300 border-cyan-400/30',
+  unknown:  'bg-muted/40 text-muted-foreground border-border/40',
 };
 
 function frameworkColor(fw: string): string {

@@ -36,11 +36,20 @@ export interface WorkerState {
   status: 'idle' | 'running' | 'success' | 'failed' | 'skipped';
   task?: string;
   thought?: string;
+  progress?: number;
+  startedAt?: string;
+  filesTouched?: string[];
 }
 
 export interface FileOperation {
   path: string;
   operation: 'created' | 'modified' | 'deleted';
+}
+
+export interface TestRunState {
+  status: 'idle' | 'running' | 'passed' | 'failed';
+  output?: string;
+  timestamp?: string;
 }
 
 export interface OpenFile {
@@ -59,12 +68,13 @@ export interface VoiceState {
   whisperModel: string;
   ttsVoice: string;
   ttsSpeed: number;
+  ttsVolume: number;
   wakePhraseEnabled: boolean;
   transcript: string;
   isBrowserTTSFallback: boolean;
-  /** Which TTS engine to use for narration */
-  ttsProvider: 'browser' | 'openai';
-  /** OpenAI voice ID (alloy | echo | fable | onyx | nova | shimmer) */
+  /** Which TTS engine to use for narration — kokoro is the default; browser is fallback-only. */
+  ttsProvider: 'kokoro' | 'piper' | 'openai' | 'browser';
+  /** OpenAI voice ID (alloy | echo | fable | onyx | nova | shimmer) — only used when ttsProvider is 'openai' */
   openaiVoice: string;
 }
 
@@ -98,7 +108,7 @@ export interface ActivityEntry {
 
 export type ReasoningStage =
   | 'idle' | 'analyzing' | 'planning' | 'writing'
-  | 'running' | 'testing' | 'committing' | 'reviewing' | 'done';
+  | 'running' | 'testing' | 'reviewing' | 'committing' | 'deploying' | 'done';
 
 export interface NarrationEntry {
   id: string;
@@ -162,6 +172,10 @@ interface MarkState {
   lastError: string | null;
   logs: string[];
 
+  // Project Inspector — persistent test results + real token throughput
+  lastTestRun:     TestRunState;
+  tokenTimestamps: number[];
+
   // Chat
   messages: ChatMessage[];
   currentMarkMsgId: string | null;
@@ -222,8 +236,10 @@ interface MarkState {
   updateVoiceSettings:  (s: Partial<VoiceSettings>) => Promise<void>;
   transcribeAudio:      (blob: Blob) => Promise<string>;
   speak:                (text: string) => Promise<void>;
-  setTtsProvider:       (provider: 'browser' | 'openai') => void;
+  setTtsProvider:       (provider: 'kokoro' | 'piper' | 'openai' | 'browser') => void;
   setOpenaiVoice:       (voice: string) => void;
+  setTtsVoice:          (voice: string) => void;
+  setTtsVolume:         (volume: number) => void;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -240,38 +256,50 @@ const DEFAULT_WORKERS: WorkerState[] = [
 const DEFAULT_VOICE: VoiceState = {
   state: 'idle', running: false, mode: 'push_to_talk',
   muted: false, autoSubmit: true, whisperModel: 'base',
-  ttsVoice: 'en_US-lessac-medium', ttsSpeed: 1.0,
+  ttsVoice: 'af_sarah', ttsSpeed: 1.0, ttsVolume: 1.0,
   wakePhraseEnabled: false, transcript: '', isBrowserTTSFallback: false,
-  ttsProvider: 'browser', openaiVoice: 'nova',
+  ttsProvider: 'kokoro', openaiVoice: 'nova',
 };
 
 // ── Browser TTS ───────────────────────────────────────────────────────────────
 
-function browserSpeak(text: string, speed = 1.0): void {
+function browserSpeak(text: string, speed = 1.0, volume = 1.0): void {
   if (!('speechSynthesis' in window)) return;
   window.speechSynthesis.cancel();
   const utt = new SpeechSynthesisUtterance(text);
   utt.rate = Math.max(0.5, Math.min(2.0, speed));
+  utt.volume = Math.max(0, Math.min(1, volume));
   window.speechSynthesis.speak(utt);
 }
 
-// ── OpenAI TTS ────────────────────────────────────────────────────────────────
+// ── Unified TTS provider endpoint (kokoro / piper / openai) ────────────────────
+//
+// Backend dispatch lives in smartagent/tts/factory.py — whichever provider is
+// active there (kept in sync via setTtsProvider below) is what actually
+// synthesizes. The frontend doesn't need per-provider branching any more.
 
-async function openaiSpeak(text: string, voice: string, serverUrl: string): Promise<void> {
-  const res = await fetch(`${serverUrl}/voice/speak-openai`, {
+async function ttsSpeak(
+  text: string, voice: string, speed: number, serverUrl: string, volume = 1.0,
+): Promise<void> {
+  const res = await fetch(`${serverUrl}/tts/speak`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, voice }),
+    body: JSON.stringify({ text, voice, speed }),
   });
-  if (!res.ok) throw new Error(`OpenAI TTS ${res.status}`);
+  if (!res.ok) throw new Error(`TTS ${res.status}`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
+  audio.volume = Math.max(0, Math.min(1, volume));
   await new Promise<void>((resolve, reject) => {
     audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
     audio.onerror = () => { URL.revokeObjectURL(url); reject(new Error('audio error')); };
     audio.play().catch(reject);
   });
+}
+
+function _voiceForProvider(voice: VoiceState): string {
+  return voice.ttsProvider === 'openai' ? voice.openaiVoice : voice.ttsVoice;
 }
 
 // ── WebSocket singleton ───────────────────────────────────────────────────────
@@ -387,21 +415,28 @@ export const useMarkStore = create<MarkState>((set, get) => {
     }));
   };
 
-  /** Speak text via TTS if voice is active, and track in narration transcript. */
+  /** Speak text via TTS unless muted, and track in narration transcript.
+   *  Kokoro is the default provider; browser speechSynthesis is fallback-only.
+   *  Narration is gated only by mute — it doesn't require an STT "listening"
+   *  session, since speaking MARK's own summaries and listening for the
+   *  user's voice are independent concerns. */
   const _narrate = (text: string) => {
     if (!text?.trim()) return;
     _addNarration(text, 'action');
     const { voice, serverUrl } = get();
-    if (!voice.running || voice.muted) return;
-    if (voice.ttsProvider === 'openai') {
-      openaiSpeak(text, voice.openaiVoice, serverUrl).catch(() => browserSpeak(text, voice.ttsSpeed));
+    if (voice.muted) return;
+    set(state => ({ voice: { ...state.voice, state: 'speaking' } }));
+    const done = () => set(state => ({
+      voice: { ...state.voice, state: state.voice.state === 'speaking' ? 'idle' : state.voice.state },
+    }));
+    if (voice.ttsProvider === 'browser' || voice.isBrowserTTSFallback) {
+      browserSpeak(text, voice.ttsSpeed, voice.ttsVolume);
+      done();
       return;
     }
-    if (voice.isBrowserTTSFallback) {
-      browserSpeak(text, voice.ttsSpeed);
-      return;
-    }
-    markApi.speak(serverUrl, text).catch(() => browserSpeak(text, voice.ttsSpeed));
+    ttsSpeak(text, _voiceForProvider(voice), voice.ttsSpeed, serverUrl, voice.ttsVolume)
+      .catch(() => browserSpeak(text, voice.ttsSpeed, voice.ttsVolume))
+      .finally(done);
   };
 
   // ── Return the store ───────────────────────────────────────────────────────
@@ -433,6 +468,8 @@ export const useMarkStore = create<MarkState>((set, get) => {
     activeFileTab:    null,
     lastError:        null,
     logs:             [],
+    lastTestRun:      { status: 'idle' },
+    tokenTimestamps:  [],
     messages:         [],
     currentMarkMsgId: null,
     branches:         { main: [] },
@@ -638,7 +675,12 @@ export const useMarkStore = create<MarkState>((set, get) => {
 
               // ── Streaming tokens ───────────────────────────────────────────
               case 'StreamingToken': {
-                set(state => ({ streamingTokens: state.streamingTokens + payload.text }));
+                set(state => ({
+                  streamingTokens: state.streamingTokens + payload.text,
+                  // Real arrival timestamps for Project Inspector's tokens/sec chart —
+                  // capped so a long run doesn't grow this unbounded.
+                  tokenTimestamps: [...state.tokenTimestamps, Date.now()].slice(-2000),
+                }));
                 _appendText(payload.text);
                 break;
               }
@@ -649,7 +691,9 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   set(state => ({
                     currentWorker: payload.worker,
                     workers: state.workers.map(w =>
-                      w.name === payload.worker ? { ...w, status: 'running', task: payload.task } : w
+                      w.name === payload.worker
+                        ? { ...w, status: 'running', task: payload.task, progress: 0, startedAt: new Date().toISOString(), filesTouched: [] }
+                        : w
                     ),
                   }));
                   addTimeline(`Worker started: ${payload.worker}`);
@@ -673,7 +717,7 @@ export const useMarkStore = create<MarkState>((set, get) => {
                     currentWorker: null,
                     workers: state.workers.map(w =>
                       w.name === payload.worker
-                        ? { ...w, status: payload.success ? 'success' : 'failed' }
+                        ? { ...w, status: payload.success ? 'success' : 'failed', progress: 100 }
                         : w
                     ),
                   }));
@@ -716,6 +760,15 @@ export const useMarkStore = create<MarkState>((set, get) => {
                       ...state.filesInRun.filter(f => f.path !== payload.path),
                       { path: payload.path, operation: op as FileOperation['operation'] },
                     ],
+                    // Attribute the touched file to whichever worker is active —
+                    // no new backend event needed, correlated from timing alone.
+                    workers: state.currentWorker
+                      ? state.workers.map(w =>
+                          w.name === state.currentWorker && !(w.filesTouched ?? []).includes(payload.path)
+                            ? { ...w, filesTouched: [...(w.filesTouched ?? []), payload.path] }
+                            : w
+                        )
+                      : state.workers,
                   }));
                   addTimeline(`File ${op}: ${payload.path}`);
                   _pushBlock({ type: 'file', op: op as any, path: payload.path });
@@ -727,6 +780,7 @@ export const useMarkStore = create<MarkState>((set, get) => {
               case 'TestsStarted': {
                 addTimeline('Running tests…');
                 _pushBlock({ type: 'tests', status: 'running' });
+                set({ lastTestRun: { status: 'running', timestamp: new Date().toISOString() } });
                 break;
               }
               case 'TestsPassed': {
@@ -735,6 +789,7 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   b => b.type === 'tests' && (b as any).status === 'running',
                   b => ({ ...b, status: 'passed' } as ContentBlock),
                 );
+                set({ lastTestRun: { status: 'passed', output: payload.output, timestamp: new Date().toISOString() } });
                 _narrate('Tests passed!');
                 break;
               }
@@ -744,6 +799,7 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   b => b.type === 'tests' && (b as any).status === 'running',
                   b => ({ ...b, status: 'failed', output: payload.output } as ContentBlock),
                 );
+                set({ lastTestRun: { status: 'failed', output: payload.output, timestamp: new Date().toISOString() } });
                 _narrate('Tests failed. Attempting to fix…');
                 break;
               }
@@ -1124,21 +1180,35 @@ export const useMarkStore = create<MarkState>((set, get) => {
 
     speak: async (text) => {
       const { voice, serverUrl } = get();
-      if (voice.ttsProvider === 'openai') {
-        try { await openaiSpeak(text, voice.openaiVoice, serverUrl); return; } catch { /* fall through */ }
+      if (voice.ttsProvider === 'browser' || voice.isBrowserTTSFallback) {
+        browserSpeak(text, voice.ttsSpeed, voice.ttsVolume);
+        return;
       }
-      if (voice.isBrowserTTSFallback) { browserSpeak(text, voice.ttsSpeed); return; }
       try {
-        await markApi.speak(serverUrl, text);
+        await ttsSpeak(text, _voiceForProvider(voice), voice.ttsSpeed, serverUrl, voice.ttsVolume);
       } catch {
-        browserSpeak(text, voice.ttsSpeed);
+        browserSpeak(text, voice.ttsSpeed, voice.ttsVolume);
       }
     },
 
-    setTtsProvider: (provider) =>
-      set(state => ({ voice: { ...state.voice, ttsProvider: provider } })),
+    setTtsProvider: (provider) => {
+      set(state => ({ voice: { ...state.voice, ttsProvider: provider } }));
+      if (provider === 'browser') return;
+      const { serverUrl } = get();
+      fetch(`${serverUrl}/tts/provider`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider }),
+      }).catch(() => { /* best-effort — /tts/speak will just use whatever the backend still has active */ });
+    },
 
     setOpenaiVoice: (voice) =>
       set(state => ({ voice: { ...state.voice, openaiVoice: voice } })),
+
+    setTtsVoice: (voice) =>
+      set(state => ({ voice: { ...state.voice, ttsVoice: voice } })),
+
+    setTtsVolume: (volume) =>
+      set(state => ({ voice: { ...state.voice, ttsVolume: Math.max(0, Math.min(1, volume)) } })),
   };
 });

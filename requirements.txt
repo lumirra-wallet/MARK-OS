@@ -7,3 +7,15 @@
 
 pytest>=8.0
 pytest
+
+# Browser automation for MARK's preview self-inspection (smartagent/preview/).
+# Uses the system-installed Chromium (see browser_agent._find_chromium_executable),
+# not Playwright's own bundled-browser download.
+playwright>=1.40
+
+# Default TTS provider (smartagent/tts/kokoro_provider.py) — CPU/ONNX runtime,
+# matches this project's local-first design. Model weights (~115MB, the
+# quantized int8 variant) are downloaded separately into .mark_tts_models/
+# (gitignored) from https://github.com/thewh1teagle/kokoro-onnx/releases —
+# not bundled in this package.
+kokoro-onnx>=0.4

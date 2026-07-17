@@ -160,6 +160,18 @@ class TestFrameworkHeuristics:
     def test_react(self):
         assert self._classify(body="react-dom.production.min.js") == "react"
 
+    def test_flutter_web_service_worker(self):
+        assert self._classify(body='<script src="flutter_service_worker.js">') == "flutter"
+
+    def test_flutter_web_glass_pane(self):
+        assert self._classify(body="<flt-glass-pane>") == "flutter"
+
+    def test_electron_user_agent(self):
+        assert self._classify(headers={"user-agent": "Mozilla/5.0 Electron/28.0"}) == "electron"
+
+    def test_react_native_web(self):
+        assert self._classify(body='<div data-rnw="true" class="react-native-web">') == "react-native-web"
+
     def test_unknown_200(self):
         assert self._classify(body="<h1>Hello</h1>", status=200) == "unknown"
 
@@ -701,6 +713,52 @@ class TestRestEndpoints:
     def test_refresh_single_missing(self, client: TestClient, isolated_manager):
         resp = client.post("/previews/nosuchid/refresh")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 20b. Self-inspection — POST /previews/{id}/inspect
+# ---------------------------------------------------------------------------
+
+class TestInspectEndpoint:
+    def test_missing_preview_404(self, client: TestClient, isolated_manager):
+        with patch("smartagent.server.api_previews.browser_agent") as mock_agent:
+            mock_agent.available = True
+            resp = client.post("/previews/nosuchid/inspect")
+        assert resp.status_code == 404
+
+    def test_unavailable_returns_503(self, client: TestClient, isolated_manager):
+        rec = PreviewRecord.make(port=3000, url="http://localhost:3000", preview_id="insp1")
+        isolated_manager.register(rec)
+        with patch("smartagent.server.api_previews.browser_agent") as mock_agent:
+            mock_agent.available = False
+            resp = client.post("/previews/insp1/inspect")
+        assert resp.status_code == 503
+
+    def test_happy_path(self, client: TestClient, isolated_manager):
+        rec = PreviewRecord.make(port=3000, url="http://localhost:3000", preview_id="insp2")
+        isolated_manager.register(rec)
+
+        from smartagent.preview.browser_agent import InspectionReport, InspectionFinding
+        fake_report = InspectionReport(
+            url="http://localhost:3000",
+            screenshot_path="/tmp/.mark_storage/screenshots/abc.png",
+            findings=[InspectionFinding(kind="console_error", message="boom", severity="error")],
+            console_errors=["boom"],
+        )
+        with patch("smartagent.server.api_previews.browser_agent") as mock_agent:
+            mock_agent.available = True
+            mock_agent.inspect.return_value = fake_report
+            resp = client.post("/previews/insp2/inspect", json={"check_accessibility": True})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["screenshot_url"] == "/screenshots/abc.png"
+        assert body["console_errors"] == ["boom"]
+        assert "boom" in body["summary"] or "console error" in body["summary"]
+        # inspect() was called with the preview's own URL, not a caller-supplied one
+        mock_agent.inspect.assert_called_once()
+        assert mock_agent.inspect.call_args.args[0] == "http://localhost:3000"
 
 
 # ---------------------------------------------------------------------------

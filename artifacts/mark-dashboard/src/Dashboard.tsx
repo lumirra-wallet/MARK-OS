@@ -1,12 +1,12 @@
 import React, { useEffect, useCallback } from 'react';
 import { useMarkStore } from '@/store/markStore';
 import {
-  MessageSquare, Activity, FolderGit2, FileText, Cpu,
+  MessageSquare, Activity, FolderGit2, Folder, FileText, Cpu,
   LineChart, Settings, Clock, Plug, Unplug, Zap,
   Mic, AudioWaveform, Volume2, Square,
   GitBranch, Brain, Box, Workflow,
   Bookmark, Terminal, Briefcase, Wrench, Code2, Award, Stethoscope,
-  Globe,
+  Globe, LayoutDashboard, Share2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChatView }          from './components/ChatView';
@@ -32,6 +32,7 @@ import { JobsPanel }         from './components/JobsPanel';
 import { TaskGraphView }     from './components/TaskGraphView';
 import { CodeIndexPanel }    from './components/CodeIndexPanel';
 import { PreviewWorkspace }  from './components/PreviewWorkspace';
+import { ProjectInspector }  from './components/ProjectInspector';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { markApi, SystemMetrics } from '@/lib/markApi';
@@ -229,57 +230,54 @@ export default function Dashboard() {
       {/* ── MAIN LAYOUT ────────────────────────────────────────────────────── */}
       <div className="flex-1 flex overflow-hidden">
 
-        {/* Left icon rail */}
+        {/* Left icon rail — grouped as an Engineering Workspace, not a chat sidebar */}
         <aside className="w-14 shrink-0 border-r border-border/50 bg-sidebar flex flex-col items-center py-3 gap-1 overflow-y-auto">
 
-          {/* PRIMARY: Chat */}
-          <NavIcon icon={MessageSquare} active={activeTab === 'chat'}     onClick={() => setActiveTab('chat')}     tooltip="Chat"           glow={running} />
+          {/* Active Run — the conversation with MARK, the executive */}
+          <NavIcon icon={MessageSquare} active={activeTab === 'chat'} onClick={() => setActiveTab('chat')} tooltip="Active Run" glow={running} />
 
           <Divider />
 
-          {/* Execution group */}
-          <NavIcon icon={Activity}    active={activeTab === 'execution'}   onClick={() => setActiveTab('execution')}   tooltip="Execution" />
-          <NavIcon icon={GitBranch}   active={activeTab === 'taskgraph'}   onClick={() => setActiveTab('taskgraph')}   tooltip="Task Graph" />
-          <NavIcon icon={Workflow}    active={activeTab === 'pipeline'}    onClick={() => setActiveTab('pipeline')}    tooltip="Pipeline Graph" />
-          <NavIcon icon={Cpu}         active={activeTab === 'workers'}     onClick={() => setActiveTab('workers')}     tooltip="Workers" />
-          <NavIcon icon={Briefcase}   active={activeTab === 'jobs'}        onClick={() => setActiveTab('jobs')}        tooltip="Long Running Jobs" />
+          {/* Engineering team: workers, timeline, checkpoints, git, live preview */}
+          <NavIcon icon={Cpu}        active={activeTab === 'workers'}     onClick={() => setActiveTab('workers')}     tooltip="Active Workers" />
+          <NavIcon icon={Clock}      active={activeTab === 'timeline'}    onClick={() => setActiveTab('timeline')}    tooltip="Timeline" />
+          <NavIcon icon={Bookmark}   active={activeTab === 'checkpoints'} onClick={() => setActiveTab('checkpoints')} tooltip="Checkpoints" />
+          <NavIcon icon={GitBranch}  active={activeTab === 'git'}         onClick={() => setActiveTab('git')}         tooltip="Git" />
+          <NavIcon icon={Globe}      active={activeTab === 'preview'}     onClick={() => setActiveTab('preview')}     tooltip="Live Preview" />
 
           <Divider />
 
-          {/* Project group */}
-          <NavIcon icon={FolderGit2}  active={activeTab === 'files'}      onClick={() => setActiveTab('files')}       tooltip="Files" />
-          <NavIcon icon={FolderGit2}  active={activeTab === 'git'}        onClick={() => setActiveTab('git')}         tooltip="Git" />
-          <NavIcon icon={FileText}    active={activeTab === 'logs'}        onClick={() => setActiveTab('logs')}        tooltip="Logs" />
-          <NavIcon icon={Terminal}    active={activeTab === 'terminal'}    onClick={() => setActiveTab('terminal')}    tooltip="Terminal" />
-          <NavIcon icon={Bookmark}    active={activeTab === 'checkpoints'} onClick={() => setActiveTab('checkpoints')} tooltip="Checkpoints" />
+          {/* Project Inspector — the composite status view */}
+          <NavIcon icon={LayoutDashboard} active={activeTab === 'inspector'} onClick={() => setActiveTab('inspector')} tooltip="Project Inspector" />
 
           <Divider />
 
           {/* Intelligence group */}
-          <NavIcon icon={Brain}       active={activeTab === 'memory'}      onClick={() => setActiveTab('memory')}      tooltip="Memory" />
-          <NavIcon icon={Box}         active={activeTab === 'models'}      onClick={() => setActiveTab('models')}      tooltip="Models" />
-          <NavIcon icon={Code2}       active={activeTab === 'codeindex'}   onClick={() => setActiveTab('codeindex')}   tooltip="Codebase Index + RAG" />
-          <NavIcon icon={Wrench}      active={activeTab === 'tools'}       onClick={() => setActiveTab('tools')}       tooltip="Tools & Plugins" />
+          <NavIcon icon={Brain}  active={activeTab === 'memory'}    onClick={() => setActiveTab('memory')}    tooltip="Engineering Memory" />
+          <NavIcon icon={Box}    active={activeTab === 'models'}    onClick={() => setActiveTab('models')}    tooltip="Models" />
+          <NavIcon icon={Code2}  active={activeTab === 'codeindex'} onClick={() => setActiveTab('codeindex')} tooltip="Codebase Index + RAG" />
+          <NavIcon icon={Wrench} active={activeTab === 'tools'}     onClick={() => setActiveTab('tools')}     tooltip="Tools & Plugins" />
 
           <Divider />
 
-          {/* Preview */}
-          <NavIcon icon={Globe}        active={activeTab === 'preview'}      onClick={() => setActiveTab('preview')}      tooltip="Live Preview" />
+          {/* Advanced / everything else — preserved, not front-and-center */}
+          <NavIcon icon={Activity}    active={activeTab === 'execution'}   onClick={() => setActiveTab('execution')}   tooltip="Execution" />
+          <NavIcon icon={Share2}      active={activeTab === 'taskgraph'}   onClick={() => setActiveTab('taskgraph')}   tooltip="Task Graph" />
+          <NavIcon icon={Workflow}    active={activeTab === 'pipeline'}    onClick={() => setActiveTab('pipeline')}    tooltip="Pipeline Graph" />
+          <NavIcon icon={Briefcase}   active={activeTab === 'jobs'}        onClick={() => setActiveTab('jobs')}        tooltip="Long Running Jobs" />
+          <NavIcon icon={Folder}      active={activeTab === 'files'}       onClick={() => setActiveTab('files')}       tooltip="Files" />
+          <NavIcon icon={FileText}    active={activeTab === 'logs'}        onClick={() => setActiveTab('logs')}        tooltip="Logs" />
+          <NavIcon icon={Terminal}    active={activeTab === 'terminal'}    onClick={() => setActiveTab('terminal')}    tooltip="Terminal" />
+          <NavIcon icon={Award}       active={activeTab === 'evaluation'}  onClick={() => setActiveTab('evaluation')}  tooltip="Run Evaluations" />
+          <NavIcon icon={LineChart}   active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} tooltip="Performance" />
+          <NavIcon icon={Stethoscope} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} tooltip="Diagnostics" />
 
-          <Divider />
-
-          {/* Observability group */}
-          <NavIcon icon={Clock}        active={activeTab === 'timeline'}     onClick={() => setActiveTab('timeline')}     tooltip="Agent Timeline" />
-          <NavIcon icon={Award}        active={activeTab === 'evaluation'}   onClick={() => setActiveTab('evaluation')}   tooltip="Run Evaluations" />
-          <NavIcon icon={LineChart}    active={activeTab === 'performance'}  onClick={() => setActiveTab('performance')}  tooltip="Performance" />
-          <NavIcon icon={Stethoscope} active={activeTab === 'diagnostics'}  onClick={() => setActiveTab('diagnostics')}  tooltip="Diagnostics" />
-
-          {/* Voice */}
+          {/* Narration (voice, simplified) */}
           <NavIcon
             icon={voice.running ? AudioWaveform : Mic}
             active={activeTab === 'voice'}
             onClick={() => setActiveTab('voice')}
-            tooltip="Voice Settings"
+            tooltip="Narration"
             pulse={voice.running && voice.state === 'listening'}
             accent={voice.running}
           />
@@ -322,6 +320,7 @@ export default function Dashboard() {
                   {activeTab === 'performance'  && <PerformanceView />}
                   {activeTab === 'diagnostics'  && <DiagnosticsView />}
                   {activeTab === 'preview'       && <PreviewWorkspace />}
+                  {activeTab === 'inspector'    && <ProjectInspector />}
                   {activeTab === 'voice'        && <VoicePanel />}
                   {activeTab === 'settings'     && <SettingsView />}
                 </motion.div>
