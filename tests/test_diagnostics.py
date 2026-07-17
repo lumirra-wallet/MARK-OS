@@ -584,24 +584,21 @@ class TestCheckEmbeddings:
         assert result["status"] == "warn"
         assert "Anthropic" in result["message"] or "anthropic" in result["message"].lower()
 
-    def test_ollama_ok(self):
+    def test_nvidia_warns_no_embedding_endpoint(self):
+        """nvidia/nemotron-* is a chat model with no embedding endpoint —
+        this must be reported, never attempt a real network call."""
         from smartagent.server.api_diagnostics import _check_embeddings
-        embed_data = json.dumps({"embeddings": [[0.1] * 8]}).encode()
-        mock_resp = MagicMock(); mock_resp.read.return_value = embed_data
-        ctx = MagicMock(); ctx.__enter__ = MagicMock(return_value=mock_resp); ctx.__exit__ = MagicMock(return_value=False)
-        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
-             patch("urllib.request.urlopen", return_value=ctx):
-            result = self._run(_check_embeddings())
-        assert result["status"] == "ok"
-        assert "dim=8" in result["message"]
-
-    def test_ollama_unavailable_is_warn(self):
-        from smartagent.server.api_diagnostics import _check_embeddings
-        import urllib.error
-        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
-             patch("urllib.request.urlopen", side_effect=urllib.error.URLError("refused")):
+        with patch("smartagent.llm.factory.get_active_provider", return_value="nvidia"):
             result = self._run(_check_embeddings())
         assert result["status"] == "warn"
+
+    def test_unknown_provider_returns_error(self):
+        """Ollama is not supported — get_active_provider() never returns it
+        in practice, but _check_embeddings() still degrades gracefully."""
+        from smartagent.server.api_diagnostics import _check_embeddings
+        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"):
+            result = self._run(_check_embeddings())
+        assert result["status"] == "error"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
