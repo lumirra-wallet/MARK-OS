@@ -4,6 +4,76 @@ All notable changes to MARK are documented here.
 
 ---
 
+## Unreleased — Engineering Workspace Redesign
+
+### Added
+
+**Combined server** — `smartagent/server/app.py` now mounts the built dashboard
+(`artifacts/mark-dashboard/dist/public`) as static files with a SPA-fallback
+route, so the API and dashboard run from a single port/process. `pnpm dev`
+now builds once + watches; the old split two-process mode is `pnpm dev:split`.
+
+**Executive synthesis layer** — `DevPipeline` (`smartagent/engineer/
+dev_pipeline.py`) no longer streams raw internal prose to chat. Every phase
+(plan, milestone, test, review, commit) now publishes a structured
+`ActivityFeedEntry` (Timeline detail only); one LLM call per milestone (and
+one at the end) composes MARK's actual executive-voice chat message. The
+existing `Narration` WS event (previously defined but never published) now
+has a real producer, wired to the same text via `DevPipeline._speak()`.
+
+**Per-task permission scoping** — `smartagent/engineer/agent_tools.py`'s
+`execute_tool()` accepts an optional `allowed_paths` list; write/rename/
+delete calls outside that scope are rejected. `DevPipeline` computes it per
+milestone from the milestone's own declared file targets (`extract_file_targets`).
+
+**Project Inspector** (`ProjectInspector.tsx`) — new composite panel:
+Running Applications, Current Branch, Recent Commits, Files Changed, Test
+Results (new persistent `lastTestRun` store state), Worker Status, real
+Performance telemetry (replacing `PerformanceView`'s previously mocked/random
+data with an actual tokens/sec series), and Active Model/Provider.
+
+**Browser automation** (`smartagent/preview/browser_agent.py`) — Playwright-
+based self-inspection of MARK's own live previews via the system-installed
+Chromium (no bundled-browser download). Navigate, click, fill, screenshot,
+console-error capture, and a dependency-free accessibility floor check.
+Wired into `DevPipeline` — a screenshot + findings get captured after each
+milestone if a preview is active, persisted to the Timeline
+(`MilestoneScreenshot` event), and folded into that milestone's executive
+summary. New endpoint: `POST /previews/{id}/inspect`.
+
+**Kokoro TTS provider** (`smartagent/tts/`) — new provider abstraction
+(`TTSProvider` protocol, mirroring `smartagent/llm/`'s factory pattern) with
+Kokoro (default, CPU/ONNX, `kokoro-onnx`), Piper, OpenAI, and browser
+providers, switchable via `POST /tts/provider`. `VoicePanel.tsx` is now a
+slim Narration panel (Voice Provider, Voice Selection, Speaking Status,
+Volume, Mute) — Push-to-Talk/Wake-Word/Continuous-mode UI and mic recording
+controls were removed from the frontend (the underlying `/voice/*` STT
+endpoints are untouched, for backward compatibility).
+
+**Engineering Workspace sidebar** — `Dashboard.tsx`'s sidebar regrouped
+around Active Run / Active Workers / Timeline / Checkpoints / Git / Live
+Preview / Project Inspector / Engineering Memory / Models, with the rest
+preserved under an Advanced group. `WorkersView.tsx` cards now show
+progress, runtime, and files touched per worker (collapsible).
+
+**Timeline 8-stage lifecycle** — `ReasoningStage` (and the stepper UI) now
+covers Analyze → Plan → Write → Run → Test → Review → Commit → Deploy;
+`TimelineView.tsx` renders screenshot thumbnails (lightbox + side-by-side
+comparison) for entries that have one.
+
+### Fixed
+
+- `agent_tools._safe_path`'s traversal check used `str.startswith()`, which
+  wrongly allows a sibling directory sharing the workspace path as a string
+  prefix; now uses `resolve()` + `is_relative_to()`.
+- Preview framework label mismatch: backend `classify()` emits `"nextjs"`,
+  frontend `FRAMEWORK_COLORS` only had `"next"` — both now map correctly.
+  Added Electron / Flutter Web / React Native Web detection.
+- `pnpm --filter @workspace/mark-dashboard build` failed outright without
+  `PORT`/`BASE_PATH` env vars set — now defaults sensibly.
+
+---
+
 ## v2.0.0 — Production Grade
 
 ### Added
