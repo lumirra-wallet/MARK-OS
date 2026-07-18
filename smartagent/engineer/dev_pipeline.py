@@ -33,8 +33,9 @@ import re
 import subprocess
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from smartagent.identity.mark_identity import (
     build_system_prompt,
@@ -47,6 +48,7 @@ from smartagent.engineer.worker_roles import (
 )
 from smartagent.llm.factory import is_llm_error_text
 from smartagent.logs.logger import get_logger
+from smartagent.performance.complexity import classify_complexity, TaskComplexity
 from smartagent.server.events import ServerEvents
 
 logger = get_logger(__name__)
@@ -760,10 +762,92 @@ class DevPipeline:
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Complexity router
+# Intent classification — the single Conversation Manager decision point.
+#
+# Replaces two independently-maintained, ad-hoc classifiers that used to live
+# here and in smartagent/server/api.py (_is_conversational_goal +
+# is_complex_goal) with one function and one decision. See
+# docs/mark-operating-system.md and the B2 plan note for why: the old
+# _is_conversational_goal defaulted ambiguous, non-action phrasing ("what do
+# you think?") to the AGENT path rather than conversation — the concrete
+# mechanism behind "every message starts an engineering session."
 # ────────────────────────────────────────────────────────────────────────────
 
-# Patterns that indicate a goal needs the full Planner→Executor→Reviewer loop
+class IntentCategory(str, Enum):
+    """Best-effort label for telemetry/system-prompt selection — the ROUTE
+    below is what actually decides worker dispatch, not this label alone."""
+    CASUAL      = "casual"
+    QUESTION    = "question"
+    BRAINSTORM  = "brainstorm"
+    PLANNING    = "planning"
+    ENGINEERING = "engineering"
+    DEBUGGING   = "debugging"
+    RESEARCH    = "research"
+    EXPLANATION = "explanation"
+
+
+@dataclass(frozen=True)
+class IntentDecision:
+    category:   IntentCategory
+    route:      Literal["conversational", "simple_agent", "complex_pipeline"]
+    complexity: "TaskComplexity | None" = None
+
+
+# Pure greeting / acknowledgement patterns — these and only these go to chat.
+# "Can you X?", "Please help", "What is X?" are NOT here — they route to the
+# agent execution path where MARK will actually act.
+_PURE_GREETING_PATTERNS = [
+    re.compile(p, re.I) for p in [
+        r"^\s*h(?:i|ey|ello)[\s!?.]*$",
+        r"^\s*good\s+(?:morning|afternoon|evening|day)[\s!?.]*$",
+        r"^\s*how\s+are\s+you[\s!?.]*$",
+        r"^\s*(?:thanks?|thank\s+you)[\s!?.]*$",
+        r"^\s*ok(?:ay)?[\s!?.]*$",
+        r"^\s*who\s+are\s+you[\s!?.]*$",
+        r"^\s*what\s+are\s+you[\s!?.]*$",
+        r"^\s*what\s+can\s+you\s+do[\s!?.]*$",
+        r"^\s*(?:yo|sup|howdy)[\s!?.]*$",
+    ]
+]
+
+# Any word from this set in the goal → always route to agent execution,
+# regardless of phrasing (a "can you write to my workspace?" question is
+# still a real action request, not small talk).
+_ACTION_KEYWORDS = frozenset({
+    # file/workspace operations
+    "file", "files", "folder", "directory", "workspace", "project",
+    "write", "read", "create", "build", "make", "generate", "add", "fix",
+    "update", "refactor", "implement", "edit", "patch", "delete", "rename",
+    "move", "copy", "open", "save", "load", "parse", "format",
+    # code
+    "code", "function", "class", "module", "method", "variable", "import",
+    "api", "endpoint", "app", "script", "program", "server", "client",
+    # infra / tools
+    "deploy", "install", "setup", "configure", "test", "debug", "run",
+    "execute", "commit", "push", "pull", "branch", "git", "docker",
+    "npm", "pnpm", "pip", "cargo", "pytest", "jest",
+    # languages / frameworks
+    "python", "javascript", "typescript", "flask", "fastapi", "react",
+    "vue", "angular", "django", "express", "node", "rust", "go",
+    # misc technical
+    "database", "sql", "migration", "schema", "model", "view", "route",
+    "middleware", "auth", "login", "session", "token", "jwt", "oauth",
+    "package", "dependency", "requirements", "environment", "config",
+})
+
+_DEBUG_KEYWORDS = frozenset({"bug", "debug", "broken", "error", "crash", "fail", "failing", "failed"})
+
+_QUESTION_WORDS = frozenset({
+    "what", "how", "why", "should", "do", "does", "is", "are",
+    "can", "could", "would", "who", "when", "where", "will",
+})
+
+# Patterns that indicate a goal needs the full Planner→Executor→Reviewer loop.
+# Kept as a supplementary escalation signal alongside classify_complexity()
+# (below) rather than dropped — some real complexity signals here (bare
+# "project", "with tests", "package", "repository", "multi-file/page/module")
+# aren't all covered by classify_complexity's own tiers, and silently losing
+# them would downgrade real complex-pipeline goals to the simple-agent path.
 _COMPLEX_PATTERNS = [
     re.compile(p, re.I) for p in [
         r"\bfull[\s-]?stack\b",
@@ -781,19 +865,65 @@ _COMPLEX_PATTERNS = [
     ]
 ]
 
-def is_complex_goal(goal: str) -> bool:
-    """
-    Return True when *goal* needs the full pipeline (Planner + multi-step
-    execution + tests + review).  Simple file/query/command tasks return False.
 
-    A goal is complex when it matches a complexity pattern — no word-count gate,
-    because short goals like "Build a project with tests" are just as complex as
-    longer ones.
+def classify_intent(goal: str) -> IntentDecision:
+    """
+    The single Conversation Manager decision point: does *goal* stay
+    conversational, run as a single-shot agent action, or need the full
+    multi-worker pipeline?
+
+    Conservative by design, same reasoning the old classifiers documented —
+    false negatives (chat message treated as a code task) produce a
+    harmless agent response; false positives (code task treated as chat)
+    produce the wrong "I'm MARK…" answer. The one behavior change from the
+    old system: ambiguous, non-action phrasing that reads as a question
+    ("what do you think?") now defaults to conversational instead of
+    silently falling through to the agent path.
     """
     g = goal.strip()
     if not g:
-        return False
-    for pat in _COMPLEX_PATTERNS:
-        if pat.search(g):
-            return True
-    return False
+        return IntentDecision(IntentCategory.CASUAL, "conversational")
+
+    # 1. Greeting/social — unchanged, already correct.
+    for pat in _PURE_GREETING_PATTERNS:
+        if pat.match(g):
+            return IntentDecision(IntentCategory.CASUAL, "conversational")
+
+    words_lower = {w.lower().strip("?!.,;:'\"") for w in g.split()}
+    has_action_keyword = bool(words_lower & _ACTION_KEYWORDS)
+    has_file_pattern = bool(re.search(r'\b\w+\.\w{1,6}\b', g))
+
+    # 2. Clear action/code/workspace signal → route by complexity, never
+    #    conversational, regardless of phrasing (e.g. a question).
+    if has_action_keyword or has_file_pattern:
+        complexity = classify_complexity(g)
+        legacy_complex = any(pat.search(g) for pat in _COMPLEX_PATTERNS)
+        is_pipeline_tier = complexity not in (TaskComplexity.TRIVIAL, TaskComplexity.SMALL)
+        route = "complex_pipeline" if (is_pipeline_tier or legacy_complex) else "simple_agent"
+        category = IntentCategory.DEBUGGING if (words_lower & _DEBUG_KEYWORDS) else IntentCategory.ENGINEERING
+        return IntentDecision(category, route, complexity)
+
+    # 3. The fallthrough fix: ambiguous, non-action phrasing that reads as a
+    #    question defaults to conversational instead of the agent path.
+    first_word = g.split()[0].lower().strip("?!.,;:'\"") if g.split() else ""
+    is_interrogative = g.rstrip().endswith("?") or first_word in _QUESTION_WORDS
+    word_count = len(g.split())
+    if is_interrogative and word_count <= 12:
+        category = (
+            IntentCategory.BRAINSTORM
+            if words_lower & {"should", "could", "would"}
+            else IntentCategory.QUESTION
+        )
+        return IntentDecision(category, "conversational")
+
+    # 4. Very short, no action keyword → chat (preserves the old ≤3-word
+    #    fallback for short non-interrogative phrasing like "sounds good").
+    if word_count <= 3:
+        return IntentDecision(IntentCategory.CASUAL, "conversational")
+
+    # 5. Everything else: route by complexity tier.
+    complexity = classify_complexity(g)
+    legacy_complex = any(pat.search(g) for pat in _COMPLEX_PATTERNS)
+    is_pipeline_tier = complexity not in (TaskComplexity.TRIVIAL, TaskComplexity.SMALL)
+    route = "complex_pipeline" if (is_pipeline_tier or legacy_complex) else "simple_agent"
+    return IntentDecision(IntentCategory.ENGINEERING, route, complexity)

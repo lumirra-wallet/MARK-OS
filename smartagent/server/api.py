@@ -47,6 +47,7 @@ from smartagent.identity.mark_identity import (
     OPENING_SURFACE_NOTES,
     PLAN_SURFACE_NOTES,
 )
+from smartagent.engineer.dev_pipeline import classify_intent
 from smartagent.llm.factory import is_llm_error_text
 from smartagent.server.events import ServerEvents, broadcaster, intercept_print
 from smartagent.server.workspace_analyzer import (
@@ -103,84 +104,13 @@ _state = RunState()
 # ---------------------------------------------------------------------------
 # Chat / planning helpers
 # ---------------------------------------------------------------------------
-
-import re as _re
-
-# Pure greeting / acknowledgement patterns — these and only these go to chat.
-# "Can you X?", "Please help", "What is X?" are NOT here — they route to the
-# agent execution path where MARK will actually act.
-_PURE_GREETING_PATTERNS: list = [
-    _re.compile(p, _re.I) for p in [
-        r"^\s*h(?:i|ey|ello)[\s!?.]*$",
-        r"^\s*good\s+(?:morning|afternoon|evening|day)[\s!?.]*$",
-        r"^\s*how\s+are\s+you[\s!?.]*$",
-        r"^\s*(?:thanks?|thank\s+you)[\s!?.]*$",
-        r"^\s*ok(?:ay)?[\s!?.]*$",
-        r"^\s*who\s+are\s+you[\s!?.]*$",
-        r"^\s*what\s+are\s+you[\s!?.]*$",
-        r"^\s*what\s+can\s+you\s+do[\s!?.]*$",
-        r"^\s*(?:yo|sup|howdy)[\s!?.]*$",
-    ]
-]
-
-# Any word from this set in the goal → always route to agent execution.
-_ACTION_KEYWORDS = frozenset({
-    # file/workspace operations
-    "file", "files", "folder", "directory", "workspace", "project",
-    "write", "read", "create", "build", "make", "generate", "add", "fix",
-    "update", "refactor", "implement", "edit", "patch", "delete", "rename",
-    "move", "copy", "open", "save", "load", "parse", "format",
-    # code
-    "code", "function", "class", "module", "method", "variable", "import",
-    "api", "endpoint", "app", "script", "program", "server", "client",
-    # infra / tools
-    "deploy", "install", "setup", "configure", "test", "debug", "run",
-    "execute", "commit", "push", "pull", "branch", "git", "docker",
-    "npm", "pnpm", "pip", "cargo", "pytest", "jest",
-    # languages / frameworks
-    "python", "javascript", "typescript", "flask", "fastapi", "react",
-    "vue", "angular", "django", "express", "node", "rust", "go",
-    # misc technical
-    "database", "sql", "migration", "schema", "model", "view", "route",
-    "middleware", "auth", "login", "session", "token", "jwt", "oauth",
-    "package", "dependency", "requirements", "environment", "config",
-})
-
-
-def _is_conversational_goal(goal: str) -> bool:
-    """
-    Return True ONLY for pure greetings and acknowledgements (no workspace
-    or code intent whatsoever).  Everything else routes to the agent
-    execution path where MARK can actually act via tools.
-
-    Conservative by design — false negatives (chat message treated as code
-    task) produce a harmless agent response.  False positives (code task
-    treated as chat) produce the wrong "I'm MARK…" answer.
-    """
-    g = goal.strip()
-    if not g:
-        return False
-
-    # Pure greeting / thanks patterns → chat
-    for pat in _PURE_GREETING_PATTERNS:
-        if pat.match(g):
-            return True
-
-    # Any action/code/workspace keyword → agent, regardless of phrasing
-    words_lower = {w.lower().strip("?!.,;:'\"") for w in g.split()}
-    if words_lower & _ACTION_KEYWORDS:
-        return False
-
-    # File-extension or path pattern → agent
-    if _re.search(r'\b\w+\.\w{1,6}\b', g):
-        return False
-
-    # Very short messages (≤ 3 words) with no action keyword → chat
-    if len(g.split()) <= 3:
-        return True
-
-    return False
-
+#
+# Intent classification lives in smartagent.engineer.dev_pipeline.classify_intent
+# — the single Conversation Manager decision point (see B2 plan note). This
+# used to be two independent, ad-hoc classifiers (_is_conversational_goal
+# here + is_complex_goal in dev_pipeline.py); consolidating them fixed a real
+# bug where ambiguous, non-action phrasing ("what do you think?") defaulted
+# to the agent path instead of staying conversational.
 
 # System prompts ─────────────────────────────────────────────────────────────
 
@@ -445,9 +375,16 @@ async def execute(req: ExecuteRequest) -> dict:
                 getattr(agent.model_manager, "_active_model_id", "none"),
             )
 
-            # ── Route: conversational vs agent task ──────────────────────────
-            if _is_conversational_goal(req.goal):
-                # ── CHAT PATH — pure greetings / acknowledgements ─────────────
+            # ── Route: the single Conversation Manager decision point ────────
+            intent = classify_intent(req.goal)
+            logger.info(
+                "MARK STATE intent  goal=%r  category=%s  route=%s",
+                req.goal[:60], intent.category.value, intent.route,
+            )
+
+            if intent.route == "conversational":
+                # ── CHAT PATH — greetings, questions, brainstorming; no ──────
+                # worker dispatch at all.
                 logger.info("MARK STATE chat  goal=%r", req.goal[:60])
 
                 def _do_chat() -> None:
@@ -469,7 +406,7 @@ async def execute(req: ExecuteRequest) -> dict:
                 logger.info("MARK STATE chat-complete")
 
             else:
-                # ── AGENT PATH — every non-chat request goes here ─────────────
+                # ── AGENT PATH — every non-conversational request goes here ──
                 # MARK uses tool calling to read/write files, run terminal
                 # commands, and manage git — never just generates text.
                 # Complex multi-step goals → DevPipeline (Planner+Exec+Test+Review+Fix)
@@ -485,15 +422,27 @@ async def execute(req: ExecuteRequest) -> dict:
                     return
 
                 from smartagent.engineer.agent_loop import run_agent_loop
-                from smartagent.engineer.dev_pipeline import DevPipeline, is_complex_goal
+                from smartagent.engineer.dev_pipeline import DevPipeline
 
-                use_pipeline = is_complex_goal(req.goal)
+                use_pipeline = intent.route == "complex_pipeline"
                 logger.info(
-                    "MARK STATE routing  goal=%r  use_pipeline=%s",
+                    "MARK STATE routing  goal=%r  use_pipeline=%s  complexity=%s",
                     req.goal[:60], use_pipeline,
+                    intent.complexity.value if intent.complexity else None,
                 )
 
                 if use_pipeline:
+                    # Bigger, multi-milestone builds get a short heads-up of
+                    # what MARK is about to do before dispatch — gives
+                    # _MARK_PLAN_SYSTEM its only live call site. Skipped for
+                    # simple_agent tasks to avoid latency/noise on quick asks.
+                    def _do_plan_announcement() -> None:
+                        _stream_llm_response(
+                            req.goal, _MARK_PLAN_SYSTEM,
+                            agent.model_manager, event_bus,
+                        )
+                    await asyncio.to_thread(_do_plan_announcement)
+
                     def _run_pipeline() -> Any:
                         pipeline = DevPipeline(
                             model_manager  = agent.model_manager,

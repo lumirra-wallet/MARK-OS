@@ -1,7 +1,9 @@
-"""Tests for _is_conversational_goal() — the intent router in api.py."""
+"""Tests for classify_intent() — the Conversation Manager's single decision
+point in dev_pipeline.py (replaces the retired _is_conversational_goal in
+api.py and is_complex_goal in dev_pipeline.py — see B2 plan note)."""
 
 import pytest
-from smartagent.server.api import _is_conversational_goal as is_chat
+from smartagent.engineer.dev_pipeline import classify_intent
 
 
 # ── True chat (pure greetings/acknowledgements) ────────────────────────────────
@@ -25,7 +27,7 @@ from smartagent.server.api import _is_conversational_goal as is_chat
     "yo",
 ])
 def test_is_chat_for_greetings(goal):
-    assert is_chat(goal) is True, f"Expected chat for: {goal!r}"
+    assert classify_intent(goal).route == "conversational", f"Expected chat for: {goal!r}"
 
 
 # ── False (should route to agent execution) ────────────────────────────────────
@@ -65,4 +67,24 @@ def test_is_chat_for_greetings(goal):
     "update requirements.txt",
 ])
 def test_is_agent_for_code_tasks(goal):
-    assert is_chat(goal) is False, f"Expected agent for: {goal!r}"
+    assert classify_intent(goal).route != "conversational", f"Expected agent for: {goal!r}"
+
+
+# ── Regression: ambiguous, non-action phrasing must stay conversational ───────
+#
+# The bug B2 fixes: the old _is_conversational_goal defaulted anything that
+# fell through its greeting/keyword/short-message checks to the AGENT path —
+# so an open question with no action keyword and more than 3 words (like
+# "what do you think?") silently triggered a tool-calling agent run instead
+# of a plain conversational reply.
+
+@pytest.mark.parametrize("goal", [
+    "what do you think?",
+    "what do you think about this approach?",
+    "should we take a break?",
+    "do you have any thoughts on this?",
+    "is this a good idea?",
+    "how does this look to you?",
+])
+def test_ambiguous_questions_stay_conversational(goal):
+    assert classify_intent(goal).route == "conversational", f"Expected chat for: {goal!r}"

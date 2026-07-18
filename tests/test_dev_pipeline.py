@@ -15,7 +15,7 @@ from smartagent.engineer.dev_pipeline import (
     DevPipeline,
     PipelineResult,
     MilestoneResult,
-    is_complex_goal,
+    classify_intent,
     extract_file_targets,
 )
 
@@ -63,40 +63,43 @@ def ws(tmp_path: Path):
     return str(tmp_path)
 
 
-# ── is_complex_goal ────────────────────────────────────────────────────────────
+# ── classify_intent — engineering routing (complex_pipeline vs simple_agent) ──
 
 class TestIsComplexGoal:
+    """Same cases as the retired is_complex_goal(), now checking
+    classify_intent(...).route instead of a bare bool."""
+
     def test_short_goal_never_complex(self):
-        assert is_complex_goal("Create hello.py") is False
+        assert classify_intent("Create hello.py").route == "simple_agent"
 
     def test_create_file_not_complex(self):
-        assert is_complex_goal("Write a Python script that sorts a list") is False
+        assert classify_intent("Write a Python script that sorts a list").route == "simple_agent"
 
     def test_full_stack_is_complex(self):
-        assert is_complex_goal(
+        assert classify_intent(
             "Build a full-stack TODO app with React frontend and Flask backend"
-        ) is True
+        ).route == "complex_pipeline"
 
     def test_project_keyword_is_complex(self):
-        assert is_complex_goal(
+        assert classify_intent(
             "Create a project with authentication, database models, and REST endpoints"
-        ) is True
+        ).route == "complex_pipeline"
 
     def test_with_tests_is_complex(self):
-        assert is_complex_goal(
+        assert classify_intent(
             "Build a Flask REST API for a blog system with tests and documentation"
-        ) is True
+        ).route == "complex_pipeline"
 
     def test_from_scratch_is_complex(self):
-        assert is_complex_goal(
+        assert classify_intent(
             "Build a microservice architecture from scratch with Docker and CI/CD"
-        ) is True
+        ).route == "complex_pipeline"
 
     def test_simple_command_not_complex(self):
-        assert is_complex_goal("Run pytest and show me the output") is False
+        assert classify_intent("Run pytest and show me the output").route == "simple_agent"
 
     def test_empty_not_complex(self):
-        assert is_complex_goal("") is False
+        assert classify_intent("").route == "conversational"
 
 
 # ── DevPipeline initialisation ────────────────────────────────────────────────
