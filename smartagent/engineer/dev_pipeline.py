@@ -49,7 +49,10 @@ from smartagent.engineer.worker_roles import (
 from smartagent.llm.factory import is_llm_error_text
 from smartagent.logs.logger import get_logger
 from smartagent.performance.complexity import classify_complexity, TaskComplexity
+from smartagent.server.conversation_store import workspace_id
+from smartagent.server.engineering_memory import engineering_memory
 from smartagent.server.events import ServerEvents
+from smartagent.storage.factory import get_storage
 
 logger = get_logger(__name__)
 
@@ -248,6 +251,13 @@ class DevPipeline:
         t0     = time.monotonic()
         result = PipelineResult(goal=goal)
 
+        # Fresh engineering-memory session per top-level goal — mirrors the
+        # existing _state.workers reset at the top of api.py's /run handler.
+        engineering_memory.clear()
+        engineering_memory.set_goal(goal)
+        engineering_memory.set_context(f"workspace={self._ws}")
+        self._persist_and_broadcast_memory()
+
         self._activity("plan", f"Planning: {goal[:80]}")
 
         # ── 1. Plan ───────────────────────────────────────────────────────────
@@ -289,6 +299,12 @@ class DevPipeline:
                 f"Milestone {i} complete ({mr.attempts} attempt{'s' if mr.attempts != 1 else ''}, {mr.elapsed:.1f}s)",
                 success=mr.success,
             )
+
+            engineering_memory.add_milestone(milestone, completed=mr.success)
+            if not mr.success:
+                reason = mr.review[:150] if mr.review else "did not pass review after retries"
+                engineering_memory.add_blocker(f"{milestone[:60]}: {reason}")
+            self._persist_and_broadcast_memory()
 
             # Best-effort self-inspection of any running preview — a screenshot
             # + console/accessibility findings feed both the Timeline (M5) and
@@ -551,6 +567,19 @@ class DevPipeline:
             self._eb.publish(ServerEvents.STREAMING_TOKEN, text=text, source="mark")
         except Exception as exc:
             logger.warning("DevPipeline._emit: %s", exc)
+
+    def _persist_and_broadcast_memory(self) -> None:
+        """Persist engineering_memory's current snapshot and notify the
+        dashboard — same best-effort, non-blocking shape as every other
+        publish helper here."""
+        try:
+            payload = engineering_memory.to_dict()
+            get_storage().set(
+                "agent_state", f"{workspace_id(self._ws)}:engineering_memory", payload,
+            )
+            self._eb.publish(ServerEvents.MEMORY_UPDATED, **payload)
+        except Exception as exc:
+            logger.warning("DevPipeline._persist_and_broadcast_memory: %s", exc)
 
     def _reasoning_stage(self, stage: str) -> None:
         """Publish a phase change for the Timeline's stage stepper."""

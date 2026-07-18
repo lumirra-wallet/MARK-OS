@@ -635,3 +635,116 @@ class TestPipelineRun:
         # ServerEvents.STREAMING_TOKEN == "StreamingToken"
         streaming_calls = [c for c in calls if "StreamingToken" in str(c)]
         assert streaming_calls, "No STREAMING_TOKEN (StreamingToken) events emitted"
+
+
+# ── B6 — engineering_memory wiring ───────────────────────────────────────────
+
+class TestEngineeringMemoryWiring:
+    @pytest.fixture(autouse=True)
+    def _clear_memory(self):
+        from smartagent.server.engineering_memory import engineering_memory
+        engineering_memory.clear()
+        yield
+        engineering_memory.clear()
+
+    def _done_msg(self):
+        m = MagicMock()
+        m.tool_calls = []
+        m.content    = "Done."
+        return m
+
+    def test_run_sets_goal_and_context(self, ws):
+        from smartagent.server.engineering_memory import engineering_memory
+        mm = MagicMock()
+        mm.chat_stream.side_effect = [iter(["1. Step one"]), iter(["PASS: done."])]
+        mm.chat_with_tools.return_value = self._done_msg()
+
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        dp.run("Build the thing")
+
+        assert engineering_memory.current_goal == "Build the thing"
+        assert ws in engineering_memory.context
+
+    def test_run_records_completed_milestone(self, ws):
+        from smartagent.server.engineering_memory import engineering_memory
+        mm = MagicMock()
+        mm.chat_stream.side_effect = [iter(["1. Step one"]), iter(["PASS: done."])]
+        mm.chat_with_tools.return_value = self._done_msg()
+
+        dp = DevPipeline(mm, make_event_bus(), ws)
+        dp.run("Build a project test create")
+
+        assert len(engineering_memory.milestones) == 1
+        assert engineering_memory.milestones[0].completed is True
+
+    def test_run_records_blocker_on_failed_milestone(self, ws):
+        from smartagent.server.engineering_memory import engineering_memory
+
+        # A tool call that never writes a file, repeated every turn, so the
+        # executor exhausts MAX_MILESTONE_TURNS with files_created == [] —
+        # the only way AgentLoopResult.success comes back False (an
+        # immediate "no more tool calls" reply is always success=True,
+        # regardless of whether anything was written).
+        stall_tc = MagicMock()
+        stall_tc.id = "tc-stall"
+        stall_tc.function.name      = "list_directory"
+        stall_tc.function.arguments = '{"path": "."}'
+        stall_msg = MagicMock()
+        stall_msg.tool_calls = [stall_tc]
+        stall_msg.content    = ""
+
+        mm = MagicMock()
+        # Planner gives one milestone; reviewer fails the (only) attempt.
+        mm.chat_stream.side_effect = [iter(["1. Step one"]), iter(["FAIL: still broken."])]
+        mm.chat_with_tools.return_value = stall_msg
+
+        dp = DevPipeline(mm, make_event_bus(), ws, max_fix_attempts=1)
+        result = dp.run("Build a project test create")
+
+        assert result.milestone_results[0].success is False
+        assert len(engineering_memory.blockers) == 1
+        assert "Step one" in engineering_memory.blockers[0].text
+
+    def test_run_broadcasts_memory_updated(self, ws):
+        mm = MagicMock()
+        mm.chat_stream.side_effect = [iter(["1. Step one"]), iter(["PASS: done."])]
+        mm.chat_with_tools.return_value = self._done_msg()
+
+        eb = make_event_bus()
+        dp = DevPipeline(mm, eb, ws)
+        dp.run("Build a project test create")
+
+        memory_calls = [c for c in eb.publish.call_args_list
+                        if c.args and c.args[0] == "MemoryUpdated"]
+        assert memory_calls, "No MemoryUpdated events published"
+        _, kwargs = memory_calls[-1]
+        assert kwargs["current_goal"] == "Build a project test create"
+
+    def test_run_persists_to_storage(self, ws):
+        mm = MagicMock()
+        mm.chat_stream.side_effect = [iter(["1. Step one"]), iter(["PASS: done."])]
+        mm.chat_with_tools.return_value = self._done_msg()
+
+        fake_store = MagicMock()
+        with patch("smartagent.engineer.dev_pipeline.get_storage", return_value=fake_store):
+            dp = DevPipeline(mm, make_event_bus(), ws)
+            dp.run("Build a project test create")
+
+        assert fake_store.set.called
+        args, _ = fake_store.set.call_args
+        assert args[0] == "agent_state"
+        assert args[1].endswith(":engineering_memory")
+
+    def test_storage_failure_does_not_crash_run(self, ws):
+        """Persist/broadcast is best-effort — a storage exception must not
+        abort the pipeline."""
+        mm = MagicMock()
+        mm.chat_stream.side_effect = [iter(["1. Step one"]), iter(["PASS: done."])]
+        mm.chat_with_tools.return_value = self._done_msg()
+
+        with patch("smartagent.engineer.dev_pipeline.get_storage",
+                   side_effect=RuntimeError("boom")):
+            dp = DevPipeline(mm, make_event_bus(), ws)
+            result = dp.run("Build a project test create")
+
+        assert result.success is True
