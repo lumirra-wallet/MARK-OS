@@ -2,7 +2,7 @@
 Storage factory — returns the active StorageProvider singleton.
 
 Selection order:
-    1. DATABASE_PROVIDER env var  ("sqlite" | "postgres")
+    1. DATABASE_PROVIDER env var  ("sqlite" | "postgres" | "mongodb")
     2. DATABASE_URL present        → postgres
     3. Default                     → sqlite (local JSON files)
 
@@ -48,6 +48,19 @@ def _create() -> "StorageProvider":
             )
         from smartagent.storage.postgres_storage import PostgresStorageProvider
         p = PostgresStorageProvider(database_url)
+        p.initialize()
+        return p
+
+    if provider_name == "mongodb":
+        mongodb_uri = os.environ.get("MONGODB_URI", "")
+        if not mongodb_uri:
+            raise RuntimeError(
+                "DATABASE_PROVIDER=mongodb but MONGODB_URI is not set. "
+                "Set MONGODB_URI=mongodb+srv://user:pass@cluster/..."
+            )
+        db_name = os.environ.get("MONGODB_DB_NAME", "mark")
+        from smartagent.storage.mongo_storage import MongoStorageProvider
+        p = MongoStorageProvider(mongodb_uri, db_name)
         p.initialize()
         return p
 

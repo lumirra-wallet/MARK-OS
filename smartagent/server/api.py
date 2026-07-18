@@ -51,6 +51,7 @@ from smartagent.engineer.dev_pipeline import classify_intent
 from smartagent.llm.factory import is_llm_error_text
 from smartagent.server import conversation_store
 from smartagent.server.events import ServerEvents, broadcaster, intercept_print
+from smartagent.server.reflection import reflect_on_run
 from smartagent.server.workspace_analyzer import (
     analyze_workspace as _analyze_workspace,
     idle_suggestions as _idle_suggestions,
@@ -358,6 +359,7 @@ async def execute(req: ExecuteRequest) -> dict:
         ev_payload: dict = {"goal": req.goal, "error": "Unexpected internal error.", "success": False}
         event_bus        = None   # assigned inside try
         ticker_task      = None   # assigned inside try
+        agent: Any       = None   # assigned inside try — may stay None if init fails
 
         logger.info(
             "MARK STATE queued    goal=%r  workspace=%r",
@@ -614,13 +616,21 @@ async def execute(req: ExecuteRequest) -> dict:
 
         # Feature 8 — self-reflection
         try:
+            outcome_summary = ev_payload.get("summary") or ev_payload.get("error", "")
+
+            def _do_reflect() -> Any:
+                return reflect_on_run(
+                    req.goal, outcome_summary, _job_success,
+                    ev_name == ServerEvents.RUN_CANCELLED,
+                    agent.model_manager if agent is not None else None,
+                )
+
+            reflection_result = await asyncio.to_thread(_do_reflect)
             reflection = {
                 "succeeded": _job_success,
                 "goal":      req.goal[:200],
                 "elapsed_s": round(elapsed, 1),
-                "lesson":    "Run completed successfully." if _job_success
-                             else ("Run was cancelled." if ev_name == ServerEvents.RUN_CANCELLED
-                                   else "Run finished with failures — check summary or error."),
+                "lesson":    reflection_result.lesson,
             }
             await connection_manager.broadcast({
                 "type":    "event",
@@ -628,6 +638,13 @@ async def execute(req: ExecuteRequest) -> dict:
                 "payload": reflection,
                 "timestamp": _now_iso(),
             })
+            if reflection_result.should_ask_user and reflection_result.ask_user_message:
+                await connection_manager.broadcast({
+                    "type":    "event",
+                    "name":    ServerEvents.MARK_PROACTIVE,
+                    "payload": {"text": reflection_result.ask_user_message},
+                    "timestamp": _now_iso(),
+                })
         except Exception:
             pass
 

@@ -1,11 +1,12 @@
 """
-Milestone 2 — Storage layer tests.
+Milestone 2 — Storage layer tests. Extended in B5 for MongoDB.
 
 Covers:
   StorageRecord           — dataclass fields, to_dict(), timestamps
   StorageProvider         — ABC helpers: get_or_default, exists, clear_namespace, health
   LocalStorageProvider    — full CRUD, overwrite, thread safety, persistence, health
   PostgresStorageProvider — full CRUD + health via mocked SQLAlchemy engine
+  MongoStorageProvider    — full CRUD + health via mocked pymongo client
   storage factory         — provider selection, singleton, reset_storage
 """
 
@@ -36,6 +37,35 @@ def sa_mock():
     sa.create_engine = MagicMock()
     with patch.dict(sys.modules, {"sqlalchemy": sa, "sqlalchemy.orm": MagicMock()}):
         yield sa
+
+
+# ── Shared pymongo mock ───────────────────────────────────────────────────────
+#
+# pymongo is not installed in this environment.  Any method that does
+# ``from pymongo import MongoClient`` would fail without a sys.modules patch.
+
+@pytest.fixture()
+def pymongo_mock():
+    """Inject a mock pymongo module so runtime imports succeed."""
+    pm = MagicMock()
+    with patch.dict(sys.modules, {"pymongo": pm}):
+        yield pm
+
+
+def _make_mongo_client(find_one=None, find_results=None, delete_count=1):
+    """Build a minimal pymongo MongoClient/db/collection mock chain."""
+    collection = MagicMock()
+    collection.find_one.return_value = find_one
+    collection.find.return_value.sort.return_value = iter(find_results or [])
+    collection.delete_one.return_value = MagicMock(deleted_count=delete_count)
+
+    db = MagicMock()
+    db.__getitem__.return_value = collection
+
+    client = MagicMock()
+    client.__getitem__.return_value = db
+    client.admin.command = MagicMock()
+    return client, db, collection
 
 
 def _make_engine(rows: list | None = None, rowcount: int = 1):
@@ -437,6 +467,181 @@ class TestPostgresStorageCRUD:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# MongoStorageProvider  (mocked pymongo)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMongoStorageInit:
+    def test_init_stores_uri_and_defaults_db_name(self):
+        from smartagent.storage.mongo_storage import MongoStorageProvider
+        p = MongoStorageProvider("mongodb://user:pass@host/")
+        assert "host" in p._uri
+        assert p._db_name == "mark"
+        assert p._client is None
+        assert p._collection is None
+
+    def test_init_accepts_custom_db_name(self):
+        from smartagent.storage.mongo_storage import MongoStorageProvider
+        p = MongoStorageProvider("mongodb://x/", db_name="custom")
+        assert p._db_name == "custom"
+
+    def test_uninitialized_get_raises(self, pymongo_mock):
+        from smartagent.storage.mongo_storage import MongoStorageProvider
+        p = MongoStorageProvider("mongodb://x/")
+        with pytest.raises(RuntimeError, match="not initialized"):
+            p.get("ns", "k")
+
+    def test_initialize_missing_pymongo_raises(self, monkeypatch):
+        import builtins
+        real = builtins.__import__
+        def fake(name, *a, **kw):
+            if name == "pymongo": raise ImportError("no pymongo")
+            return real(name, *a, **kw)
+        monkeypatch.setattr(builtins, "__import__", fake)
+        from smartagent.storage.mongo_storage import MongoStorageProvider
+        p = MongoStorageProvider("mongodb://x/")
+        with pytest.raises(RuntimeError, match="pip install pymongo"):
+            p.initialize()
+
+    def test_initialize_sets_client_and_collection(self, pymongo_mock):
+        from smartagent.storage.mongo_storage import MongoStorageProvider
+        client, db, collection = _make_mongo_client()
+        pymongo_mock.MongoClient.return_value = client
+        p = MongoStorageProvider("mongodb://x/")
+        p.initialize()
+        assert p._client is client
+        assert p._collection is collection
+        assert collection.create_index.called
+
+    def test_initialize_ping_failure_raises(self, pymongo_mock):
+        from smartagent.storage.mongo_storage import MongoStorageProvider
+        client, _, _ = _make_mongo_client()
+        client.admin.command.side_effect = Exception("connection refused")
+        pymongo_mock.MongoClient.return_value = client
+        p = MongoStorageProvider("mongodb://x/")
+        with pytest.raises(RuntimeError, match="cannot connect"):
+            p.initialize()
+
+
+class TestMongoStorageCRUD:
+    """All pymongo calls go through the pymongo_mock fixture."""
+
+    @pytest.fixture(autouse=True)
+    def _pm(self, pymongo_mock):
+        self._pymongo_mock = pymongo_mock
+
+    @pytest.fixture
+    def store(self):
+        from smartagent.storage.mongo_storage import MongoStorageProvider
+        return MongoStorageProvider("mongodb://x/")
+
+    def _wire(self, store, find_one=None, find_results=None, delete_count=1):
+        client, db, collection = _make_mongo_client(find_one, find_results, delete_count)
+        store._client = client
+        store._collection = collection
+        return client, db, collection
+
+    # ── get ──────────────────────────────────────────────────────────────────
+
+    def test_get_existing(self, store):
+        self._wire(store, find_one={"value": {"k": "v"}})
+        assert store.get("ns", "k") == {"k": "v"}
+
+    def test_get_missing_returns_none(self, store):
+        self._wire(store, find_one=None)
+        assert store.get("ns", "missing") is None
+
+    def test_get_scalar(self, store):
+        self._wire(store, find_one={"value": 42})
+        assert store.get("ns", "k") == 42
+
+    # ── set ──────────────────────────────────────────────────────────────────
+
+    def test_set_calls_update_one_upsert(self, store):
+        _, _, collection = self._wire(store)
+        store.set("ns", "k", {"x": 1})
+        assert collection.update_one.called
+        _, kwargs = collection.update_one.call_args
+        assert kwargs.get("upsert") is True
+
+    def test_set_stores_value_natively_no_json_encoding(self, store):
+        _, _, collection = self._wire(store)
+        store.set("ns", "k", [1, 2, 3])
+        args, _ = collection.update_one.call_args
+        update_doc = args[1]
+        assert update_doc["$set"]["value"] == [1, 2, 3]
+
+    def test_set_passes_namespace_and_key_filter(self, store):
+        _, _, collection = self._wire(store)
+        store.set("myns", "mykey", "val")
+        args, _ = collection.update_one.call_args
+        assert args[0] == {"namespace": "myns", "key": "mykey"}
+
+    def test_set_preserves_created_at_via_set_on_insert(self, store):
+        _, _, collection = self._wire(store)
+        store.set("ns", "k", "v")
+        args, _ = collection.update_one.call_args
+        assert "created_at" in args[1]["$setOnInsert"]
+        assert "created_at" not in args[1]["$set"]
+
+    # ── delete ────────────────────────────────────────────────────────────────
+
+    def test_delete_returns_true_when_deleted(self, store):
+        self._wire(store, delete_count=1)
+        assert store.delete("ns", "k") is True
+
+    def test_delete_returns_false_when_no_doc(self, store):
+        self._wire(store, delete_count=0)
+        assert store.delete("ns", "k") is False
+
+    # ── list_keys ─────────────────────────────────────────────────────────────
+
+    def test_list_keys_returns_keys(self, store):
+        self._wire(store, find_results=[{"key": "alpha"}, {"key": "beta"}])
+        assert store.list_keys("ns") == ["alpha", "beta"]
+
+    def test_list_keys_empty(self, store):
+        self._wire(store, find_results=[])
+        assert store.list_keys("ns") == []
+
+    # ── list_records ──────────────────────────────────────────────────────────
+
+    def test_list_records_returns_storage_records(self, store):
+        from smartagent.storage.base import StorageRecord
+        docs = [
+            {"key": "k1", "value": "hello", "created_at": "2024-01-01T00:00:00+00:00",
+             "updated_at": "2024-01-02T00:00:00+00:00"},
+            {"key": "k2", "value": 42, "created_at": "2024-02-01T00:00:00+00:00",
+             "updated_at": "2024-02-02T00:00:00+00:00"},
+        ]
+        self._wire(store, find_results=docs)
+        recs = store.list_records("myns")
+        assert len(recs) == 2
+        assert all(isinstance(r, StorageRecord) for r in recs)
+        assert recs[0].key == "k1"; assert recs[0].value == "hello"
+        assert recs[1].value == 42
+        assert all(r.namespace == "myns" for r in recs)
+
+    # ── health ────────────────────────────────────────────────────────────────
+
+    def test_health_ok(self, store):
+        self._wire(store)
+        h = store.health()
+        assert h["status"]  == "ok"
+        assert h["provider"] == "mongodb"
+
+    def test_health_error_on_exception(self, store):
+        client, _, _ = self._wire(store)
+        client.admin.command.side_effect = Exception("connection refused")
+        h = store.health()
+        assert h["status"] == "error"
+
+    def test_health_uninitialized(self, store):
+        # _client is None (never wired)
+        h = store.health()
+        assert h["status"] == "error"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Storage factory
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -503,6 +708,40 @@ class TestStorageFactory:
         monkeypatch.setenv("STORAGE_DIR",  str(tmp_path / "s"))
         from smartagent.storage.local_storage import LocalStorageProvider
         assert isinstance(fac.get_storage(), LocalStorageProvider)
+
+    def test_mongodb_without_uri_raises(self, monkeypatch):
+        import smartagent.storage.factory as fac
+        monkeypatch.setenv("DATABASE_PROVIDER", "mongodb")
+        monkeypatch.delenv("MONGODB_URI", raising=False)
+        with pytest.raises(RuntimeError, match="MONGODB_URI"):
+            fac.get_storage()
+
+    def test_mongodb_selected_when_provider_set(self, monkeypatch):
+        import smartagent.storage.factory as fac
+        monkeypatch.setenv("DATABASE_PROVIDER", "mongodb")
+        monkeypatch.setenv("MONGODB_URI", "mongodb://x/")
+        with patch("smartagent.storage.mongo_storage.MongoStorageProvider.initialize"):
+            store = fac.get_storage()
+        from smartagent.storage.mongo_storage import MongoStorageProvider
+        assert isinstance(store, MongoStorageProvider)
+
+    def test_mongodb_default_db_name(self, monkeypatch):
+        import smartagent.storage.factory as fac
+        monkeypatch.setenv("DATABASE_PROVIDER", "mongodb")
+        monkeypatch.setenv("MONGODB_URI", "mongodb://x/")
+        monkeypatch.delenv("MONGODB_DB_NAME", raising=False)
+        with patch("smartagent.storage.mongo_storage.MongoStorageProvider.initialize"):
+            store = fac.get_storage()
+        assert store._db_name == "mark"
+
+    def test_mongodb_custom_db_name(self, monkeypatch):
+        import smartagent.storage.factory as fac
+        monkeypatch.setenv("DATABASE_PROVIDER", "mongodb")
+        monkeypatch.setenv("MONGODB_URI", "mongodb://x/")
+        monkeypatch.setenv("MONGODB_DB_NAME", "custom_db")
+        with patch("smartagent.storage.mongo_storage.MongoStorageProvider.initialize"):
+            store = fac.get_storage()
+        assert store._db_name == "custom_db"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
