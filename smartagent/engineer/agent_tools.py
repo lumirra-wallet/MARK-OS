@@ -494,6 +494,49 @@ def _git_commit(args: dict, ws: str) -> str:
     return out or f"Committed: {message}"
 
 
+def git_unpushed_count(ws: str) -> int:
+    """
+    Number of local commits not yet on the upstream branch.
+
+    Returns 0 if there's no upstream configured or the check fails for any
+    other reason — callers that need the real error (e.g. "no upstream
+    branch") get it from ``git_push`` itself, which always attempts the
+    actual push rather than second-guessing why the count came back 0.
+    """
+    r = subprocess.run(
+        ["git", "rev-list", "@{u}..HEAD", "--count"],
+        capture_output=True, text=True, cwd=ws, timeout=10,
+    )
+    if r.returncode != 0:
+        return 0
+    try:
+        return int(r.stdout.strip())
+    except ValueError:
+        return 0
+
+
+def _git_push(args: dict, ws: str) -> str:
+    """
+    Push local commits to the configured upstream remote.
+
+    Only reachable after approval gating — see ``requires_approval`` below
+    and MARK's post-run push flow in ``smartagent/server/api.py``, which is
+    the only current caller. Not exposed to the LLM tool-calling loop (not
+    in ``TOOL_DEFINITIONS``) — pushing is MARK's own executive decision
+    after a successful engineering run, never something a worker decides to
+    do mid-conversation.
+    """
+    if git_unpushed_count(ws) == 0:
+        return "Nothing to push."
+    r = subprocess.run(
+        ["git", "push"], capture_output=True, text=True, cwd=ws, timeout=30,
+    )
+    out = (r.stdout + r.stderr).strip()
+    if r.returncode != 0:
+        return f"git push failed: {out or 'unknown error'}"
+    return out or "Pushed."
+
+
 def _rename_file(args: dict, ws: str) -> str:
     src = _safe_path(ws, args["src"])
     dst = _safe_path(ws, args["dst"])
@@ -528,6 +571,7 @@ _DISPATCH: dict[str, Any] = {
     "git_status":      _git_status,
     "git_diff":        _git_diff,
     "git_commit":      _git_commit,
+    "git_push":        _git_push,
     "rename_file":     _rename_file,
     "delete_file":     _delete_file,
 }

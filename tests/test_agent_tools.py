@@ -16,6 +16,7 @@ import pytest
 from smartagent.engineer.agent_tools import (
     TOOL_DEFINITIONS,
     execute_tool,
+    git_unpushed_count,
     requires_approval,
     _safe_path,
 )
@@ -301,6 +302,77 @@ class TestGitOperations:
         (Path(git_ws) / "test.py").write_text("x = 1\n")
         result = execute_tool("git_commit", {"message": "initial commit"}, git_ws)
         assert "initial commit" in result or "master" in result or "main" in result or "commit" in result.lower()
+
+
+# ── git push ────────────────────────────────────────────────────────────────
+
+class TestGitPush:
+    @pytest.fixture()
+    def git_ws(self, tmp_path):
+        """Same bare init as TestGitOperations — no upstream configured."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"],
+                       cwd=repo, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, capture_output=True)
+        return str(repo)
+
+    @pytest.fixture()
+    def git_ws_with_remote(self, git_ws, tmp_path):
+        """A repo with a real local bare remote, tracked and pushed once."""
+        remote = tmp_path / "remote.git"
+        subprocess.run(["git", "init", "--bare", str(remote)], capture_output=True)
+        (Path(git_ws) / "seed.txt").write_text("seed\n")
+        subprocess.run(["git", "add", "-A"], cwd=git_ws, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "seed commit"], cwd=git_ws, capture_output=True)
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=git_ws,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        subprocess.run(["git", "remote", "add", "origin", str(remote)],
+                       cwd=git_ws, capture_output=True)
+        subprocess.run(["git", "push", "-u", "origin", branch],
+                       cwd=git_ws, capture_output=True)
+        return git_ws
+
+    def test_unpushed_count_no_upstream_is_zero(self, git_ws):
+        assert git_unpushed_count(git_ws) == 0
+
+    def test_push_no_upstream_reports_nothing_to_push(self, git_ws):
+        result = execute_tool("git_push", {}, git_ws)
+        assert result == "Nothing to push."
+
+    def test_unpushed_count_zero_right_after_push(self, git_ws_with_remote):
+        assert git_unpushed_count(git_ws_with_remote) == 0
+
+    def test_unpushed_count_reflects_new_local_commit(self, git_ws_with_remote):
+        (Path(git_ws_with_remote) / "more.txt").write_text("more\n")
+        subprocess.run(["git", "add", "-A"], cwd=git_ws_with_remote, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "second commit"],
+                       cwd=git_ws_with_remote, capture_output=True)
+        assert git_unpushed_count(git_ws_with_remote) == 1
+
+    def test_push_actually_pushes_and_resets_count(self, git_ws_with_remote):
+        (Path(git_ws_with_remote) / "more.txt").write_text("more\n")
+        subprocess.run(["git", "add", "-A"], cwd=git_ws_with_remote, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "second commit"],
+                       cwd=git_ws_with_remote, capture_output=True)
+
+        result = execute_tool("git_push", {}, git_ws_with_remote)
+
+        assert result != "Nothing to push."
+        assert "failed" not in result.lower()
+        assert git_unpushed_count(git_ws_with_remote) == 0
+
+    def test_git_push_is_approval_required(self):
+        assert requires_approval("git_push") is True
+
+    def test_git_push_not_in_llm_tool_definitions(self):
+        """Push is MARK's own executive decision after a run, not something
+        the LLM tool-calling loop can invoke mid-conversation."""
+        names = {t["function"]["name"] for t in TOOL_DEFINITIONS}
+        assert "git_push" not in names
 
 
 # ── unknown tool ───────────────────────────────────────────────────────────────

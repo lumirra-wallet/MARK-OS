@@ -33,6 +33,11 @@ class DenyRequest(BaseModel):
     reason: str = Field("", description="Optional reason shown in the UI.")
 
 
+class AutonomyModeRequest(BaseModel):
+    """Set the Level-4 (engineering execution) autonomy mode."""
+    mode: str = Field(..., description='"manual" (pause for approval) or "auto" (auto-approve).')
+
+
 # ---------------------------------------------------------------------------
 # Responses
 # ---------------------------------------------------------------------------

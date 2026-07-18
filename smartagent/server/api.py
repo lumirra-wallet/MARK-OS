@@ -11,6 +11,8 @@ POST /execute      — start a MARK software-engineering run
 POST /cancel       — request cancellation of the current run
 POST /approve      — approve a pending permission request
 POST /deny         — deny a pending permission request
+GET  /settings/autonomy  — current Level-4 autonomy mode ("manual" | "auto")
+POST /settings/autonomy  — set the Level-4 autonomy mode
 WS   /ws           — event stream (all MARK events as JSON)
 """
 
@@ -47,9 +49,10 @@ from smartagent.identity.mark_identity import (
     OPENING_SURFACE_NOTES,
     PLAN_SURFACE_NOTES,
 )
+from smartagent.engineer.agent_tools import execute_tool, git_unpushed_count
 from smartagent.engineer.dev_pipeline import classify_intent
 from smartagent.llm.factory import is_llm_error_text
-from smartagent.server import conversation_store
+from smartagent.server import conversation_store, deploy_awareness
 from smartagent.server.events import ServerEvents, broadcaster, intercept_print
 from smartagent.server.reflection import reflect_on_run
 from smartagent.server.workspace_analyzer import (
@@ -59,6 +62,7 @@ from smartagent.server.workspace_analyzer import (
 from smartagent.server.engineering_memory import engineering_memory
 from smartagent.server.models import (
     ApproveRequest,
+    AutonomyModeRequest,
     DenyRequest,
     ExecuteRequest,
     HealthResponse,
@@ -69,8 +73,9 @@ from smartagent.server.models import (
     StatusResponse,
     WorkerInfo,
 )
-from smartagent.server.permissions import permission_gate
+from smartagent.server.permissions import APPROVED, permission_gate
 from smartagent.server.websocket import connection_manager
+from smartagent.storage.factory import get_storage
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +194,56 @@ def _workspace_preamble(ctx: dict[str, Any]) -> str:
         f"{ctx.get('todo_count', 0)} open TODOs. Tests via "
         f"{ctx.get('test_framework') or 'none detected'}."
     )
+
+
+async def _push_with_approval(workspace: str, ahead: int) -> None:
+    """
+    Request approval to push *ahead* local commits to the remote, then push
+    if approved — Level 4 (engineering execution) per the four-level
+    autonomy model. Skips the approval wait entirely when
+    settings.autonomy_mode == "auto"; otherwise creates a real
+    PermissionGate request and waits for a human to approve/deny it via
+    POST /approve or /deny (same mechanism the dashboard already uses for
+    delete_file — see permissions.py).
+
+    Runs detached from any single /run call's lifecycle (see its one
+    caller, in the post-run hooks section above) — broadcasts via
+    connection_manager directly rather than a per-run EventBus, since the
+    triggering run's own event_bus may already be torn down by the time a
+    human actually responds.
+    """
+    try:
+        autonomy_mode = get_storage().get_or_default("settings", "autonomy_mode", "manual")
+        if autonomy_mode != "auto":
+            perm = permission_gate.create_request(
+                "git_push", workspace,
+                diff=f"{ahead} local commit{'s' if ahead != 1 else ''} ready to push to origin.",
+            )
+            await connection_manager.broadcast({
+                "type":    "event",
+                "name":    ServerEvents.PERMISSION_REQUESTED,
+                "payload": {
+                    "request_id": perm.request_id,
+                    "operation":  perm.operation,
+                    "path":       perm.path,
+                    "diff":       perm.diff,
+                },
+                "timestamp": _now_iso(),
+            })
+            outcome = await permission_gate.wait_for_approval(perm)
+            if outcome != APPROVED:
+                logger.info(
+                    "MARK STATE push  denied/timeout  workspace=%r  result=%r",
+                    workspace, outcome,
+                )
+                return
+
+        def _push() -> str:
+            return execute_tool("git_push", {}, workspace)
+        push_result = await asyncio.to_thread(_push)
+        logger.info("MARK STATE push  workspace=%r  result=%r", workspace, push_result[:200])
+    except Exception as exc:
+        logger.warning("_push_with_approval failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +415,7 @@ async def execute(req: ExecuteRequest) -> dict:
         event_bus        = None   # assigned inside try
         ticker_task      = None   # assigned inside try
         agent: Any       = None   # assigned inside try — may stay None if init fails
+        intent: Any      = None   # assigned inside try — may stay None if init fails
 
         logger.info(
             "MARK STATE queued    goal=%r  workspace=%r",
@@ -648,6 +704,31 @@ async def execute(req: ExecuteRequest) -> dict:
         except Exception:
             pass
 
+        # Feature: auto-push after a successful engineering run — Level 4
+        # (engineering execution) per the four-level autonomy model: gated
+        # behind PermissionGate approval unless autonomy_mode="auto".
+        # Scheduled as a detached background task (not awaited) so a
+        # pending approval — up to 5 minutes — never delays RunCompleted or
+        # blocks the next run; it uses connection_manager directly rather
+        # than the per-run event_bus, since event_bus is torn down in the
+        # `finally` block above and won't outlive this function.
+        try:
+            if (
+                intent is not None
+                and intent.route == "complex_pipeline"
+                and ev_payload.get("success")
+            ):
+                def _count() -> int:
+                    return git_unpushed_count(_state.workspace)
+                ahead = await asyncio.to_thread(_count)
+                if ahead > 0:
+                    asyncio.create_task(
+                        _push_with_approval(_state.workspace, ahead),
+                        name="mark-push-approval",
+                    )
+        except Exception:
+            pass
+
         # Record in timeline
         try:
             from smartagent.server.api_timeline import record_event
@@ -751,6 +832,31 @@ async def list_permissions() -> PermissionsResponse:
 
 
 # ---------------------------------------------------------------------------
+# Autonomy mode
+# ---------------------------------------------------------------------------
+
+@router.get("/settings/autonomy")
+async def get_autonomy_mode() -> dict:
+    """
+    Current Level-4 (engineering execution) autonomy mode.
+
+    "manual" (default) pauses for explicit approval on gated operations
+    (currently: pushing commits after a successful engineering run).
+    "auto" skips the approval wait entirely — opt-in unattended execution.
+    """
+    mode = get_storage().get_or_default("settings", "autonomy_mode", "manual")
+    return {"autonomy_mode": mode}
+
+
+@router.post("/settings/autonomy")
+async def set_autonomy_mode(req: AutonomyModeRequest) -> dict:
+    if req.mode not in ("manual", "auto"):
+        raise HTTPException(400, "mode must be 'manual' or 'auto'")
+    get_storage().set("settings", "autonomy_mode", req.mode)
+    return {"autonomy_mode": req.mode}
+
+
+# ---------------------------------------------------------------------------
 # WebSocket
 # ---------------------------------------------------------------------------
 
@@ -805,9 +911,24 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             "Tell me what you'd like built or fixed and I'll get the team on it."
         )
 
+        # "Remember and check if changes were made" — compares the current
+        # git HEAD against what MARK last saw running here (persisted via
+        # get_storage(), so it survives a restart/redeploy) and feeds any
+        # summary into the opening prompt as another fact for MARK's own
+        # LLM to weave in naturally, the same way _workspace_preamble()'s
+        # project facts are injected below.
+        try:
+            change_summary = await asyncio.to_thread(
+                deploy_awareness.check_for_new_commits, _state.workspace or "."
+            )
+        except Exception:
+            change_summary = None
+
         def _compose_opening() -> str:
             mm = _build_model_manager(_state.workspace)
             facts = _workspace_preamble(payload)
+            if change_summary:
+                facts = f"{facts}\n\n{change_summary}"
             messages = [
                 {"role": "system", "content": _MARK_OPENING_SYSTEM},
                 {"role": "user",   "content": facts},

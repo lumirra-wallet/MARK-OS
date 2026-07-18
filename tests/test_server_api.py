@@ -359,6 +359,120 @@ class TestDeny:
 
 
 # ---------------------------------------------------------------------------
+# 7b. Autonomy mode — GET/POST /settings/autonomy
+# ---------------------------------------------------------------------------
+
+class TestAutonomySettings:
+    def test_default_is_manual(self, client, fresh_state):
+        with patch("smartagent.server.api.get_storage") as mock_storage:
+            mock_storage.return_value.get_or_default.return_value = "manual"
+            r = client.get("/settings/autonomy")
+        assert r.status_code == 200
+        assert r.json()["autonomy_mode"] == "manual"
+
+    def test_set_to_auto(self, client, fresh_state):
+        with patch("smartagent.server.api.get_storage") as mock_storage:
+            r = client.post("/settings/autonomy", json={"mode": "auto"})
+            assert r.status_code == 200
+            assert r.json()["autonomy_mode"] == "auto"
+            mock_storage.return_value.set.assert_called_once_with(
+                "settings", "autonomy_mode", "auto"
+            )
+
+    def test_rejects_invalid_mode(self, client, fresh_state):
+        r = client.post("/settings/autonomy", json={"mode": "yolo"})
+        assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# 7c. _push_with_approval — Level 4 gated push after a successful run
+# ---------------------------------------------------------------------------
+
+class TestPushWithApproval:
+    """
+    Verifies the gating logic itself (auto vs. manual, approved vs. denied)
+    — git_unpushed_count()/execute_tool("git_push", ...) are already
+    exercised directly against real git repos in test_agent_tools.py, so
+    here execute_tool is mocked to isolate just the approval flow.
+    """
+
+    def _run(self, coro):
+        return asyncio.run(coro)
+
+    def teardown_method(self):
+        from smartagent.server.permissions import permission_gate
+        permission_gate._pending.clear()
+        permission_gate._always_approved.clear()
+
+    def test_auto_mode_pushes_without_approval_prompt(self):
+        from smartagent.server.api import _push_with_approval
+        broadcast = AsyncMock()
+        with patch("smartagent.server.api.get_storage") as mock_storage, \
+             patch("smartagent.server.api.execute_tool") as mock_execute, \
+             patch("smartagent.server.api.connection_manager") as mock_cm:
+            mock_storage.return_value.get_or_default.return_value = "auto"
+            mock_execute.return_value = "Pushed."
+            mock_cm.broadcast = broadcast
+            self._run(_push_with_approval("/tmp/ws", 2))
+
+        mock_execute.assert_called_once_with("git_push", {}, "/tmp/ws")
+        broadcast.assert_not_called()
+
+    def test_manual_mode_requests_approval_and_pushes_when_approved(self):
+        from smartagent.server.api import _push_with_approval
+        from smartagent.server.permissions import permission_gate
+
+        broadcast = AsyncMock()
+
+        async def _approve_soon():
+            await asyncio.sleep(0.01)
+            pending = permission_gate.list_pending()
+            assert len(pending) == 1
+            assert pending[0].operation == "git_push"
+            permission_gate.approve(pending[0].request_id)
+
+        async def _run():
+            asyncio.create_task(_approve_soon())
+            await _push_with_approval("/tmp/ws", 3)
+
+        with patch("smartagent.server.api.get_storage") as mock_storage, \
+             patch("smartagent.server.api.execute_tool") as mock_execute, \
+             patch("smartagent.server.api.connection_manager") as mock_cm:
+            mock_storage.return_value.get_or_default.return_value = "manual"
+            mock_execute.return_value = "Pushed."
+            mock_cm.broadcast = broadcast
+            self._run(_run())
+
+        mock_execute.assert_called_once_with("git_push", {}, "/tmp/ws")
+        assert broadcast.await_count == 1
+        sent = broadcast.call_args.args[0]
+        assert sent["name"] == ServerEvents.PERMISSION_REQUESTED
+        assert sent["payload"]["operation"] == "git_push"
+
+    def test_manual_mode_denied_never_pushes(self):
+        from smartagent.server.api import _push_with_approval
+        from smartagent.server.permissions import permission_gate
+
+        async def _deny_soon():
+            await asyncio.sleep(0.01)
+            pending = permission_gate.list_pending()
+            permission_gate.deny(pending[0].request_id)
+
+        async def _run():
+            asyncio.create_task(_deny_soon())
+            await _push_with_approval("/tmp/ws", 1)
+
+        with patch("smartagent.server.api.get_storage") as mock_storage, \
+             patch("smartagent.server.api.execute_tool") as mock_execute, \
+             patch("smartagent.server.api.connection_manager") as mock_cm:
+            mock_storage.return_value.get_or_default.return_value = "manual"
+            mock_cm.broadcast = AsyncMock()
+            self._run(_run())
+
+        mock_execute.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # 8. WebSocket /ws
 # ---------------------------------------------------------------------------
 
