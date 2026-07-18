@@ -917,9 +917,16 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         # summary into the opening prompt as another fact for MARK's own
         # LLM to weave in naturally, the same way _workspace_preamble()'s
         # project facts are injected below.
+        #
+        # Resolved to an absolute path (matching os.path.abspath(req.workspace)
+        # in the /run handler) rather than using _state.workspace as-is: it
+        # defaults to the literal string "." until the first /run call, which
+        # would hash to a different workspace_id() than engineering_memory's
+        # key for the same project once a run does set an absolute path.
         try:
             change_summary = await asyncio.to_thread(
-                deploy_awareness.check_for_new_commits, _state.workspace or "."
+                deploy_awareness.check_for_new_commits,
+                os.path.abspath(_state.workspace or "."),
             )
         except Exception:
             change_summary = None
