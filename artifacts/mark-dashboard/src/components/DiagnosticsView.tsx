@@ -5,7 +5,9 @@
  *   Backend · Database · LLM Provider · Embeddings · Vector DB ·
  *   Git · Workspace · Memory · WebSocket · System (CPU/RAM)
  *
- * Polls /diagnostics every 30 s and supports a manual refresh button.
+ * Polls /diagnostics every 30 s (probe=false — no real provider network
+ * calls, just last-known status). The manual Refresh button does a real
+ * connectivity probe (probe=true).
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -33,6 +35,15 @@ interface DiagCheck {
   ram_total_gb?: number;
   count?:      number;
   dir?:        string;
+  // llm_provider extras
+  endpoint?:       string;
+  request_count?:  number;
+  last_error?:     string | null;
+  last_error_at?:  string | null;
+  // system extras — THIS process, distinct from system-wide load
+  process_pid?:      number;
+  process_cpu_pct?:  number;
+  process_rss_mb?:   number;
 }
 
 interface DiagResponse {
@@ -106,6 +117,7 @@ function CheckCard({ check, index }: { check: DiagCheck; index: number }) {
   const label = subsystemLabel[check.name] ?? check.name;
 
   const isSystem = check.name === 'system';
+  const isLlm    = check.name === 'llm_provider';
   const cpuColor = (check.cpu_pct ?? 0) > 80 ? 'bg-amber-400' : 'bg-emerald-400';
   const ramColor = (check.ram_pct ?? 0) > 85 ? 'bg-red-400'   : (check.ram_pct ?? 0) > 70 ? 'bg-amber-400' : 'bg-emerald-400';
 
@@ -115,60 +127,93 @@ function CheckCard({ check, index }: { check: DiagCheck; index: number }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.04 }}
       className={cn(
-        'flex items-start gap-3 p-4 rounded-xl border',
+        'flex flex-col gap-2.5 p-4 rounded-xl border',
         statusBg[check.status],
       )}
     >
-      {/* Subsystem label */}
-      <div className="flex items-center gap-2.5 min-w-[148px] shrink-0">
-        <Icon className={cn('w-4 h-4 shrink-0', statusColor[check.status])} />
-        <span className="text-sm font-medium">{label}</span>
+      <div className="flex items-start gap-3">
+        {/* Subsystem label */}
+        <div className="flex items-center gap-2.5 min-w-[148px] shrink-0">
+          <Icon className={cn('w-4 h-4 shrink-0', statusColor[check.status])} />
+          <span className="text-sm font-medium">{label}</span>
+        </div>
+
+        {/* Message + status */}
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <StatusIcon status={check.status} />
+          <p className="text-sm text-muted-foreground truncate">{check.message}</p>
+        </div>
+
+        {/* Right-side badges */}
+        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          {/* CPU bar */}
+          {isSystem && check.cpu_pct != null && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-muted-foreground/60 font-mono">CPU</span>
+              <UsageBar pct={check.cpu_pct} color={cpuColor} />
+              <span className="text-[10px] font-mono text-muted-foreground w-8">{check.cpu_pct?.toFixed(0)}%</span>
+            </div>
+          )}
+          {/* RAM bar */}
+          {isSystem && check.ram_pct != null && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-muted-foreground/60 font-mono">RAM</span>
+              <UsageBar pct={check.ram_pct} color={ramColor} />
+              <span className="text-[10px] font-mono text-muted-foreground w-8">{check.ram_pct?.toFixed(0)}%</span>
+            </div>
+          )}
+
+          {/* Provider badge */}
+          {check.provider && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/40 text-muted-foreground font-mono capitalize">
+              {check.provider}
+            </span>
+          )}
+          {/* Model badge */}
+          {check.model && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 font-mono truncate max-w-[130px]">
+              {check.model}
+            </span>
+          )}
+          {/* Latency */}
+          {check.latency_ms != null && (
+            <span className="text-[10px] text-muted-foreground/60 font-mono w-14 text-right">
+              {check.latency_ms}ms
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Message + status */}
-      <div className="flex items-center gap-2 flex-1 min-w-0">
-        <StatusIcon status={check.status} />
-        <p className="text-sm text-muted-foreground truncate">{check.message}</p>
-      </div>
+      {/* LLM provider detail row — endpoint, request count, last error */}
+      {isLlm && (check.endpoint || check.request_count != null) && (
+        <div className="flex items-center gap-4 flex-wrap pl-[172px] text-[11px]">
+          {check.endpoint && (
+            <span className="text-muted-foreground font-mono truncate max-w-[280px]">
+              {check.endpoint}
+            </span>
+          )}
+          {check.request_count != null && (
+            <span className="text-muted-foreground">
+              <span className="font-mono text-foreground/80">{check.request_count}</span> requests this process
+            </span>
+          )}
+          {check.last_error && (
+            <span className="text-red-400/80 truncate max-w-[360px]" title={check.last_error}>
+              last error: {check.last_error}
+              {check.last_error_at && <span className="text-muted-foreground/60"> ({new Date(check.last_error_at).toLocaleTimeString()})</span>}
+            </span>
+          )}
+        </div>
+      )}
 
-      {/* Right-side badges */}
-      <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-        {/* CPU bar */}
-        {isSystem && check.cpu_pct != null && (
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-muted-foreground/60 font-mono">CPU</span>
-            <UsageBar pct={check.cpu_pct} color={cpuColor} />
-            <span className="text-[10px] font-mono text-muted-foreground w-8">{check.cpu_pct?.toFixed(0)}%</span>
-          </div>
-        )}
-        {/* RAM bar */}
-        {isSystem && check.ram_pct != null && (
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-muted-foreground/60 font-mono">RAM</span>
-            <UsageBar pct={check.ram_pct} color={ramColor} />
-            <span className="text-[10px] font-mono text-muted-foreground w-8">{check.ram_pct?.toFixed(0)}%</span>
-          </div>
-        )}
-
-        {/* Provider badge */}
-        {check.provider && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/40 text-muted-foreground font-mono capitalize">
-            {check.provider}
-          </span>
-        )}
-        {/* Model badge */}
-        {check.model && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 font-mono truncate max-w-[130px]">
-            {check.model}
-          </span>
-        )}
-        {/* Latency */}
-        {check.latency_ms != null && (
-          <span className="text-[10px] text-muted-foreground/60 font-mono w-14 text-right">
-            {check.latency_ms}ms
-          </span>
-        )}
-      </div>
+      {/* System detail row — this process's own PID/CPU/RSS, distinct from system-wide */}
+      {isSystem && check.process_pid != null && (
+        <div className="flex items-center gap-4 flex-wrap pl-[172px] text-[11px] text-muted-foreground">
+          <span>MARK process (pid <span className="font-mono text-foreground/80">{check.process_pid}</span>)</span>
+          <span><span className="font-mono text-foreground/80">{check.process_cpu_pct?.toFixed(1)}%</span> CPU</span>
+          <span><span className="font-mono text-foreground/80">{check.process_rss_mb}</span> MB RSS</span>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -257,12 +302,20 @@ export function DiagnosticsView() {
   const [error,     setError]     = useState('');
   const [lastCheck, setLastCheck] = useState<Date | null>(null);
 
-  const run = useCallback(async () => {
+  // probe=true makes a REAL network call to the active LLM provider (and to
+  // its embedding endpoint, where applicable) to verify reachability — not
+  // a free ping. Auto-polling with probe=true would silently burn one real
+  // provider request every 30s just from this page being open, which
+  // measurably adds to a rate-limited provider's request volume instead of
+  // only diagnosing it. The periodic poll below uses probe=false (reports
+  // last-known status + telemetry, zero network calls); only an explicit
+  // manual refresh click does the real connectivity check.
+  const run = useCallback(async (probe: boolean) => {
     setLoading(true);
     setError('');
     try {
       const base = serverUrl.replace(/\/$/, '');
-      const res  = await fetch(`${base}/diagnostics`);
+      const res  = await fetch(`${base}/diagnostics?probe=${probe}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json: DiagResponse = await res.json();
       setData(json);
@@ -275,8 +328,8 @@ export function DiagnosticsView() {
   }, [serverUrl]);
 
   useEffect(() => {
-    run();
-    const id = setInterval(run, 30_000);
+    run(true); // first load: do the real check once
+    const id = setInterval(() => run(false), 30_000);
     return () => clearInterval(id);
   }, [run]);
 
@@ -302,7 +355,7 @@ export function DiagnosticsView() {
             <Button
               size="sm"
               variant="outline"
-              onClick={run}
+              onClick={() => run(true)}
               disabled={loading}
               className="h-8 text-xs"
             >

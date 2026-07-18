@@ -56,6 +56,37 @@ _EXCLUDE_FROM_DISCOVERY = True
 NVIDIA_INFERENCE_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_REASONING_BUDGET = 16384
 
+# ---------------------------------------------------------------------------
+# Process-wide telemetry — diagnostics needs real cumulative request/error
+# counts, but api_diagnostics.py's health check constructs a fresh, throwaway
+# NvidiaProvider instance per poll (so a per-instance counter would always
+# read back 0). Track at module level instead, updated by every instance.
+# ---------------------------------------------------------------------------
+_total_requests: int = 0
+_last_error: str | None = None
+_last_error_at: str | None = None
+
+
+def get_telemetry() -> dict[str, Any]:
+    """Process-wide request count + last error, for the diagnostics endpoint."""
+    return {
+        "base_url":       NVIDIA_INFERENCE_BASE_URL,
+        "total_requests": _total_requests,
+        "last_error":     _last_error,
+        "last_error_at":  _last_error_at,
+    }
+
+
+def _record_request() -> None:
+    global _total_requests
+    _total_requests += 1
+
+
+def _record_error(exc: BaseException) -> None:
+    global _last_error, _last_error_at
+    _last_error    = str(exc)
+    _last_error_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
 # Curated catalogue of NVIDIA-hosted models this codebase knows about.
 # Fields mirror _GITHUB_MODEL_CATALOGUE's shape for consistency.
 _NVIDIA_MODEL_CATALOGUE: list[dict[str, Any]] = [
@@ -240,6 +271,7 @@ class NvidiaProvider(BaseModel):
                 checked_at=now,
             )
         t0 = time.monotonic()
+        _record_request()
         try:
             client = self._get_client()
             client.chat.completions.create(
@@ -259,6 +291,7 @@ class NvidiaProvider(BaseModel):
                 checked_at=now,
             )
         except Exception as exc:
+            _record_error(exc)
             return ModelHealth(
                 healthy=False,
                 status=ModelStatus.ERROR,
@@ -295,6 +328,7 @@ class NvidiaProvider(BaseModel):
                 f"NvidiaProvider {self._model_name!r} must be load()ed before chat()."
             )
         self._call_count += 1
+        _record_request()
         params = self._build_params(kwargs)
         try:
             client = self._get_client()
@@ -319,6 +353,7 @@ class NvidiaProvider(BaseModel):
                 "model": self._model_name,
             }
         except Exception as exc:
+            _record_error(exc)
             logger.warning(
                 "NvidiaProvider.chat: error for model %s: %s",
                 self._model_name, exc,
@@ -374,6 +409,7 @@ class NvidiaProvider(BaseModel):
         matching every other provider's contract of "chat_stream() output
         is the final answer, nothing else."
         """
+        _record_request()
         params = self._build_params(kwargs)
         try:
             client = self._get_client()
@@ -392,6 +428,7 @@ class NvidiaProvider(BaseModel):
                 if content:
                     yield content
         except Exception as exc:
+            _record_error(exc)
             logger.warning(
                 "NvidiaProvider.stream: error for model %s: %s",
                 self._model_name, exc,
@@ -423,6 +460,7 @@ class NvidiaProvider(BaseModel):
                 f"NvidiaProvider {self._model_name!r} must be load()ed before chat_with_tools()."
             )
         self._call_count += 1
+        _record_request()
         try:
             client = self._get_client()
             response = client.chat.completions.create(
@@ -436,6 +474,7 @@ class NvidiaProvider(BaseModel):
             )
             return response.choices[0].message
         except Exception as exc:
+            _record_error(exc)
             logger.warning(
                 "NvidiaProvider.chat_with_tools: error for model %s: %s",
                 self._model_name, exc,

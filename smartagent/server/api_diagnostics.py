@@ -140,7 +140,13 @@ def _check_websocket() -> dict[str, Any]:
 
 
 def _check_system() -> dict[str, Any]:
-    """CPU and RAM usage via psutil."""
+    """
+    System-wide CPU/RAM plus THIS process's own usage — system-wide load
+    on a dev machine is dominated by whatever else is running (browser tabs,
+    IDE, etc.), which is easy to mistake for "MARK is using a lot of CPU."
+    Reporting this process's own PID/CPU/RSS separately answers that
+    directly instead of leaving it to system-wide numbers alone.
+    """
     try:
         import psutil  # type: ignore
         cpu_pct = psutil.cpu_percent(interval=0.1)
@@ -148,14 +154,25 @@ def _check_system() -> dict[str, Any]:
         ram_pct = mem.percent
         ram_gb_used  = round(mem.used  / 1e9, 1)
         ram_gb_total = round(mem.total / 1e9, 1)
+
+        proc = psutil.Process(os.getpid())
+        proc_cpu_pct = proc.cpu_percent(interval=0.1)
+        proc_rss_mb  = round(proc.memory_info().rss / 1e6, 1)
+
         status  = "ok" if cpu_pct < 80 and ram_pct < 85 else "warn"
         return {
             "status":  status,
-            "message": f"CPU {cpu_pct:.0f}%  ·  RAM {ram_gb_used}/{ram_gb_total} GB ({ram_pct:.0f}%)",
+            "message": (
+                f"CPU {cpu_pct:.0f}%  ·  RAM {ram_gb_used}/{ram_gb_total} GB ({ram_pct:.0f}%)  "
+                f"·  this process (pid {proc.pid}): {proc_cpu_pct:.0f}% CPU, {proc_rss_mb} MB"
+            ),
             "cpu_pct": cpu_pct,
             "ram_pct": ram_pct,
             "ram_used_gb":  ram_gb_used,
             "ram_total_gb": ram_gb_total,
+            "process_pid":     proc.pid,
+            "process_cpu_pct": proc_cpu_pct,
+            "process_rss_mb":  proc_rss_mb,
         }
     except ImportError:
         return {"status": "warn", "message": "psutil not installed — install for CPU/RAM metrics"}
@@ -163,7 +180,20 @@ def _check_system() -> dict[str, Any]:
         return {"status": "warn", "message": str(exc)}
 
 
-async def _check_llm_provider() -> dict[str, Any]:
+async def _check_llm_provider(probe: bool = True) -> dict[str, Any]:
+    """
+    *probe* controls whether this makes a REAL network call to the provider.
+
+    health() on every provider (confirmed directly for NvidiaProvider: a
+    genuine ``chat.completions.create(...)`` call) is a real, quota-consuming
+    request — not a free ping. The frontend auto-polls /diagnostics every
+    30s, so a naive "always probe" diagnostics page silently burns one real
+    API call every 30 seconds just from being left open, which measurably
+    contributes to hitting a provider's rate limit rather than only
+    diagnosing it. probe=False (the periodic-poll default) reports static
+    config + last-known telemetry with zero network calls; probe=True (an
+    explicit manual refresh) does the real connectivity check.
+    """
     t0 = time.monotonic()
     try:
         from smartagent.llm.factory import get_active_provider, get_llm_settings
@@ -175,6 +205,8 @@ async def _check_llm_provider() -> dict[str, Any]:
             token = os.environ.get("GITHUB_TOKEN", "")
             if not token:
                 return {"status": "error", "message": "GITHUB_TOKEN not set", "provider": "github"}
+            if not probe:
+                return {"status": "ok", "message": "GitHub token present (not probed this poll)", "provider": "github", "model": model}
             from smartagent.llm.github_provider import GitHubProvider
             p      = GitHubProvider(model_name=model, token=token)
             p.load()
@@ -192,17 +224,34 @@ async def _check_llm_provider() -> dict[str, Any]:
             api_key = os.environ.get("NVIDIA_API_KEY", "")
             if not api_key:
                 return {"status": "error", "message": "NVIDIA_API_KEY not set", "provider": "nvidia"}
-            from smartagent.llm.nvidia_provider import NvidiaProvider
+            from smartagent.llm.nvidia_provider import NvidiaProvider, get_telemetry
+            telemetry = get_telemetry()
+            if not probe:
+                return {
+                    "status":        "ok" if not telemetry["last_error"] else "warn",
+                    "message":       "NVIDIA key present (not probed this poll — see request_count/last_error below)",
+                    "provider":      "nvidia",
+                    "model":         model,
+                    "endpoint":      telemetry["base_url"],
+                    "request_count": telemetry["total_requests"],
+                    "last_error":    telemetry["last_error"],
+                    "last_error_at": telemetry["last_error_at"],
+                }
             p      = NvidiaProvider(model_name=model, api_key=api_key)
             p.load()
             health = p.health()
             ms     = round((time.monotonic() - t0) * 1000)
+            telemetry = get_telemetry()  # re-read — the probe call above just updated it
             return {
-                "status":     "ok" if health.healthy else "error",
-                "message":    health.message,
-                "provider":   "nvidia",
-                "model":      model,
-                "latency_ms": ms,
+                "status":       "ok" if health.healthy else "error",
+                "message":      health.message,
+                "provider":     "nvidia",
+                "model":        model,
+                "latency_ms":   ms,
+                "endpoint":     telemetry["base_url"],
+                "request_count": telemetry["total_requests"],
+                "last_error":   telemetry["last_error"],
+                "last_error_at": telemetry["last_error_at"],
             }
 
         elif provider_name == "openai":
@@ -210,6 +259,8 @@ async def _check_llm_provider() -> dict[str, Any]:
             api_key = _os.environ.get("OPENAI_API_KEY", "")
             if not api_key:
                 return {"status": "error", "message": "OPENAI_API_KEY not set", "provider": "openai"}
+            if not probe:
+                return {"status": "ok", "message": "OpenAI key present (not probed this poll)", "provider": "openai", "model": model}
             from smartagent.llm.openai_provider import OpenAIProvider
             p  = OpenAIProvider(model_name=model, api_key=api_key)
             h  = p.health()
@@ -227,6 +278,8 @@ async def _check_llm_provider() -> dict[str, Any]:
             api_key = _os.environ.get("ANTHROPIC_API_KEY", "")
             if not api_key:
                 return {"status": "error", "message": "ANTHROPIC_API_KEY not set", "provider": "anthropic"}
+            if not probe:
+                return {"status": "ok", "message": "Anthropic key present (not probed this poll)", "provider": "anthropic", "model": model}
             from smartagent.llm.anthropic_provider import AnthropicProvider
             p  = AnthropicProvider(model_name=model, api_key=api_key)
             h  = p.health()
@@ -247,7 +300,7 @@ async def _check_llm_provider() -> dict[str, Any]:
         return {"status": "error", "message": str(exc)}
 
 
-async def _check_embeddings() -> dict[str, Any]:
+async def _check_embeddings(probe: bool = True) -> dict[str, Any]:
     t0 = time.monotonic()
     try:
         from smartagent.llm.factory import get_active_provider
@@ -257,6 +310,8 @@ async def _check_embeddings() -> dict[str, Any]:
             token = os.environ.get("GITHUB_TOKEN", "")
             if not token:
                 return {"status": "error", "message": "GITHUB_TOKEN not set"}
+            if not probe:
+                return {"status": "ok", "message": "GitHub token present (not probed this poll)"}
             from smartagent.llm.github_provider import GitHubProvider
             p   = GitHubProvider(token=token)
             p.load()
@@ -275,6 +330,8 @@ async def _check_embeddings() -> dict[str, Any]:
             api_key = os.environ.get("OPENAI_API_KEY", "")
             if not api_key:
                 return {"status": "error", "message": "OPENAI_API_KEY not set"}
+            if not probe:
+                return {"status": "ok", "message": "OpenAI key present (not probed this poll)"}
             from smartagent.llm.openai_provider import OpenAIProvider
             p   = OpenAIProvider(api_key=api_key)
             vec = p.embed("hello world test")
@@ -286,6 +343,8 @@ async def _check_embeddings() -> dict[str, Any]:
             openai_key = os.environ.get("OPENAI_API_KEY", "")
             if not openai_key:
                 return {"status": "warn", "message": "Anthropic: no embedding API. Set OPENAI_API_KEY for fallback."}
+            if not probe:
+                return {"status": "ok", "message": "OpenAI fallback key present (not probed this poll)"}
             from openai import OpenAI  # type: ignore
             c   = OpenAI(api_key=openai_key)
             r   = c.embeddings.create(model="text-embedding-3-small", input="hello world test")
@@ -304,16 +363,21 @@ async def _check_embeddings() -> dict[str, Any]:
 # ── Main endpoint ─────────────────────────────────────────────────────────────
 
 @router.get("/diagnostics")
-async def get_diagnostics() -> dict:
+async def get_diagnostics(probe: bool = True) -> dict:
     """
     Full system health snapshot.
 
     Returns a list of subsystem checks, each with:
         name, status ("ok"|"warn"|"error"), message, latency_ms?
+
+    ``probe=false`` skips the real network calls llm_provider/embeddings
+    would otherwise make on every poll (see _check_llm_provider's
+    docstring) — pass it from an automatic/periodic poller; leave the
+    default ``true`` for an explicit, user-triggered refresh.
     """
     llm_task, embed_task = await asyncio.gather(
-        _check_llm_provider(),
-        _check_embeddings(),
+        _check_llm_provider(probe),
+        _check_embeddings(probe),
         return_exceptions=True,
     )
 

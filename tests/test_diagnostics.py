@@ -297,14 +297,20 @@ class TestCheckMemory:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _mock_psutil(cpu: float = 30.0, ram_pct: float = 50.0,
-                 ram_used: int = 4_000_000_000, ram_total: int = 8_000_000_000):
+                 ram_used: int = 4_000_000_000, ram_total: int = 8_000_000_000,
+                 proc_cpu: float = 5.0, proc_rss: int = 100_000_000):
     vm = MagicMock()
     vm.percent = ram_pct
     vm.used    = ram_used
     vm.total   = ram_total
+    proc = MagicMock()
+    proc.pid = 12345
+    proc.cpu_percent.return_value = proc_cpu
+    proc.memory_info.return_value = MagicMock(rss=proc_rss)
     psutil_mock = MagicMock()
     psutil_mock.cpu_percent.return_value     = cpu
     psutil_mock.virtual_memory.return_value  = vm
+    psutil_mock.Process.return_value         = proc
     return psutil_mock
 
 
@@ -508,6 +514,48 @@ class TestCheckLLMProvider:
              patch("smartagent.llm.nvidia_provider.NvidiaProvider", return_value=p):
             result = self._run(_check_llm_provider())
         assert result["model"] == "nvidia/nemotron-3-ultra-550b-a55b"
+
+    def test_nvidia_result_includes_endpoint_and_telemetry(self):
+        from smartagent.server.api_diagnostics import _check_llm_provider
+        health = MagicMock(); health.healthy = True; health.message = "NVIDIA OK"
+        p = MagicMock(); p.health.return_value = health
+        with patch("smartagent.llm.factory.get_active_provider", return_value="nvidia"), \
+             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "nvidia/nemotron-3-ultra-550b-a55b"}), \
+             patch("os.environ.get", side_effect=lambda k, d="": "nvapi-test" if k == "NVIDIA_API_KEY" else d), \
+             patch("smartagent.llm.nvidia_provider.NvidiaProvider", return_value=p):
+            result = self._run(_check_llm_provider())
+        assert result["endpoint"] == "https://integrate.api.nvidia.com/v1"
+        assert "request_count" in result
+        assert "last_error" in result
+
+    # ── probe=False must never construct/call a provider ────────────────────
+
+    def test_probe_false_skips_real_call_for_every_provider(self):
+        from smartagent.server.api_diagnostics import _check_llm_provider
+        for provider, key_env in [
+            ("github", "GITHUB_TOKEN"), ("nvidia", "NVIDIA_API_KEY"),
+            ("openai", "OPENAI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY"),
+        ]:
+            with patch("smartagent.llm.factory.get_active_provider", return_value=provider), \
+                 patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "m"}), \
+                 patch("os.environ.get", side_effect=lambda k, d="", _e=key_env: "present" if k == _e else d), \
+                 patch("smartagent.llm.github_provider.GitHubProvider") as ghp, \
+                 patch("smartagent.llm.nvidia_provider.NvidiaProvider") as nvp, \
+                 patch("smartagent.llm.openai_provider.OpenAIProvider") as oap, \
+                 patch("smartagent.llm.anthropic_provider.AnthropicProvider") as anp:
+                result = self._run(_check_llm_provider(probe=False))
+            assert result["status"] in ("ok", "warn"), f"{provider}: {result}"
+            for mock_cls in (ghp, nvp, oap, anp):
+                mock_cls.assert_not_called()
+
+    def test_probe_false_still_reports_no_key_as_error(self):
+        from smartagent.server.api_diagnostics import _check_llm_provider
+        with patch("smartagent.llm.factory.get_active_provider", return_value="nvidia"), \
+             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "m"}), \
+             patch("os.environ.get", return_value=""):
+            result = self._run(_check_llm_provider(probe=False))
+        assert result["status"] == "error"
+        assert "NVIDIA_API_KEY" in result["message"]
 
     # ── unknown provider ─────────────────────────────────────────────────────
     # Ollama is not supported — get_active_provider() never returns it in
