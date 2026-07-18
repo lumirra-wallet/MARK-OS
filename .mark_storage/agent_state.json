@@ -824,5 +824,231 @@
     },
     "created_at": "2026-07-18T16:01:11+00:00",
     "updated_at": "2026-07-18T16:01:11+00:00"
+  },
+  "6688f3b44c27e4a7:engineering_memory": {
+    "value": {
+      "current_goal": "Create app.py",
+      "context": "workspace=/tmp/pytest-of-smart/pytest-22/test_emits_reviewing_and_commi0",
+      "milestones": [
+        {
+          "text": "Create app.py",
+          "completed": true
+        }
+      ],
+      "blockers": [],
+      "session_elapsed": 7,
+      "last_updated": 0
+    },
+    "created_at": "2026-07-18T16:02:25+00:00",
+    "updated_at": "2026-07-18T16:02:25+00:00"
+  },
+  "7435f70b091269de:engineering_memory": {
+    "value": {
+      "current_goal": "Create app.py",
+      "context": "workspace=/tmp/pytest-of-smart/pytest-22/test_internal_phase_text_goes_0",
+      "milestones": [
+        {
+          "text": "Create app.py",
+          "completed": true
+        }
+      ],
+      "blockers": [],
+      "session_elapsed": 7,
+      "last_updated": 0
+    },
+    "created_at": "2026-07-18T16:02:25+00:00",
+    "updated_at": "2026-07-18T16:02:25+00:00"
+  },
+  "f2d764e37d400cbf:engineering_memory": {
+    "value": {
+      "current_goal": "Build a hello world script",
+      "context": "workspace=/tmp/pytest-of-smart/pytest-22/test_named_workers_fire_starte0",
+      "milestones": [
+        {
+          "text": "Create hello.py",
+          "completed": true
+        }
+      ],
+      "blockers": [],
+      "session_elapsed": 7,
+      "last_updated": 0
+    },
+    "created_at": "2026-07-18T16:02:26+00:00",
+    "updated_at": "2026-07-18T16:02:26+00:00"
+  },
+  "2a3c678612db6472:engineering_memory": {
+    "value": {
+      "current_goal": "Build a hello world script",
+      "context": "workspace=/tmp/pytest-of-smart/pytest-22/test_every_started_worker_also0",
+      "milestones": [
+        {
+          "text": "Create hello.py",
+          "completed": true
+        }
+      ],
+      "blockers": [],
+      "session_elapsed": 7,
+      "last_updated": 0
+    },
+    "created_at": "2026-07-18T16:02:26+00:00",
+    "updated_at": "2026-07-18T16:02:26+00:00"
+  },
+  "562a267aee56f0ab:engineering_memory": {
+    "value": {
+      "current_goal": "Build a hello world script",
+      "context": "workspace=/tmp/pytest-of-smart/pytest-22/test_engineer_dispatch_suppres0",
+      "milestones": [
+        {
+          "text": "Create hello.py",
+          "completed": true
+        }
+      ],
+      "blockers": [],
+      "session_elapsed": 7,
+      "last_updated": 0
+    },
+    "created_at": "2026-07-18T16:02:26+00:00",
+    "updated_at": "2026-07-18T16:02:26+00:00"
+  },
+  "77ae82d83553a5a1:engineering_memory": {
+    "value": {
+      "current_goal": "Build a hello world script",
+      "context": "workspace=/tmp/pytest-of-smart/pytest-22/test_single_milestone_pass0",
+      "milestones": [
+        {
+          "text": "Create hello.py",
+          "completed": true
+        }
+      ],
+      "blockers": [],
+      "session_elapsed": 7,
+      "last_updated": 0
+    },
+    "created_at": "2026-07-18T16:02:26+00:00",
+    "updated_at": "2026-07-18T16:02:26+00:00"
+  },
+  "5d68a4eebb1374c6:engineering_memory": {
+    "value": {
+      "current_goal": "Do something simple",
+      "context": "workspace=/tmp/pytest-of-smart/pytest-22/test_no_milestones_fallback0",
+      "milestones": [
+        {
+          "text": "Do something simple",
+          "completed": true
+        }
+      ],
+      "blockers": [],
+      "session_elapsed": 7,
+      "last_updated": 0
+    },
+    "created_at": "2026-07-18T16:02:26+00:00",
+    "updated_at": "2026-07-18T16:02:26+00:00"
+  },
+  "4a478657b8ab2fa9:engineering_memory": {
+    "value": {
+      "current_goal": "Simple goal with complex trigger words project test",
+      "context": "workspace=/tmp/pytest-of-smart/pytest-22/test_pipeline_result_has_requi0",
+      "milestones": [
+        {
+          "text": "Step one",
+          "completed": true
+        }
+      ],
+      "blockers": [],
+      "session_elapsed": 7,
+      "last_updated": 0
+    },
+    "created_at": "2026-07-18T16:02:26+00:00",
+    "updated_at": "2026-07-18T16:02:26+00:00"
+  },
+  "cc83546cc8f2ab25:engineering_memory": {
+    "value": {
+      "current_goal": "Simple project goal test run create",
+      "context": "workspace=/tmp/pytest-of-smart/pytest-22/test_event_bus_receives_tokens0",
+      "milestones": [
+        {
+          "text": "Step one",
+          "completed": true
+        }
+      ],
+      "blockers": [],
+      "session_elapsed": 7,
+      "last_updated": 0
+    },
+    "created_at": "2026-07-18T16:02:26+00:00",
+    "updated_at": "2026-07-18T16:02:26+00:00"
+  },
+  "f63f76a7824864e8:engineering_memory": {
+    "value": {
+      "current_goal": "Build the thing",
+      "context": "workspace=/tmp/pytest-of-smart/pytest-22/test_run_sets_goal_and_context0",
+      "milestones": [
+        {
+          "text": "Step one",
+          "completed": true
+        }
+      ],
+      "blockers": [],
+      "session_elapsed": 7,
+      "last_updated": 0
+    },
+    "created_at": "2026-07-18T16:02:26+00:00",
+    "updated_at": "2026-07-18T16:02:26+00:00"
+  },
+  "9852ca528db79783:engineering_memory": {
+    "value": {
+      "current_goal": "Build a project test create",
+      "context": "workspace=/tmp/pytest-of-smart/pytest-22/test_run_records_completed_mil0",
+      "milestones": [
+        {
+          "text": "Step one",
+          "completed": true
+        }
+      ],
+      "blockers": [],
+      "session_elapsed": 7,
+      "last_updated": 0
+    },
+    "created_at": "2026-07-18T16:02:26+00:00",
+    "updated_at": "2026-07-18T16:02:26+00:00"
+  },
+  "b27c4fc308dad1c6:engineering_memory": {
+    "value": {
+      "current_goal": "Build a project test create",
+      "context": "workspace=/tmp/pytest-of-smart/pytest-22/test_run_records_blocker_on_fa0",
+      "milestones": [
+        {
+          "text": "Step one",
+          "completed": false
+        }
+      ],
+      "blockers": [
+        {
+          "text": "Step one: FAIL: still broken.",
+          "resolved": false
+        }
+      ],
+      "session_elapsed": 7,
+      "last_updated": 0
+    },
+    "created_at": "2026-07-18T16:02:26+00:00",
+    "updated_at": "2026-07-18T16:02:26+00:00"
+  },
+  "3df82af8cb86d983:engineering_memory": {
+    "value": {
+      "current_goal": "Build a project test create",
+      "context": "workspace=/tmp/pytest-of-smart/pytest-22/test_run_broadcasts_memory_upd0",
+      "milestones": [
+        {
+          "text": "Step one",
+          "completed": true
+        }
+      ],
+      "blockers": [],
+      "session_elapsed": 8,
+      "last_updated": 0
+    },
+    "created_at": "2026-07-18T16:02:26+00:00",
+    "updated_at": "2026-07-18T16:02:26+00:00"
   }
 }
