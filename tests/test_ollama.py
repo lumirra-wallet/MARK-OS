@@ -696,12 +696,13 @@ class TestMarkSystemPrompt:
     def test_prompt_mentions_mark(self):
         assert "MARK" in MARK_SYSTEM_PROMPT
 
-    def test_prompt_mentions_owner(self):
-        assert "Mr. Smart" in MARK_SYSTEM_PROMPT
+    def test_prompt_declares_operating_system_identity(self):
+        assert "AI Operating System" in MARK_SYSTEM_PROMPT
 
-    def test_prompt_includes_mission(self):
+    def test_prompt_never_claims_to_be_a_coding_agent(self):
         lower = MARK_SYSTEM_PROMPT.lower()
-        assert "mission" in lower or "serve" in lower
+        assert "autonomous ai software engineer" not in lower
+        assert "ai software engineering assistant" not in lower
 
 
 # ---------------------------------------------------------------------------

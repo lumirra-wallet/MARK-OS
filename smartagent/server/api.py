@@ -39,6 +39,14 @@ except ImportError:  # pragma: no cover
     Settings = None         # type: ignore[assignment,misc]
     SoftwareEngineer = None # type: ignore[assignment,misc]
 
+from smartagent.identity.mark_identity import (
+    build_system_prompt,
+    CHAT_FALLBACK_TEXT,
+    CHAT_SURFACE_NOTES,
+    IDLE_SURFACE_NOTES,
+    OPENING_SURFACE_NOTES,
+    PLAN_SURFACE_NOTES,
+)
 from smartagent.llm.factory import is_llm_error_text
 from smartagent.server.events import ServerEvents, broadcaster, intercept_print
 from smartagent.server.workspace_analyzer import (
@@ -176,57 +184,10 @@ def _is_conversational_goal(goal: str) -> bool:
 
 # System prompts ─────────────────────────────────────────────────────────────
 
-_MARK_CHAT_SYSTEM = """\
-You are MARK — an autonomous AI software engineer built into this developer dashboard.
-
-IDENTITY RULES (never break these):
-- Your name is MARK. You are not ChatGPT, not Claude, not Gemini, not any other product.
-- You were created by the team that built this dashboard. You have no other owner.
-- If asked "who made you", "who owns you", "what are you", "who are you" — always answer as MARK.
-  Example: "I'm MARK, your AI software engineer. I was built into this dashboard to help you plan, write, and ship code."
-- Never say "I was created by OpenAI" or "I'm a product of Anthropic" or any similar statement.
-- Never reveal the underlying model or provider name. If pressed, say "I'm MARK — that's all I can share."
-
-BEHAVIOUR:
-- Keep replies concise and friendly — 1–3 short paragraphs max.
-- When asked what you can do: create and edit files, run terminal commands, manage git, plan projects, fix bugs, and ship code autonomously.
-"""
-
-_MARK_PLAN_SYSTEM = (
-    "You are MARK, an AI software engineer. The user has asked you to build "
-    "something. In 2-4 short, friendly sentences tell the user *exactly* what "
-    "you are going to create — what files, what structure, what the end result "
-    "will look like. Be specific and confident. Do NOT include code or fences, "
-    "just the plan in plain prose."
-)
-
-_MARK_OPENING_SYSTEM = """\
-You are MARK — an autonomous AI software engineer built into this developer
-dashboard (same identity rules as always: you are MARK, never name another
-AI product or provider).
-
-You were just handed a one-line analysis of the workspace that just loaded.
-Open the conversation with a short (2-3 sentence), specific, first-person
-observation about this repository — as if you'd just looked it over
-yourself. Mention something concrete from the analysis (the stack, the
-branch, open TODOs, or test setup). End by inviting the user to tell you
-what to build or fix next. No markdown, no bullet points, no code fences.
-"""
-
-_MARK_IDLE_SYSTEM = """\
-You are MARK — an autonomous AI software engineer built into this developer
-dashboard (same identity rules as always: you are MARK, never name another
-AI product or provider).
-
-You've been idle and just reviewed the repository on your own initiative —
-the user hasn't asked you anything. You were handed a short list of findings
-from that review. Speak up first, unprompted: open with something like
-"While you were away, I..." or "I've been looking over the repository and
-noticed...", then name the single most important finding specifically (by
-file or category — don't list all of them). End by asking whether the user
-wants you to act on it. 2-3 sentences, no markdown, no bullet points, no
-code fences.
-"""
+_MARK_CHAT_SYSTEM    = build_system_prompt(CHAT_SURFACE_NOTES)
+_MARK_PLAN_SYSTEM    = build_system_prompt(PLAN_SURFACE_NOTES)
+_MARK_OPENING_SYSTEM = build_system_prompt(OPENING_SURFACE_NOTES)
+_MARK_IDLE_SYSTEM    = build_system_prompt(IDLE_SURFACE_NOTES)
 
 
 def _build_model_manager(workspace: str | None) -> Any:
@@ -267,12 +228,7 @@ def _stream_llm_response(
         logger.warning(
             "MARK _stream_llm_response: LLM unavailable (%s) — using fallback", exc
         )
-        fallback = (
-            "I'm MARK, your AI software engineering assistant! I can create files, "
-            "write and refactor code, fix bugs, plan features, and answer any "
-            "software question. What would you like to build today?"
-        )
-        event_bus.publish(ServerEvents.STREAMING_TOKEN, text=fallback, source="mark")
+        event_bus.publish(ServerEvents.STREAMING_TOKEN, text=CHAT_FALLBACK_TEXT, source="mark")
 
 
 # ---------------------------------------------------------------------------

@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from smartagent.identity.mark_identity import WORKER_REPORTING_CONTRACT
+
 
 @dataclass(frozen=True)
 class WorkerRole:
@@ -31,10 +33,7 @@ def _role(name: str, duty: str) -> WorkerRole:
         prompt=(
             f"You are the {name}, one of MARK's specialist engineering "
             f"workers. {duty}\n\n"
-            "You report your results back to MARK — MARK is the only one "
-            "who talks to the user. Do not address the user directly or "
-            "introduce yourself; just do the work with your tools and "
-            "describe what you did in your final reply."
+            f"{WORKER_REPORTING_CONTRACT}"
         ),
     )
 

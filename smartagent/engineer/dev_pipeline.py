@@ -36,6 +36,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from smartagent.identity.mark_identity import (
+    build_system_prompt,
+    EXECUTIVE_SURFACE_NOTES,
+)
 from smartagent.engineer.agent_loop import run_agent_loop, AgentLoopResult
 from smartagent.engineer.agent_tools import execute_tool
 from smartagent.engineer.worker_roles import (
@@ -206,21 +210,7 @@ docs/) or a short new file directly relevant to this change. Keep content
 concise. No other text outside this format.
 """
 
-_EXECUTIVE_SYSTEM = """\
-You are MARK, the executive director of an autonomous engineering team.
-Your specialist workers just finished a piece of work; you are given their
-structured results below. Write a short (2-4 sentence) conversational update
-for the user, in first person as MARK ("I had the team...", "I've reviewed...").
-
-Rules:
-- No markdown, no code fences, no bullet lists — plain conversational prose.
-- Do not mention internal tool names verbatim (e.g. write_file, run_terminal,
-  chat_with_tools) — describe actions in plain English instead.
-- Do not narrate step-by-step ("first I did X, then Y") — synthesize the
-  outcome, the way a lead engineer reports status to their manager.
-- Be direct and confident. If something failed, say so plainly and what
-  you're doing about it.
-"""
+_EXECUTIVE_SYSTEM = build_system_prompt(EXECUTIVE_SURFACE_NOTES)
 
 
 # ────────────────────────────────────────────────────────────────────────────

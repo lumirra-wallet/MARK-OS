@@ -61,7 +61,9 @@ export interface OpenFile {
 
 // ── Preview types ─────────────────────────────────────────────────────────────
 
-export type PreviewStatus = 'starting' | 'ready' | 'error' | 'stopped';
+// Matches what the backend (api_previews.py) actually ever sends — it never
+// emits 'starting'/'ready'/'error'/'stopped'.
+export type PreviewStatus = 'active' | 'unreachable' | 'closed';
 export type DeviceMode    = 'desktop' | 'tablet' | 'mobile' | 'landscape';
 export type ThemeMode     = 'dark' | 'light';
 
@@ -805,7 +807,7 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   url:          payload.url   ?? '',
                   title:        payload.title ?? payload.framework ?? 'Preview',
                   framework:    payload.framework ?? 'unknown',
-                  status:       (payload.status ?? 'ready') as PreviewStatus,
+                  status:       (payload.status ?? 'active') as PreviewStatus,
                   port:         payload.port,
                   registeredAt: timestamp,
                 };
@@ -850,13 +852,13 @@ export const useMarkStore = create<MarkState>((set, get) => {
                 break;
               }
 
-              case 'PreviewStopped': {
+              case 'PreviewClosed': {
                 set(state => ({
                   previews: state.previews.map(p =>
-                    p.id === payload.id ? { ...p, status: 'stopped' as PreviewStatus } : p
+                    p.id === payload.id ? { ...p, status: 'closed' as PreviewStatus } : p
                   ),
                 }));
-                addTimeline(`Preview stopped: ${payload.id}`);
+                addTimeline(`Preview closed: ${payload.id}`);
                 break;
               }
             }

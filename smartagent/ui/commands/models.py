@@ -154,7 +154,7 @@ def _get_identity(agent: "SmartAgent") -> str:
     try:
         return f"MARK v{agent.mind.identity_engine.version} — {agent.mind.identity_engine.mission}"
     except Exception:
-        return "MARK — personal AI assistant for Mr. Smart"
+        return "MARK — AI Operating System"
 
 
 def _get_goals(agent: "SmartAgent") -> list[str]:

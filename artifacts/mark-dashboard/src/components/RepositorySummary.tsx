@@ -1,15 +1,16 @@
 /**
- * RepositorySummary — "Repository Summary" + "Current Engineering Activity",
- * two of the always-visible mission-control panels (see docs/mark-operating-
- * system.md and Dashboard.tsx). Extracted from the retired LiveEngineerPanel.tsx
- * (Narration transcript dropped — see that doc's narration removal).
+ * RepositorySummary.tsx — the always-visible mission-control sections
+ * originally extracted from the retired LiveEngineerPanel.tsx, now split
+ * across the 4-zone layout (see Dashboard.tsx):
  *
- * Sections:
- *   Workspace context  — project type, git branch, test status, TODOs
- *   Reasoning stage    — visual phase stepper (current engineering activity)
- *   Activity feed      — real-time action log
- *   Memory             — goals, milestones, blockers
- *   Suggestions        — proactive idle improvements
+ *   WorkspaceCard + IdleSuggestions  — this file's default `RepositorySummary`
+ *                                      export, Left zone "Repository Summary"
+ *   ReasoningStepper                 — exported standalone, Center zone
+ *                                      "Engineering Timeline" header
+ *   ActivityFeed                     — exported standalone, Center zone
+ *                                      "Mission Feed"
+ *   MemorySection                    — exported standalone, Left zone
+ *                                      "Engineering Memory"
  */
 
 import React, { useState } from 'react';
@@ -78,7 +79,7 @@ const SUGGESTION_CONFIG: Record<string, { icon: React.ComponentType<any>; color:
 
 // ── Workspace context card (Repository Summary) ───────────────────────────────
 
-function WorkspaceCard() {
+export function WorkspaceCard() {
   const { workspaceContext } = useMarkStore();
   const [open, setOpen] = useState(true);
 
@@ -146,7 +147,7 @@ function WorkspaceCard() {
 
 // ── Reasoning stage stepper (current engineering activity, at a glance) ──────
 
-function ReasoningStepper() {
+export function ReasoningStepper() {
   const { reasoningStage, running } = useMarkStore();
 
   if (!running && reasoningStage === 'idle') return null;
@@ -168,14 +169,14 @@ function ReasoningStepper() {
                 <TooltipTrigger asChild>
                   <div className={cn(
                     "flex flex-col items-center gap-1",
-                    done    && "text-emerald-400",
-                    active  && "text-accent",
+                    done    && "text-success",
+                    active  && "text-primary",
                     pending && "text-muted-foreground/40",
                   )}>
                     <div className={cn(
                       "w-6 h-6 rounded-full flex items-center justify-center border transition-all",
-                      done   && "bg-emerald-400/15 border-emerald-400/50",
-                      active && "bg-accent/20 border-accent shadow-sm shadow-accent/30",
+                      done   && "bg-success/15 border-success-border",
+                      active && "bg-primary/20 border-primary glow-sm",
                       pending && "bg-transparent border-border/30",
                     )}>
                       {active && running
@@ -206,7 +207,7 @@ function ReasoningStepper() {
 
 // ── Activity feed ─────────────────────────────────────────────────────────────
 
-function ActivityFeed() {
+export function ActivityFeed() {
   const { activityFeed, running } = useMarkStore();
   const [limit, setLimit] = useState(15);
 
@@ -299,7 +300,7 @@ function ActivityFeed() {
 
 // ── Engineering memory ────────────────────────────────────────────────────────
 
-function MemorySection() {
+export function MemorySection() {
   const { engineeringMemory } = useMarkStore();
   const [open, setOpen] = useState(true);
 
@@ -429,9 +430,6 @@ export function RepositorySummary() {
     <ScrollArea className="h-full">
       <div className="pb-3">
         <WorkspaceCard />
-        <ReasoningStepper />
-        <ActivityFeed />
-        <MemorySection />
         <IdleSuggestions />
       </div>
     </ScrollArea>

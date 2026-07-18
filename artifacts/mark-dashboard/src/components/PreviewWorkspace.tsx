@@ -78,12 +78,11 @@ function frameworkColor(fw: string): string {
 
 function StatusDot({ status }: { status: PreviewInfo['status'] }) {
   const cfg: Record<string, { cls: string; pulse: boolean }> = {
-    ready:    { cls: 'bg-emerald-400', pulse: false },
-    starting: { cls: 'bg-amber-400',   pulse: true  },
-    error:    { cls: 'bg-red-400',     pulse: false },
-    stopped:  { cls: 'bg-muted-foreground', pulse: false },
+    active:      { cls: 'bg-success glow-sm',    pulse: false },
+    unreachable: { cls: 'bg-warning',            pulse: true  },
+    closed:      { cls: 'bg-muted-foreground',   pulse: false },
   };
-  const { cls, pulse } = cfg[status] ?? cfg.stopped;
+  const { cls, pulse } = cfg[status] ?? cfg.closed;
   return (
     <motion.span
       className={cn('inline-block w-2 h-2 rounded-full shrink-0', cls)}
@@ -396,7 +395,7 @@ export function PreviewWorkspace() {
     const id = `manual-${Math.random().toString(36).slice(2)}`;
     const p: PreviewInfo = {
       id, url, title: url, framework: 'unknown',
-      status: 'ready', registeredAt: new Date().toISOString(),
+      status: 'active', registeredAt: new Date().toISOString(),
     };
     setManualPreviews(prev => [...prev, p]);
     setActivePreviewId(id);
@@ -467,10 +466,9 @@ export function PreviewWorkspace() {
 
         {/* Connection status badge */}
         <div className="ml-auto flex items-center gap-1.5">
-          {current?.status === 'ready'    && <Wifi    className="w-3.5 h-3.5 text-emerald-400" />}
-          {current?.status === 'starting' && <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1.2, repeat: Infinity }}><Wifi className="w-3.5 h-3.5 text-amber-400" /></motion.div>}
-          {current?.status === 'error'    && <AlertCircle className="w-3.5 h-3.5 text-destructive" />}
-          {current?.status === 'stopped'  && <WifiOff  className="w-3.5 h-3.5 text-muted-foreground" />}
+          {current?.status === 'active'      && <Wifi    className="w-3.5 h-3.5 text-success" />}
+          {current?.status === 'unreachable' && <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1.2, repeat: Infinity }}><AlertCircle className="w-3.5 h-3.5 text-warning" /></motion.div>}
+          {current?.status === 'closed'      && <WifiOff  className="w-3.5 h-3.5 text-muted-foreground" />}
           {current && (
             <span className="text-[10px] text-muted-foreground capitalize">{current.status}</span>
           )}

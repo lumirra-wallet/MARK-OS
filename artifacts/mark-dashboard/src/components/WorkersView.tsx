@@ -5,8 +5,8 @@ import { useMarkStore, WorkerState } from '@/store/markStore';
 import { cn } from '@/lib/utils';
 
 const STATUS_STYLE: Record<WorkerState['status'], string> = {
-  running: 'bg-accent/20 text-accent border-accent/30',
-  success: 'bg-emerald-500/20 text-emerald-500 border-emerald-500/30',
+  running: 'bg-primary/20 text-primary border-primary-border',
+  success: 'bg-success/20 text-success border-success-border',
   failed:  'bg-destructive/20 text-destructive border-destructive/30',
   idle:    'bg-muted text-muted-foreground border-border',
   skipped: 'bg-muted/50 text-muted-foreground border-border/50 border-dashed',
@@ -49,7 +49,7 @@ function WorkerCard({ worker }: { worker: WorkerState }) {
         <div className="flex items-center gap-2 min-w-0">
           {worker.status === 'running' && (
             <motion.span
-              className="w-1.5 h-1.5 rounded-full bg-accent shrink-0"
+              className="w-1.5 h-1.5 rounded-full bg-primary glow-sm shrink-0"
               animate={{ opacity: [1, 0.3, 1] }}
               transition={{ duration: 1.2, repeat: Infinity }}
             />
@@ -71,7 +71,7 @@ function WorkerCard({ worker }: { worker: WorkerState }) {
         <div className="px-4 pb-2">
           <div className="h-1 rounded-full bg-muted overflow-hidden">
             <motion.div
-              className={cn('h-full rounded-full', worker.status === 'success' ? 'bg-emerald-500' : 'bg-accent')}
+              className={cn('h-full rounded-full', worker.status === 'success' ? 'bg-success' : 'bg-primary')}
               initial={{ width: 0 }}
               animate={{ width: `${worker.progress ?? (worker.status === 'success' ? 100 : 0)}%` }}
               transition={{ duration: 0.3 }}

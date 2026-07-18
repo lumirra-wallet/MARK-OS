@@ -5,12 +5,11 @@ import {
   LineChart, Settings, Clock, Plug, Unplug,
   Square, GitBranch, Brain, Box, Workflow,
   Bookmark, Terminal, Briefcase, Wrench, Code2, Award, Stethoscope,
-  Folder, FileText, Share2, MoreHorizontal,
+  Folder, FileText, Share2, MoreHorizontal, FlaskConical, Rocket,
 } from 'lucide-react';
 import { ChatView }          from './components/ChatView';
 import { MarkAvatar, MarkAvatarState } from './components/MarkAvatar';
 import { ApprovalsSidebar }  from './components/ApprovalsSidebar';
-import { ExecutionView }     from './components/ExecutionView';
 import { SettingsView }      from './components/SettingsView';
 import { FilesView }         from './components/FilesView';
 import { LogsView }          from './components/LogsView';
@@ -30,12 +29,21 @@ import { JobsPanel }         from './components/JobsPanel';
 import { TaskGraphView }     from './components/TaskGraphView';
 import { CodeIndexPanel }    from './components/CodeIndexPanel';
 import { PreviewWorkspace }  from './components/PreviewWorkspace';
-import { ProjectInspector }  from './components/ProjectInspector';
-import { RepositorySummary } from './components/RepositorySummary';
+import {
+  ProjectInspector, RunningAppsCard, GitStatusCard, ModelStatusCard,
+} from './components/ProjectInspector';
+import {
+  RepositorySummary, ReasoningStepper, ActivityFeed, MemorySection,
+} from './components/RepositorySummary';
+import { CurrentProjectCard }  from './components/CurrentProjectCard';
+import { TodaysProgressCard }  from './components/TodaysProgressCard';
+import { CodingActivityCard }  from './components/CodingActivityCard';
+import { WorkerPipeline }      from './components/WorkerPipeline';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { markApi, SystemMetrics } from '@/lib/markApi';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 // ── Token Budget pill (Feature 13) ───────────────────────────────────────────
 
@@ -94,35 +102,37 @@ function MetricsPill({ metrics }: { metrics: SystemMetrics | null }) {
 
 // ── Secondary tools drawer ────────────────────────────────────────────────────
 //
-// Everything that isn't one of the seven always-visible mission-control
-// panels (MARK's conversation, Active Workers, Engineering Timeline, Live
-// Preview, Project Inspector, Repository Summary, Current Activity) lives
-// here instead — not deleted, just not competing for primary screen space.
-// See docs/mark-operating-system.md's "what still doesn't match" section.
+// Deeper/occasional tools that don't compete for primary Mission Control
+// screen space. Everything the redesign brief named explicitly (MARK
+// Conversation, Engineering Timeline, Mission Feed, Coding Activity, Current
+// Project, Active Workers, Repository Summary, Today's Progress, Engineering
+// Memory, Project Inspector, Running Apps, Live Preview, Git Status,
+// Performance, Model Status, Terminal, Logs, Testing, Deployment) now lives
+// in one of the four always-visible zones in Dashboard's body — see
+// docs/mark-operating-system.md. What remains here are the disk-based
+// memory-file browser, the full interactive git tool (stage/commit/branch/
+// stash — Git Status in the Right zone is a read-only summary), the full
+// model-switching UI (Model Status in the Right zone is read-only), and
+// tools with no named zone in the brief.
 
 const SECONDARY_TOOLS = [
-  { id: 'execution',   label: 'Execution',          icon: Activity,     Component: ExecutionView },
-  { id: 'taskgraph',   label: 'Task Graph',         icon: Share2,       Component: TaskGraphView },
-  { id: 'pipeline',    label: 'Pipeline Graph',     icon: Workflow,     Component: PipelineView },
-  { id: 'jobs',        label: 'Long Running Jobs',  icon: Briefcase,    Component: JobsPanel },
-  { id: 'files',       label: 'Files',              icon: Folder,      Component: FilesView },
-  { id: 'git',         label: 'Git (full detail)',  icon: GitBranch,    Component: GitPanel },
-  { id: 'logs',        label: 'Logs',               icon: FileText,     Component: LogsView },
-  { id: 'terminal',    label: 'Terminal',           icon: Terminal,     Component: LiveTerminal },
-  { id: 'checkpoints', label: 'Checkpoints',        icon: Bookmark,     Component: CheckpointsPanel },
-  { id: 'memory',      label: 'Engineering Memory', icon: Brain,        Component: MemoryPanel },
-  { id: 'models',      label: 'Models',             icon: Box,          Component: ModelsPanel },
-  { id: 'codeindex',   label: 'Codebase Index + RAG', icon: Code2,      Component: CodeIndexPanel },
-  { id: 'tools',       label: 'Tools & Plugins',    icon: Wrench,       Component: ToolsPanel },
-  { id: 'evaluation',  label: 'Run Evaluations',    icon: Award,        Component: EvaluationPanel },
-  { id: 'performance', label: 'Performance',        icon: LineChart,    Component: PerformanceView },
-  { id: 'diagnostics', label: 'Diagnostics',        icon: Stethoscope,  Component: DiagnosticsView },
-  { id: 'settings',    label: 'Settings',           icon: Settings,     Component: SettingsView },
+  { id: 'taskgraph',   label: 'Task Graph',           icon: Share2,       Component: TaskGraphView },
+  { id: 'pipeline',    label: 'Pipeline Graph',       icon: Workflow,     Component: PipelineView },
+  { id: 'jobs',        label: 'Long Running Jobs',    icon: Briefcase,    Component: JobsPanel },
+  { id: 'files',       label: 'Files',                icon: Folder,       Component: FilesView },
+  { id: 'git',         label: 'Git (full detail)',    icon: GitBranch,    Component: GitPanel },
+  { id: 'memory',      label: 'Memory Files',         icon: Brain,        Component: MemoryPanel },
+  { id: 'models',      label: 'Models & Providers',   icon: Box,          Component: ModelsPanel },
+  { id: 'codeindex',   label: 'Codebase Index + RAG', icon: Code2,        Component: CodeIndexPanel },
+  { id: 'tools',       label: 'Tools & Plugins',      icon: Wrench,       Component: ToolsPanel },
+  { id: 'evaluation',  label: 'Run Evaluations',      icon: Award,        Component: EvaluationPanel },
+  { id: 'diagnostics', label: 'Diagnostics',          icon: Stethoscope,  Component: DiagnosticsView },
+  { id: 'settings',    label: 'Settings',             icon: Settings,     Component: SettingsView },
 ] as const;
 
 function SecondaryToolsDrawer() {
   const [active, setActive] = useState<string>(SECONDARY_TOOLS[0].id);
-  const Active = SECONDARY_TOOLS.find(t => t.id === active)?.Component ?? ExecutionView;
+  const Active = SECONDARY_TOOLS.find(t => t.id === active)?.Component ?? SECONDARY_TOOLS[0].Component;
 
   return (
     <Sheet>
@@ -276,65 +286,193 @@ export default function Dashboard() {
       </header>
 
       {/* ── MISSION-CONTROL WORKSPACE ─────────────────────────────────────────
-           All seven panels are simultaneously mounted — no tab-switching, no
-           navigation required to see what's happening. See
-           docs/mark-operating-system.md. */}
-      <PanelGroup direction="horizontal" className="flex-1 bg-background">
+           Four always-visible zones (Left / Center / Right / Bottom) — no
+           tab-switching, no navigation required to see what's happening.
+           See docs/mark-operating-system.md. */}
+      <PanelGroup direction="vertical" className="flex-1 bg-background">
+        <Panel defaultSize={76} minSize={45}>
+          <PanelGroup direction="horizontal" className="h-full">
 
-        {/* Column 1 — MARK's live conversation (the only conversational entity) */}
-        <Panel defaultSize={40} minSize={26} className="flex flex-col relative z-0">
-          {pendingPermissions.length > 0 && (
-            <div className="border-b border-destructive/30 bg-destructive/5 shrink-0">
-              <ApprovalsSidebar />
-            </div>
-          )}
-          <div className="flex-1 min-h-0">
-            <ChatView />
-          </div>
-        </Panel>
-
-        <PanelResizeHandle className="w-1 bg-border/50 hover:bg-accent/50 transition-colors cursor-col-resize z-10">
-          <div className="h-full w-full flex flex-col justify-center items-center">
-            <div className="h-8 w-1 rounded-full bg-border" />
-          </div>
-        </PanelResizeHandle>
-
-        {/* Column 2 — Live Preview + Project Inspector */}
-        <Panel defaultSize={30} minSize={20} className="flex flex-col border-l border-border/50 bg-card/20">
-          <PanelGroup direction="vertical">
-            <Panel defaultSize={60} minSize={25}>
-              <PreviewWorkspace />
+            {/* Left — Current Project · Active Workers · Repository Summary ·
+                Today's Progress · Engineering Memory */}
+            <Panel defaultSize={22} minSize={16} className="flex flex-col bg-card/20">
+              <PanelGroup direction="vertical">
+                <Panel defaultSize={42} minSize={20}>
+                  <ScrollArea className="h-full">
+                    <CurrentProjectCard />
+                    <RepositorySummary />
+                    <TodaysProgressCard />
+                    <MemorySection />
+                  </ScrollArea>
+                </Panel>
+                <PanelResizeHandle className="h-1 bg-border/50 hover:bg-primary/50 transition-colors cursor-row-resize" />
+                <Panel defaultSize={58} minSize={25}>
+                  <WorkersView />
+                </Panel>
+              </PanelGroup>
             </Panel>
-            <PanelResizeHandle className="h-1 bg-border/50 hover:bg-accent/50 transition-colors cursor-row-resize" />
-            <Panel defaultSize={40} minSize={20}>
-              <ProjectInspector />
+
+            <ColResizeHandle />
+
+            {/* Center — MARK Conversation · Engineering Timeline · Mission
+                Feed · Coding Activity */}
+            <Panel defaultSize={46} minSize={30} className="flex flex-col relative z-0 border-l border-border/50">
+              <PanelGroup direction="vertical">
+                <Panel defaultSize={48} minSize={25} className="flex flex-col">
+                  {pendingPermissions.length > 0 && (
+                    <div className="border-b border-destructive/30 bg-destructive/5 shrink-0">
+                      <ApprovalsSidebar />
+                    </div>
+                  )}
+                  <div className="flex-1 min-h-0">
+                    <ChatView />
+                  </div>
+                </Panel>
+                <PanelResizeHandle className="h-1 bg-border/50 hover:bg-primary/50 transition-colors cursor-row-resize" />
+                <Panel defaultSize={28} minSize={15} className="flex flex-col border-t border-border/50">
+                  <div className="px-3 pt-2 pb-1 shrink-0">
+                    <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Engineering Timeline</h2>
+                  </div>
+                  <WorkerPipeline />
+                  <ReasoningStepper />
+                  <div className="flex-1 min-h-0 mt-2">
+                    <TimelineView />
+                  </div>
+                </Panel>
+                <PanelResizeHandle className="h-1 bg-border/50 hover:bg-primary/50 transition-colors cursor-row-resize" />
+                <Panel defaultSize={24} minSize={15} className="border-t border-border/50">
+                  <ScrollArea className="h-full">
+                    <div className="px-3 pt-2">
+                      <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Mission Feed</h2>
+                    </div>
+                    <ActivityFeed />
+                    <CodingActivityCard />
+                  </ScrollArea>
+                </Panel>
+              </PanelGroup>
+            </Panel>
+
+            <ColResizeHandle />
+
+            {/* Right — Project Inspector · Running Apps · Live Preview ·
+                Git Status · Performance · Model Status */}
+            <Panel defaultSize={32} minSize={22} className="flex flex-col border-l border-border/50 bg-card/20">
+              <PanelGroup direction="vertical">
+                <Panel defaultSize={34} minSize={18}>
+                  <PreviewWorkspace />
+                </Panel>
+                <PanelResizeHandle className="h-1 bg-border/50 hover:bg-primary/50 transition-colors cursor-row-resize" />
+                <Panel defaultSize={22} minSize={15}>
+                  <ScrollArea className="h-full">
+                    <div className="p-3 flex flex-col gap-3">
+                      <RunningAppsCard />
+                      <ModelStatusCard />
+                    </div>
+                  </ScrollArea>
+                </Panel>
+                <PanelResizeHandle className="h-1 bg-border/50 hover:bg-primary/50 transition-colors cursor-row-resize" />
+                <Panel defaultSize={24} minSize={15}>
+                  <ScrollArea className="h-full">
+                    <div className="p-3">
+                      <GitStatusCard />
+                    </div>
+                  </ScrollArea>
+                </Panel>
+                <PanelResizeHandle className="h-1 bg-border/50 hover:bg-primary/50 transition-colors cursor-row-resize" />
+                <Panel defaultSize={20} minSize={15}>
+                  <ProjectInspector />
+                </Panel>
+              </PanelGroup>
             </Panel>
           </PanelGroup>
         </Panel>
 
-        <PanelResizeHandle className="w-1 bg-border/50 hover:bg-accent/50 transition-colors cursor-col-resize z-10">
-          <div className="h-full w-full flex flex-col justify-center items-center">
-            <div className="h-8 w-1 rounded-full bg-border" />
+        <PanelResizeHandle className="h-1 bg-border/50 hover:bg-primary/50 transition-colors cursor-row-resize z-10">
+          <div className="w-full h-full flex items-center justify-center">
+            <div className="w-8 h-1 rounded-full bg-border" />
           </div>
         </PanelResizeHandle>
 
-        {/* Column 3 — Active Workers · Engineering Timeline · Repository Summary */}
-        <Panel defaultSize={30} minSize={20} className="flex flex-col border-l border-border/50 bg-card/30">
-          <PanelGroup direction="vertical">
-            <Panel defaultSize={34} minSize={15}>
-              <WorkersView />
+        {/* Bottom — Terminal · Logs · Testing · Deployment */}
+        <Panel defaultSize={24} minSize={12} className="border-t border-border/50 bg-card/30">
+          <PanelGroup direction="horizontal" className="h-full">
+            <Panel defaultSize={30} minSize={15} className="flex flex-col">
+              <BottomZoneLabel icon={Terminal} label="Terminal" />
+              <div className="flex-1 min-h-0 p-2">
+                <LiveTerminal />
+              </div>
             </Panel>
-            <PanelResizeHandle className="h-1 bg-border/50 hover:bg-accent/50 transition-colors cursor-row-resize" />
-            <Panel defaultSize={33} minSize={15}>
-              <TimelineView />
+            <ColResizeHandle />
+            <Panel defaultSize={25} minSize={15} className="flex flex-col">
+              <LogsView />
             </Panel>
-            <PanelResizeHandle className="h-1 bg-border/50 hover:bg-accent/50 transition-colors cursor-row-resize" />
-            <Panel defaultSize={33} minSize={15}>
-              <RepositorySummary />
+            <ColResizeHandle />
+            <Panel defaultSize={20} minSize={12} className="flex flex-col">
+              <BottomZoneLabel icon={FlaskConical} label="Testing" />
+              <TestingZone />
+            </Panel>
+            <ColResizeHandle />
+            <Panel defaultSize={25} minSize={15} className="flex flex-col">
+              <BottomZoneLabel icon={Rocket} label="Deployment & Checkpoints" />
+              <div className="flex-1 min-h-0">
+                <CheckpointsPanel />
+              </div>
             </Panel>
           </PanelGroup>
         </Panel>
       </PanelGroup>
+    </div>
+  );
+}
+
+// ── Shared layout bits ───────────────────────────────────────────────────────
+
+function ColResizeHandle() {
+  return (
+    <PanelResizeHandle className="w-1 bg-border/50 hover:bg-primary/50 transition-colors cursor-col-resize z-10">
+      <div className="h-full w-full flex flex-col justify-center items-center">
+        <div className="h-8 w-1 rounded-full bg-border" />
+      </div>
+    </PanelResizeHandle>
+  );
+}
+
+function BottomZoneLabel({ icon: Icon, label }: { icon: React.ComponentType<any>; label: string }) {
+  return (
+    <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border/40 shrink-0">
+      <Icon className="w-3.5 h-3.5 text-primary" />
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+    </div>
+  );
+}
+
+function TestingZone() {
+  const { lastTestRun } = useMarkStore();
+  const statusStyle: Record<string, string> = {
+    passed:  'bg-success/20 text-success border-success-border',
+    failed:  'bg-destructive/20 text-destructive border-destructive/30',
+    running: 'bg-primary/20 text-primary border-primary-border',
+    idle:    'bg-muted text-muted-foreground border-border',
+  };
+  return (
+    <div className="flex-1 min-h-0 flex flex-col p-2.5 gap-2 overflow-hidden">
+      <div className="flex items-center gap-2 shrink-0">
+        <span className={`text-[10px] px-2 py-0.5 rounded font-mono uppercase tracking-wider border ${statusStyle[lastTestRun.status]}`}>
+          {lastTestRun.status}
+        </span>
+        {lastTestRun.timestamp && (
+          <span className="text-[10px] text-muted-foreground">
+            {new Date(lastTestRun.timestamp).toLocaleTimeString()}
+          </span>
+        )}
+      </div>
+      <ScrollArea className="flex-1 min-h-0">
+        {lastTestRun.output ? (
+          <pre className="text-[10px] font-mono text-muted-foreground whitespace-pre-wrap break-all">{lastTestRun.output}</pre>
+        ) : (
+          <span className="text-xs text-muted-foreground italic">No test output yet</span>
+        )}
+      </ScrollArea>
     </div>
   );
 }
