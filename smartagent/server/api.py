@@ -49,6 +49,7 @@ from smartagent.identity.mark_identity import (
 )
 from smartagent.engineer.dev_pipeline import classify_intent
 from smartagent.llm.factory import is_llm_error_text
+from smartagent.server import conversation_store
 from smartagent.server.events import ServerEvents, broadcaster, intercept_print
 from smartagent.server.workspace_analyzer import (
     analyze_workspace as _analyze_workspace,
@@ -136,29 +137,57 @@ def _stream_llm_response(
     system_prompt: str,
     model_manager: Any,
     event_bus: Any,
-) -> None:
+    history: list[dict[str, str]] | None = None,
+) -> str:
     """
     Call the active LLM and publish every token as a StreamingToken event.
 
     Must be called from a worker thread (``asyncio.to_thread``) because
     ``model_manager.chat_stream()`` is a blocking iterator.  Falls back to a
     canned reply when no model is loaded or the call fails.
+
+    *history* (oldest first) is inserted between the system message and the
+    current turn — this is what makes chat stateful across turns; omit it
+    (or pass ``None``) for a one-off completion with no prior context.
+
+    Returns the full composed text (or the fallback text on failure) so
+    callers can persist it as a turn in conversation_store.
     """
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user",   "content": goal},
-    ]
+    messages = [{"role": "system", "content": system_prompt}]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": goal})
+    chunks: list[str] = []
     try:
         for chunk in model_manager.chat_stream(messages):
             if chunk and is_llm_error_text(chunk):
                 raise RuntimeError(chunk)
             if chunk:
+                chunks.append(chunk)
                 event_bus.publish(ServerEvents.STREAMING_TOKEN, text=chunk, source="mark")
+        return "".join(chunks)
     except Exception as exc:
         logger.warning(
             "MARK _stream_llm_response: LLM unavailable (%s) — using fallback", exc
         )
         event_bus.publish(ServerEvents.STREAMING_TOKEN, text=CHAT_FALLBACK_TEXT, source="mark")
+        return CHAT_FALLBACK_TEXT
+
+
+def _workspace_preamble(ctx: dict[str, Any]) -> str:
+    """
+    Compact 2-4 line project-state summary for injection into the chat
+    system prompt — built from a cached analyze_workspace() payload
+    (conversation_store.get_cached_workspace_context), never recomputed
+    per chat turn.
+    """
+    frameworks_text = ", ".join(ctx.get("frameworks") or []) or "no detected framework"
+    return (
+        f"{ctx.get('project_type') or 'a'} project on branch "
+        f"{ctx.get('git_branch') or 'unknown'}, using {frameworks_text}. "
+        f"{ctx.get('todo_count', 0)} open TODOs. Tests via "
+        f"{ctx.get('test_framework') or 'none detected'}."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -387,13 +416,22 @@ async def execute(req: ExecuteRequest) -> dict:
                 # worker dispatch at all.
                 logger.info("MARK STATE chat  goal=%r", req.goal[:60])
 
-                def _do_chat() -> None:
-                    _stream_llm_response(
-                        req.goal, _MARK_CHAT_SYSTEM,
+                def _do_chat() -> str:
+                    history = conversation_store.recent_turns(_state.workspace)
+                    system_prompt = _MARK_CHAT_SYSTEM
+                    ctx = conversation_store.get_cached_workspace_context(_state.workspace)
+                    if ctx:
+                        preamble = _workspace_preamble(ctx)
+                        system_prompt = f"{_MARK_CHAT_SYSTEM}\n\nCurrent project: {preamble}"
+                    return _stream_llm_response(
+                        req.goal, system_prompt,
                         agent.model_manager, event_bus,
+                        history=history,
                     )
 
-                await asyncio.to_thread(_do_chat)
+                reply_text = await asyncio.to_thread(_do_chat)
+                conversation_store.append_turn(_state.workspace, "user", req.goal)
+                conversation_store.append_turn(_state.workspace, "assistant", reply_text)
                 ev_name    = ServerEvents.RUN_COMPLETED
                 ev_payload = {
                     "goal":           req.goal,
@@ -731,6 +769,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             payload = await asyncio.to_thread(
                 _analyze_workspace, _state.workspace or "."
             )
+            conversation_store.cache_workspace_context(_state.workspace, payload)
             await connection_manager.send_to(ws, {
                 "type":      "event",
                 "name":      ServerEvents.WORKSPACE_ANALYZED,
@@ -751,12 +790,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
         def _compose_opening() -> str:
             mm = _build_model_manager(_state.workspace)
-            facts = (
-                f"{payload.get('project_type') or 'a'} project on branch "
-                f"{payload.get('git_branch') or 'unknown'}, using {frameworks_text}. "
-                f"{payload.get('todo_count', 0)} open TODOs. Tests via "
-                f"{payload.get('test_framework') or 'none detected'}."
-            )
+            facts = _workspace_preamble(payload)
             messages = [
                 {"role": "system", "content": _MARK_OPENING_SYSTEM},
                 {"role": "user",   "content": facts},
