@@ -109,8 +109,10 @@ class PipelineResult:
     total_elapsed:      float             = 0.0
     final_summary:      str               = ""
     summary:            str               = ""
-    # duck-type compatibility
+    # duck-type compatibility with AgentLoopResult (api.py logs both
+    # uniformly after either path completes)
     iterations:         list              = field(default_factory=list)
+    stop_reason:        str               = "done"
 
 
 # ────────────────────────────────────────────────────────────────────────────
