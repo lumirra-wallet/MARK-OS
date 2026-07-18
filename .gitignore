@@ -73,3 +73,4 @@ vault/*/*.md
 .env
 .env.local
 .env.*.local
+/env
