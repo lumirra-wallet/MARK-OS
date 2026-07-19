@@ -135,13 +135,16 @@ class SmartAgent:
             event_bus=self.events,
         )
         self.model_manager.discover_providers()
-        # LLM Provider wiring — activated by ACTIVE_PROVIDER=nvidia/github.
+        # LLM Provider wiring — activated by ACTIVE_PROVIDER=ollama/nvidia/github.
         # The factory's _auto_default_provider() auto-detects from
         # NVIDIA_API_KEY/GITHUB_TOKEN for the REST API layer; here we require
         # an explicit env var so that unit tests (which never set
-        # ACTIVE_PROVIDER) are not affected.
+        # ACTIVE_PROVIDER) are not affected. Checked against the factory's
+        # own _VALID_PROVIDERS set rather than a separately-maintained tuple
+        # so a new provider only needs registering in one place.
         import os as _os
-        if _os.environ.get("ACTIVE_PROVIDER", "").strip().lower() in ("nvidia", "github"):
+        from smartagent.llm.factory import _VALID_PROVIDERS as _WIREABLE_PROVIDERS
+        if _os.environ.get("ACTIVE_PROVIDER", "").strip().lower() in _WIREABLE_PROVIDERS:
             try:
                 from smartagent.llm.factory import wire_agent as _wire_agent
                 _wire_agent(self.model_manager)
