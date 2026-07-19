@@ -192,10 +192,6 @@ export default function Dashboard() {
     messages,
   } = useMarkStore();
 
-  const lastMsg = messages[messages.length - 1];
-  const avatarState: MarkAvatarState =
-    lastMsg?.role === 'mark' && lastMsg.isActive ? 'speaking' : running ? 'thinking' : 'idle';
-
   const [liveElapsed, setLiveElapsed] = React.useState(elapsed);
   const [metrics,     setMetrics]     = React.useState<SystemMetrics | null>(null);
 
