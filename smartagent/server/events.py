@@ -88,6 +88,10 @@ class ServerEvents:
     ERROR          = "Error"
     STATUS_CHANGED = "StatusChanged"
 
+    # MARK's own internal state (agent.mind) — pushed on every real
+    # transition so the frontend's Presence Engine never has to poll for it.
+    SELF_STATE_CHANGED = "SelfStateChanged"
+
     # Permissions
     PERMISSION_REQUESTED = "PermissionRequested"
     PERMISSION_GRANTED   = "PermissionGranted"

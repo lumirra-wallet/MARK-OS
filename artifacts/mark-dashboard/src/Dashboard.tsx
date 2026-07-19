@@ -6,9 +6,11 @@ import {
   Square, GitBranch, Brain, Box, Workflow,
   Bookmark, Terminal, Briefcase, Wrench, Code2, Award, Stethoscope,
   Folder, FileText, Share2, MoreHorizontal, FlaskConical, Rocket,
+  ArrowLeft,
 } from 'lucide-react';
 import { ChatView }          from './components/ChatView';
 import { MarkPresence }      from './components/MarkPresence';
+import { MarkHome }          from './components/MarkHome';
 import { ApprovalsSidebar }  from './components/ApprovalsSidebar';
 import { SettingsView }      from './components/SettingsView';
 import { FilesView }         from './components/FilesView';
@@ -194,6 +196,13 @@ export default function Dashboard() {
   const [liveElapsed, setLiveElapsed] = React.useState(elapsed);
   const [metrics,     setMetrics]     = React.useState<SystemMetrics | null>(null);
 
+  // MARK's Home is the default view. The Engineering Workspace (everything
+  // below the "MISSION-CONTROL WORKSPACE" block) is an application opened
+  // from inside MARK, not the boot screen — see docs/mark-operating-system.md
+  // and the Brain Ownership Architecture. Local, not persisted: every fresh
+  // load starts at MARK, the way opening Windows doesn't resume Task Manager.
+  const [view, setView] = useState<'home' | 'workspace'>('home');
+
   useEffect(() => { connectWebSocket(); }, [connectWebSocket]);
 
   // Elapsed timer
@@ -230,6 +239,16 @@ export default function Dashboard() {
         {/* Left: MARK's real presence + workspace + goal */}
         <div className="flex items-center gap-3 min-w-0">
           <MarkPresence />
+          {view === 'workspace' && (
+            <button
+              onClick={() => setView('home')}
+              className="flex items-center gap-1.5 shrink-0 text-xs font-mono bg-muted/40 hover:bg-muted/60 px-2.5 py-1.5 rounded border border-border/40 transition-colors"
+              title="Back to MARK"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">MARK</span>
+            </button>
+          )}
           <div className="h-3.5 w-px bg-border shrink-0" />
           {workspace && (
             <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground font-mono bg-muted/40 px-2 py-0.5 rounded border border-border/40 max-w-[220px]">
@@ -277,10 +296,16 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* ── MISSION-CONTROL WORKSPACE ─────────────────────────────────────────
-           Four always-visible zones (Left / Center / Right / Bottom) — no
-           tab-switching, no navigation required to see what's happening.
-           See docs/mark-operating-system.md. */}
+      {view === 'home' ? (
+        <div className="flex-1 min-h-0 bg-background">
+          <MarkHome onOpenWorkspace={() => setView('workspace')} />
+        </div>
+      ) : (
+      /* ── ENGINEERING WORKSPACE — opened from inside MARK, not the boot ────
+           screen. Four always-visible zones (Left / Center / Right / Bottom)
+           — no tab-switching within it, no navigation required to see what's
+           happening once you're here. See docs/mark-operating-system.md and
+           the Brain Ownership Architecture. */
       <PanelGroup direction="vertical" className="flex-1 bg-background">
         <Panel defaultSize={76} minSize={45}>
           <PanelGroup direction="horizontal" className="h-full">
@@ -413,6 +438,7 @@ export default function Dashboard() {
           </PanelGroup>
         </Panel>
       </PanelGroup>
+      )}
     </div>
   );
 }

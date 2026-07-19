@@ -1,0 +1,4 @@
+# Local, streaming voice pipeline (Real-Time Presence directive) — no
+# cloud STT account or API key. See smartagent/server/voice_pipeline.py.
+faster-whisper>=1.2.1
+silero-vad>=6.2.1

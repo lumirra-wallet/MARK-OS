@@ -1,5 +1,12 @@
 [
   {
+    "name": "Best Practices",
+    "parent_path": "",
+    "path": "Best Practices",
+    "description": "",
+    "aliases": []
+  },
+  {
     "name": "Business",
     "parent_path": "",
     "path": "Business",

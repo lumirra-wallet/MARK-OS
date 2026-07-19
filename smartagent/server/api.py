@@ -218,6 +218,22 @@ def _outcome_summary(ev_payload: dict, ev_name: str) -> str:
     return str(ev_payload.get("summary") or ev_payload.get("error") or ev_name or "")
 
 
+async def _broadcast_self_state(agent: Any) -> None:
+    """Push MARK's current self-state to every connected client — called at
+    the two real transition points (a task starting, a task finishing), not
+    on a timer. The frontend's Presence Engine is driven by this, plus its
+    own one-time fetch on connect; it never polls."""
+    try:
+        await connection_manager.broadcast({
+            "type": "event",
+            "name": ServerEvents.SELF_STATE_CHANGED,
+            "payload": self_state.snapshot(agent),
+            "timestamp": _now_iso(),
+        })
+    except Exception:
+        pass
+
+
 def _stream_llm_response(
     goal: str,
     system_prompt: str,
@@ -551,6 +567,7 @@ async def execute(req: ExecuteRequest) -> dict:
                 "MARK STATE agent-ready  active_model=%r", _active_model or "none",
             )
             self_state.task_started(agent, req.goal)
+            await _broadcast_self_state(agent)
 
             # ── Understand: the Intent Engine's single decision point ────────
             intent = classify_intent(req.goal)
@@ -775,6 +792,9 @@ async def execute(req: ExecuteRequest) -> dict:
                     succeeded=bool(ev_payload.get("success")),
                     what_happened=_outcome_summary(ev_payload, ev_name),
                 )
+                # event_bus is already uninstalled above — broadcast directly
+                # via connection_manager, same as the post-run hooks below.
+                await _broadcast_self_state(agent)
             logger.info(
                 "MARK STATE teardown   running=False  ev=%r", ev_name,
             )
@@ -1150,6 +1170,46 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 await connection_manager.send_to(ws, {"type": "ping"})
     except (WebSocketDisconnect, Exception):
         connection_manager.disconnect(ws)
+
+
+@router.websocket("/ws/voice")
+async def voice_websocket(ws: WebSocket) -> None:
+    """
+    Real-time voice input: the browser streams raw PCM16 microphone audio
+    as binary frames; this runs it through VoiceSession's real local
+    VAD + Whisper pipeline and sends transcript/interruption events back
+    on the same connection — {"type": "speech_start"}, {"type": "partial",
+    "text": ...}, {"type": "final", "text": ...}.
+
+    Deliberately separate from /ws: this is one owner's live microphone
+    audio, not something every connected dashboard client should receive.
+    speech_start is the interruption signal — the frontend uses it to stop
+    TTS playback the moment the owner starts talking, before any
+    transcription has even happened.
+    """
+    from smartagent.server.voice_pipeline import VoiceSession
+
+    await ws.accept()
+    logger.info("MARK STATE voice-ws  connected")
+    try:
+        session = await asyncio.to_thread(VoiceSession)
+    except Exception as exc:
+        logger.warning("voice_websocket: failed to start VoiceSession: %s", exc)
+        await ws.close(code=1011, reason="voice pipeline unavailable")
+        return
+
+    try:
+        while True:
+            data = await ws.receive_bytes()
+            events = await asyncio.to_thread(session.feed, data)
+            for event in events:
+                await ws.send_json(event)
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.warning("voice_websocket: %s", exc)
+    finally:
+        logger.info("MARK STATE voice-ws  disconnected")
 
 
 # ---------------------------------------------------------------------------

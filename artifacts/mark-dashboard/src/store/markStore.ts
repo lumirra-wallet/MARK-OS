@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { markApi, PermissionInfo } from '@/lib/markApi';
+import { markApi, PermissionInfo, SelfState } from '@/lib/markApi';
 
 // ── Chat message model ────────────────────────────────────────────────────────
 
@@ -175,6 +175,13 @@ interface MarkState {
   activePreviewId: string | null;
   deviceMode:      DeviceMode;
   themeMode:       ThemeMode;
+
+  // MARK's own real-time state — agent.mind, pushed over the WebSocket on
+  // every real transition (see SelfStateChanged), plus one fetch on connect
+  // for the initial snapshot. No polling: this is either the last real
+  // push, or null until the first one arrives.
+  selfState: SelfState | null;
+  fetchSelfState: () => Promise<void>;
 
   // Preview actions
   setActivePreviewId: (id: string | null) => void;
@@ -374,6 +381,17 @@ export const useMarkStore = create<MarkState>((set, get) => {
     deviceMode:      'desktop',
     themeMode:       'dark',
 
+    // MARK's real-time self-state — null until the first fetch/push lands.
+    selfState: null,
+    fetchSelfState: async () => {
+      try {
+        const s = await markApi.getSelfState(get().serverUrl);
+        set({ selfState: s });
+      } catch {
+        /* stay null — the Presence Engine has an honest "unknown" state for this */
+      }
+    },
+
     // ── Branch actions (Feature 9) ────────────────────────────────────────────
 
     createBranch: (name) => set(state => ({
@@ -443,20 +461,15 @@ export const useMarkStore = create<MarkState>((set, get) => {
         ws.onopen = () => {
           set({ connectionStatus: 'connected' });
           if (reconnectTimer) clearTimeout(reconnectTimer);
-          // Greeting on first connect
-          if (get().messages.length === 0) {
-            set(state => ({
-              messages: [...state.messages, {
-                id: _id(), role: 'mark' as const,
-                timestamp: new Date().toISOString(),
-                blocks: [{
-                  type: 'text',
-                  text: "Good morning. I'm MARK — the executive director of your engineering team.\n\nTell me what you want built, and I'll plan the work, delegate it to the right specialists, supervise execution, and report back.",
-                }],
-                isActive: false,
-              }],
-            }));
-          }
+          // No hardcoded greeting here — the real opening message arrives
+          // via the MarkOpening event below, generated server-side from an
+          // actual look at the repo (and never silent even if that LLM call
+          // fails — see reflect_on_run's fallback contract). A canned
+          // "I'm MARK — the executive director..." line here just meant
+          // every fresh connection showed two openings, and reintroduced
+          // the exact engineering-first framing that line was fixed away
+          // from server-side.
+          get().fetchSelfState();
         };
 
         ws.onclose = () => {
@@ -497,8 +510,11 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   engineeringMemory: { ...state.engineeringMemory, currentGoal: payload.goal },
                 }));
                 addTimeline(`Run started: ${payload.goal}`);
+                // No canned opener — this fired on every message regardless
+                // of what MARK actually decided to do with it, including
+                // plain conversation. The bubble starts empty and fills with
+                // MARK's real reply as StreamingToken/block events arrive.
                 _startMarkMsg(timestamp);
-                _pushBlock({ type: 'text', text: `I'll get started on that right away.\n` });
                 break;
               }
 
@@ -519,6 +535,14 @@ export const useMarkStore = create<MarkState>((set, get) => {
                   type: 'summary', text: summaryText, success: payload.success,
                   filesCreated: created, filesModified: modified, elapsed: payload.elapsed,
                 }]);
+                break;
+              }
+
+              // MARK's real internal state changed (agent.mind) — pushed at
+              // every real transition (task started, task finished), not
+              // polled. The Presence Engine reads this directly.
+              case 'SelfStateChanged': {
+                set({ selfState: payload });
                 break;
               }
 
