@@ -225,14 +225,11 @@ export default function Dashboard() {
     <div className="h-screen w-full flex flex-col bg-background text-foreground overflow-hidden font-sans">
 
       {/* ── TOP NAV ────────────────────────────────────────────────────────── */}
-      <header className="h-12 border-b border-border/50 bg-card/50 backdrop-blur shrink-0 flex items-center justify-between px-4 z-10 gap-3">
+      <header className="h-14 border-b border-border/50 bg-card/50 backdrop-blur shrink-0 flex items-center justify-between px-4 z-10 gap-3">
 
-        {/* Left: logo + workspace + goal */}
+        {/* Left: MARK's real presence + workspace + goal */}
         <div className="flex items-center gap-3 min-w-0">
-          <div className="flex items-center gap-2 shrink-0">
-            <MarkAvatar state={avatarState} size={22} />
-            <span className="font-bold tracking-tight">MARK</span>
-          </div>
+          <MarkPresence />
           <div className="h-3.5 w-px bg-border shrink-0" />
           {workspace && (
             <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground font-mono bg-muted/40 px-2 py-0.5 rounded border border-border/40 max-w-[220px]">
