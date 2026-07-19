@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spotify Clone - Music for Everyone</title>
+    <link rel="stylesheet" href="spotify-styles.css" />
+</head>
+<body>
+    <header class="header">
+        <nav class="nav">
+            <div class="nav-left">
+                <a href="#" class="logo">
+                    <svg class="logo-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 3C6.48 3 2 7.48 2 13s4.48 10 10 10 10-4.48 10-10S17.52 3 12 3zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm3-8c0 1.66-1.34 3-3 3s-3-1.34-3-3 1.34-3 3-3 3 1.34 3 3z"/>
+                    </svg>
+                    <span class="logo-text">Spotify</span>
+                </a>
+            </div>
+            <ul class="nav-links">
+                <li><a href="#features" class="nav-link">Features</a></li>
+                <li><a href="#music" class="nav-link">Music</a></li>
+                <li><a href="#podcasts" class="nav-link">Podcasts</a></li>
+                <li><a href="#pricing" class="nav-link">Pricing</a></li>
+            </ul>
+            <div class="nav-right">
+                <a href="#login" class="btn btn-secondary">Log In</a>
+                <a href="#signup" class="btn btn-primary">Sign Up</a>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <section class="hero" id="hero">
+            <div class="hero-content">
+                <span class="hero-badge">New: AI DJ - Your Personal Music Curator</span>
+                <h1 class="hero-title">Music for everyone</h1>
+                <p class="hero-subtitle">Millions of songs and podcasts. No credit card needed.</p>
+                <div class="hero-actions">
+                    <a href="#signup" class="btn btn-primary btn-large">Get Spotify Free</a>
+                    <a href="#features" class="btn btn-secondary btn-large">Learn More</a>
+                </div>
+                <p class="hero-note">Free forever. No credit card required.</p>
+            </div>
+            <div class="hero-visual">
+                <div class="hero-card hero-card-1">
+                    <div class="card-image"></div>
+                    <div class="card-content">
+                        <span class="card-tag">Playlist</span>
+                        <h3>Today's Top Hits</h3>
+                        <p>The hottest tracks right now</p>
+                    </div>
+                </div>
+                <div class="hero-card hero-card-2">
+                    <div class="card-image"></div>
+                    <div class="card-content">
+                        <span class="card-tag">Album</span>
+                        <h3>Midnights</h3>
+                        <p>Taylor Swift</p>
+                    </div>
+                </div>
+                <div class="hero-card hero-card-3">
+                    <div class="card-image"></div>
+                    <div class="card-content">
+                        <span class="card-tag">Podcast</span>
+                        <h3>The Daily</h3>
+                        <p>New York Times</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="features" id="features">
+            <div class="container">
+                <header class="section-header">
+                    <h2>Why Spotify?</h2>
+                    <p>Discover, listen, and share the music you love</p>
+                </header>
+                <div class="features-grid">
+                    <article class="feature-card">
+                        <div class="feature-icon">
+                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                            </svg>
+                        </div>
+                        <h3>Discover New Music</h3>
+                        <p>Personalized recommendations based on your taste. Discover Weekly, Release Radar, and Daily Mixes made just for you.</p>
+                    </article>
+                    <article class="feature-card">
+                        <div class="feature-icon">
+                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 12.5h-2v-1h2v1zm0-2.5h-2v-1h2v1zm0-2.5h-2v-1h2v1zm0-2.5h-2v-1h2v1z"/>
+                            </svg>
+                        </div>
+                        <h3>Listen Everywhere</h3>
+                        <p>Play on your phone, computer, tablet, smart TV, speakers, car, and more. Seamless switching between devices.</p>
+                    </article>
+                    <article class="feature-card">
+                        <div class="feature-icon">
+                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                            </svg>
+                        </div>
+                        <h3>Create & Share Playlists</h3>
+                        <p>Build the perfect playlist for any mood. Collaborate with friends and share your musical journey.</p>
+                    </article>
+                    <article class="feature-card">
+                        <div class="feature-icon">
+                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H4V4h16v12z"/>
+                            </svg>
+                        </div>
+                        <h3>Offline Listening</h3>
+                        <p>Download your favorite songs and podcasts. Listen anywhere, even without an internet connection.</p>
+                    </article>
+                    <article class="feature-card">
+                        <div class="feature-icon">
+                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                            </svg>
+                        </div>
+                        <h3>High Quality Audio</h3>
+                        <p>Stream in up to 320kbps. Hear every detail the artist intended with crystal clear sound quality.</p>
+                    </article>
+                    <article class="feature-card">
+                        <div class="feature-icon">
+                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+                            </svg>
+                        </div>
+                        <h3>Lyrics & Behind the Music</h3>
+                        <p>Follow along with real-time lyrics. Discover the stories behind songs with Canvas and artist insights.</p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="music-showcase" id="music">
+            <div class="container">
+                <header class="section-header">
+                    <h2>Made For You</h2>
+                    <p>Playlists personalized to your taste</p>
+                </header>
+                <div class="showcase-grid">
+                    <div class="showcase-card large">
+                        <div class="showcase-image" style="background: linear-gradient(135deg, #1DB954 0%, #1ed760 100%);">
+                            <div class="play-overlay">
+                                <button class="play-btn" aria-label="Play Discover Weekly">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="showcase-content">
+                            <span class="showcase-tag">Made For You</span>
+                            <h3>Discover Weekly</h3>
+                            <p>Your weekly mixtape of fresh music. Updated every Monday with 30 new tracks picked just for you.</p>
+                            <button class="btn btn-outline">Play Playlist</button>
+                        </div>
+                    </div>
+                    <div class="showcase-card">
+                        <div class="showcase-image" style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);">
+                            <div class="play-overlay">
+                                <button class="play-btn" aria-label="Play Release Radar">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="showcase-content">
+                            <span class="showcase-tag">Made For You</span>
+                            <h3>Release Radar</h3>
+                            <p>New music from artists you follow. Updated every Friday with the latest releases.</p>
+                            <button class="btn btn-outline">Play Playlist</button>
+                        </div>
+                    </div>
+                    <div class="showcase-card">
+                        <div class="showcase-image" style="background: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);">
+                            <div class="play-overlay">
+                                <button class="play-btn" aria-label="Play Daily Mix">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="showcase-content">
+                            <span class="showcase-tag">Made For You</span>
+                            <h3>Daily Mix 1</h3>
+                            <p>Your favorite tracks mixed with fresh picks. Endless playlists based on your listening habits.</p>
+                            <button class="btn btn-outline">Play Playlist</button>
+                        </div>
+                    </div>
+                    <div class="showcase-card">
+                        <div class="showcase-image" style="background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);">
+                            <div class="play-overlay">
+                                <button class="play-btn" aria-label="Play On Repeat">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="showcase-content">
+                            <span class="showcase-tag">Made For You</span>
+                            <h3>On Repeat</h3>
+                            <p>You've been playing these tracks on repeat. Your most listened songs, all in one place.</p>
+                            <button class="btn btn-outline">Play Playlist</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="popular-section" id="popular">
+            <div class="container">
+                <header class="section-header">
+                    <h2>Popular Playlists</h2>
+                    <p>Trending now across the globe</p>
+                </header>
+                <div class="popular-grid">
+                    <article class="popular-card">
+                        <div class="popular-image" style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);"></div>
+                        <div class="popular-content">
+                            <span class="popular-tag">Playlist</span>
+                            <h3>Today's Top Hits</h3>
+                            <p>50 songs · 2.5M likes</p>
+                        </div>
+                    </article>
+                    <article class="popular-card">
+                        <div class="popular-image" style="background: linear-gradient(135deg, #7c2d12 0%, #ea580c 100%);"></div>
+                        <div class="popular-content">
+                            <span class="popular-tag">Playlist</span>
+                            <h3>RapCaviar</h3>
+                            <p>50 songs · 14.2M likes</p>
+                        </div>
+                    </article>
+                    <article class="popular-card">
+                        <div class="popular-image" style="background: linear-gradient(135deg, #365314 0%, #65a30d 100%);"></div>
+                        <div class="popular-content">
+                            <span class="popular-tag">Playlist</span>
+                            <h3>Viva Latino</h3>
+                            <p>80 songs · 9.8M likes</p>
+                        </div>
+                    </article>
+                    <article class="popular-card">
+                        <div class="popular-image" style="background: linear-gradient(135deg, #581c87 0%, #a855f7 100%);"></div>
+                        <div class="popular-content">
+                            <span class="popular-tag">Playlist</span>
+                            <h3>Rock This</h3>
+                            <p>100 songs · 6.3M likes</p>
+                        </div>
+                    </article>
+                    <article class="popular-card">
+                        <div class="popular-image" style="background: linear-gradient(135deg, #1f2937 0%, #374151 100%);"></div>
+                        <div class="popular-content">
+                            <span class="popular-tag">Playlist</span>
+                            <h3>All Out 2010s</h3>
+                            <p>75 songs · 3.1M likes</p>
+                        </div>
+                    </article>
+                    <article class="popular-card">
+                        <div class="popular-image" style="background: linear-gradient(135deg, #92400e 0%, #f59e0b 100%);"></div>
+                        <div class="popular-content">
+                            <span class="popular-tag">Playlist</span>
+                            <h3>Chill Hits</h3>
+                            <p>60 songs · 4.7M likes</p>
+                        </div>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="artists-section" id="artists">
+            <div class="container">
+                <header class="section-header">
+                    <h2>Popular Artists</h2>
+                    <p>Trending artists worldwide</p>
+                </header>
+                <div class="artists-grid">
+                    <article class="artist-card">
+                        <div class="artist-image" style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);"></div>
+                        <div class="artist-content">
+                            <h3>Taylor Swift</h3>
+                            <p>98.5M monthly listeners</p>
+                        </div>
+                    </article>
+                    <article class="artist-card">
+                        <div class="artist-image" style="background: linear-gradient(135deg, #7c2
