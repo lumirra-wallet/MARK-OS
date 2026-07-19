@@ -405,6 +405,20 @@ export const markApi = {
     if (!res.ok) throw new Error('github models fetch failed');
     return res.json() as Promise<{ models: GitHubModelInfo[]; error?: string }>;
   },
+
+  // ── MARK's own presence — self-state and identity ─────────────────────────
+
+  getSelfState: async (baseUrl: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/self-state'));
+    if (!res.ok) throw new Error('self-state fetch failed');
+    return res.json() as Promise<SelfState>;
+  },
+
+  getIdentity: async (baseUrl: string) => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/identity'));
+    if (!res.ok) throw new Error('identity fetch failed');
+    return res.json() as Promise<IdentityProfile>;
+  },
 };
 
 // ── Enhanced git types ────────────────────────────────────────────────────────
