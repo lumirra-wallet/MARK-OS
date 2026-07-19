@@ -88,3 +88,49 @@ def test_is_agent_for_code_tasks(goal):
 ])
 def test_ambiguous_questions_stay_conversational(goal):
     assert classify_intent(goal).route == "conversational", f"Expected chat for: {goal!r}"
+
+
+# ── Capability questions about MARK itself stay conversational ────────────────
+#
+# "can you generate images?" contains "generate" — a generic action verb
+# that would otherwise force the agent/engineering path regardless of
+# phrasing. But this is a yes/no question about MARK's own ability, not a
+# work request, and answering it should never involve tool calls (searching
+# the workspace, reading files) — see the live incident this regression test
+# is named for: MARK tried to read a hallucinated file path and searched the
+# codebase for "image generation" instead of just answering from its own
+# identity.
+
+@pytest.mark.parametrize("goal", [
+    "can you generate images?",
+    "can you generate an image?",
+    "are you able to browse the internet?",
+    "do you support voice?",
+    "does mark support voice input?",
+    "will you be able to make phone calls?",
+    "can you make videos?",
+    "could you write music?",
+])
+def test_capability_questions_stay_conversational(goal):
+    decision = classify_intent(goal)
+    assert decision.route == "conversational", f"Expected chat for: {goal!r}"
+
+
+# ── Same phrasing shape, but a real request — must still route to the agent ───
+#
+# The capability-question fix must not swallow genuine work requests that
+# happen to be phrased as "can/could/are/do you ...?" — distinguished by a
+# concrete deliverable (a file, or a code/project-domain noun) or a
+# "for me" / "help" signal.
+
+@pytest.mark.parametrize("goal", [
+    "can you generate a REST API?",
+    "can you fix app.py?",
+    "could you help me build a login page?",
+    "can you create a Flask app for me?",
+    "are you able to write main.py?",
+    "do you support building a React frontend?",
+])
+def test_capability_shaped_work_requests_still_route_to_agent(goal):
+    decision = classify_intent(goal)
+    assert decision.route != "conversational", f"Expected agent for: {goal!r}"

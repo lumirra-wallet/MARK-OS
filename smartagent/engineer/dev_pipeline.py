@@ -868,6 +868,24 @@ _ACTION_KEYWORDS = frozenset({
 
 _DEBUG_KEYWORDS = frozenset({"bug", "debug", "broken", "error", "crash", "fail", "failing", "failed"})
 
+# ── Capability questions (about MARK itself) vs. actual work requests ──────
+# "can you generate images?" is a yes/no question about MARK's own ability
+# and should stay conversational. "generate a REST API" or "can you fix
+# app.py?" are real work and must still route to the engineering path even
+# though both contain the same generic verb. The distinguishing signal isn't
+# the verb — it's whether the sentence also names a concrete deliverable
+# (a code/project-domain noun, or a file) and whether it reads as "do this
+# for me" rather than "is this something you can do".
+_GENERIC_CAPABILITY_VERBS = frozenset({
+    "generate", "create", "make", "write", "build", "do", "support",
+    "handle", "produce",
+})
+_CODE_DOMAIN_SIGNAL_KEYWORDS = _ACTION_KEYWORDS - _GENERIC_CAPABILITY_VERBS
+_CAPABILITY_QUESTION_OPENER = re.compile(r"^(can|could|are|do|does|will)\s+(you|mark)\b", re.I)
+# Present in real requests ("can you help ME build X") but not in abstract
+# capability questions ("can you generate images?") — excludes the former.
+_REQUEST_SIGNAL_WORDS = frozenset({"help", "me", "my", "for", "us", "our"})
+
 _QUESTION_WORDS = frozenset({
     "what", "how", "why", "should", "do", "does", "is", "are",
     "can", "could", "would", "who", "when", "where", "will",
@@ -923,6 +941,25 @@ def classify_intent(goal: str) -> IntentDecision:
     words_lower = {w.lower().strip("?!.,;:'\"") for w in g.split()}
     has_action_keyword = bool(words_lower & _ACTION_KEYWORDS)
     has_file_pattern = bool(re.search(r'\b\w+\.\w{1,6}\b', g))
+
+    # 1.5. Capability question about MARK itself ("can you generate images?",
+    #      "are you able to browse the internet?") → conversational, even
+    #      though it contains a generic action verb like "generate". Must
+    #      run before the action-keyword branch below, which would otherwise
+    #      treat the verb alone as a work request. Real requests phrased as
+    #      questions ("can you fix app.py?", "could you help me build a
+    #      login page?") are excluded via the file-pattern check, the
+    #      request-signal words, and the presence of an actual code/project
+    #      noun — so this only catches genuine yes/no questions about ability.
+    if (
+        not has_file_pattern
+        and g.rstrip().endswith("?")
+        and _CAPABILITY_QUESTION_OPENER.match(g)
+        and not (words_lower & _REQUEST_SIGNAL_WORDS)
+        and not (words_lower & _CODE_DOMAIN_SIGNAL_KEYWORDS)
+        and len(g.split()) <= 12
+    ):
+        return IntentDecision(IntentCategory.QUESTION, "conversational")
 
     # 2. Clear action/code/workspace signal → route by complexity, never
     #    conversational, regardless of phrasing (e.g. a question).

@@ -55,6 +55,16 @@ class LlmSettingsUpdate(PydanticModel):
 
 _PROVIDER_CATALOGUE = [
     {
+        "id":          "ollama",
+        "name":        "Ollama (local)",
+        "description": "MARK's local intelligence core — no cloud, no API key, runs on this machine",
+        "base_url":    os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"),
+        "requires_token": False,
+        "token_env":   None,
+        "capabilities": ["chat", "streaming", "tool_calling"],
+        "default_model": os.environ.get("MARK_MODEL") or os.environ.get("OLLAMA_DEFAULT_MODEL") or "llama3.2:3b",
+    },
+    {
         "id":          "nvidia",
         "name":        "NVIDIA",
         "description": "Cloud-hosted models via NVIDIA's OpenAI-compatible inference API",
@@ -125,10 +135,17 @@ async def list_providers() -> dict:
     result = []
     for p in _PROVIDER_CATALOGUE:
         entry = dict(p)
-        # nvidia / github / openai / anthropic — availability is just
-        # "is the token/key present", same check `_auto_default_provider()` uses.
-        entry["token_present"] = bool(os.environ.get(p["token_env"]))
-        entry["available"] = entry["token_present"]
+        if p["token_env"] is None:
+            # ollama — local, no API key required. "available" here mirrors
+            # the other providers' meaning (configured, not live-probed —
+            # see /diagnostics?probe=true for real reachability).
+            entry["token_present"] = True
+            entry["available"] = True
+        else:
+            # nvidia / github / openai / anthropic — availability is just
+            # "is the token/key present", same check `_auto_default_provider()` uses.
+            entry["token_present"] = bool(os.environ.get(p["token_env"]))
+            entry["available"] = entry["token_present"]
         entry["active"] = (p["id"] == current)
         result.append(entry)
     return {"providers": result}
