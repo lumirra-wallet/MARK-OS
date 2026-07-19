@@ -168,3 +168,26 @@ def test_vague_self_improvement_needs_clarification(goal):
 def test_concrete_improvement_requests_do_not_need_clarification(goal):
     decision = classify_intent(goal)
     assert decision.route != "needs_clarification", f"Expected normal routing for: {goal!r}"
+
+
+# ── The default is "can I answer this myself?", not "assume engineering" ──────
+#
+# Regression for the architecture fix: longer, non-interrogative phrasing
+# with no recognized action keyword and no file pattern used to fall through
+# to the engineering path via classify_complexity() — an "assume work is
+# needed unless proven otherwise" default. Workers are the last resort, not
+# the first; this branch must stay conversational by default. (Messages that
+# genuinely do name a code/project/file term are still caught earlier, by
+# the action-keyword/file-pattern branch — this is specifically about what's
+# left over once that branch has already had its chance.)
+
+@pytest.mark.parametrize("goal", [
+    "Let's discuss the roadmap for next quarter",
+    "I had a really productive day today",
+    "That sounds like a good direction to explore",
+    "I've been thinking about this for a while",
+    "This has been a long week for everyone",
+])
+def test_ambiguous_declarative_statements_default_to_conversational(goal):
+    decision = classify_intent(goal)
+    assert decision.route == "conversational", f"Expected chat default for: {goal!r}"

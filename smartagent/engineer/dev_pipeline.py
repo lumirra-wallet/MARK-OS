@@ -1020,9 +1020,12 @@ def classify_intent(goal: str) -> IntentDecision:
     if word_count <= 3:
         return IntentDecision(IntentCategory.CASUAL, "conversational")
 
-    # 5. Everything else: route by complexity tier.
-    complexity = classify_complexity(g)
-    legacy_complex = any(pat.search(g) for pat in _COMPLEX_PATTERNS)
-    is_pipeline_tier = complexity not in (TaskComplexity.TRIVIAL, TaskComplexity.SMALL)
-    route = "complex_pipeline" if (is_pipeline_tier or legacy_complex) else "simple_agent"
-    return IntentDecision(IntentCategory.ENGINEERING, route, complexity)
+    # 5. Everything else: stay conversational. This branch is only reached by
+    #    longer, non-interrogative phrasing with no recognized action
+    #    keyword and no file pattern — by construction, branch 2 already
+    #    claimed every message that named a code/project/file term. What's
+    #    left is discussion, reflection, or a statement, not a work order.
+    #    The default is "can I answer this myself" — engineering is an
+    #    escalation branch 2 already earns, never the fallback for what's
+    #    left over. ("Workers are the last option, not the first.")
+    return IntentDecision(IntentCategory.CASUAL, "conversational")
