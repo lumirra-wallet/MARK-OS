@@ -189,7 +189,6 @@ export default function Dashboard() {
     running, goal, workspace, elapsed,
     cancelRun, cancelRequested,
     serverUrl, pendingPermissions,
-    messages,
   } = useMarkStore();
 
   const [liveElapsed, setLiveElapsed] = React.useState(elapsed);
