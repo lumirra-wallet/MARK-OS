@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "mark",
-      "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "cd /home/smart/Documents/Smart-Agent-Core && BASE_PATH=/ PORT=18949 npx pnpm --filter @workspace/mark-dashboard run build && npx pnpm --filter @workspace/mark-api run dev"],
+      "runtimeExecutable": "C:\\Program Files\\Git\\bin\\bash.exe",
+      "runtimeArgs": ["-c", "cd \"C:/Users/Mr smart/MARK-OS\" && pnpm run dev"],
       "port": 18949
     }
   ]
