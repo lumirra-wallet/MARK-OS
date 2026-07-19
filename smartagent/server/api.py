@@ -603,6 +603,22 @@ async def execute(req: ExecuteRequest) -> dict:
 
                     logger.info("MARK STATE executing  dev-pipeline starting")
                     result = await asyncio.to_thread(_run_pipeline)
+
+                    # Reflect on the mission in the background — never
+                    # delays the response, never breaks it if it fails
+                    # (see reflection_bridge.py for why this only runs
+                    # for pipeline missions, not single-shot agent tasks).
+                    def _reflect() -> None:
+                        from smartagent.server.reflection_bridge import get_reflection_bridge
+                        get_reflection_bridge().reflect_on_pipeline_result(
+                            result,
+                            memory_manager=agent.memory,
+                            knowledge_manager=agent.knowledge,
+                            model_manager=agent.model_manager,
+                        )
+                    asyncio.create_task(
+                        asyncio.to_thread(_reflect), name="mark-reflect",
+                    )
                 else:
                     def _run_agent() -> Any:
                         return run_agent_loop(
