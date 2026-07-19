@@ -438,7 +438,7 @@ async def execute(req: ExecuteRequest) -> dict:
             return
 
         from smartagent.server.self_state import get_self_state_tracker
-        get_self_state_tracker().task_started()
+        get_self_state_tracker().task_started(req.goal)
 
         try:
             # Use module-level imports (patchable in tests).
@@ -481,7 +481,7 @@ async def execute(req: ExecuteRequest) -> dict:
             )
             get_self_state_tracker().set_model(_active_model)
 
-            # ── Route: the single Conversation Manager decision point ────────
+            # ── Understand: the Intent Engine's single decision point ────────
             intent = classify_intent(req.goal)
             logger.info(
                 "MARK STATE intent  goal=%r  category=%s  route=%s",
@@ -661,7 +661,10 @@ async def execute(req: ExecuteRequest) -> dict:
                     broadcaster.uninstall(event_bus)
                 except Exception:
                     pass
-            get_self_state_tracker().task_finished()
+            get_self_state_tracker().task_finished(
+                succeeded=bool(ev_payload.get("success")),
+                what_happened=str(ev_payload.get("summary") or ev_name or ""),
+            )
             logger.info(
                 "MARK STATE teardown   running=False  ev=%r", ev_name,
             )

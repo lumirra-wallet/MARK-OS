@@ -1,52 +1,68 @@
-"""Tests for smartagent.server.self_state — Phase 5 (internal self-state)."""
+"""Tests for smartagent.server.self_state — MARK's internal self-state.
+
+Wraps a real smartagent.mind.executive.executive_controller.ExecutiveController
+(attention/confidence/homeostasis/state machine), not a bare dataclass — see
+self_state.py's module docstring for why. Tests assert on the tracker's own
+public contract, not on ExecutiveController's internals directly."""
 
 from __future__ import annotations
 
-from smartagent.server.self_state import Mode, SelfState, SelfStateTracker, get_self_state_tracker
+from smartagent.server.self_state import SelfStateTracker, get_self_state_tracker
 
 
-class TestSelfState:
-    def test_default_state_is_idle(self):
-        s = SelfState()
-        assert s.mode == Mode.IDLE
-        assert s.active_tasks == 0
+class TestSelfStateTracker:
+    def test_default_snapshot_is_idle(self):
+        t = SelfStateTracker()
+        snap = t.snapshot()
+        assert snap["mode"] == "idle"
+        assert snap["active_tasks"] == 0
 
-    def test_as_dict_shape(self):
-        d = SelfState().as_dict()
-        for key in ("identity", "mode", "active_tasks", "model", "memory", "voice"):
+    def test_snapshot_shape(self):
+        d = SelfStateTracker().snapshot()
+        for key in (
+            "identity", "owner", "mode", "state", "current_activity",
+            "active_tasks", "model", "memory", "voice", "confidence", "health",
+        ):
             assert key in d
         assert d["identity"] == "MARK"
 
     def test_voice_honestly_reports_disabled(self):
-        """Phase 4 (voice) hasn't been built — self-state must not overclaim."""
-        assert SelfState().as_dict()["voice"] == "disabled"
+        """Voice hasn't been built — self-state must not overclaim."""
+        assert SelfStateTracker().snapshot()["voice"] == "disabled"
 
-
-class TestSelfStateTracker:
     def test_task_started_increments_and_sets_executing(self):
         t = SelfStateTracker()
-        t.task_started()
+        t.task_started("build the API")
         snap = t.snapshot()
         assert snap["active_tasks"] == 1
         assert snap["mode"] == "executing"
+        assert snap["current_activity"] == "build the API"
 
     def test_task_finished_decrements_and_returns_to_idle(self):
         t = SelfStateTracker()
-        t.task_started()
-        t.task_finished()
+        t.task_started("build the API")
+        t.task_finished(succeeded=True, what_happened="Built it.")
         snap = t.snapshot()
         assert snap["active_tasks"] == 0
         assert snap["mode"] == "idle"
 
-    def test_multiple_concurrent_tasks_stay_executing_until_all_finish(self):
+    def test_task_started_and_finished_use_sensible_defaults(self):
+        """Zero-arg calls (as api.py used to make before it started passing
+        the real goal/outcome) must still work without raising."""
         t = SelfStateTracker()
         t.task_started()
-        t.task_started()
+        t.task_finished()
+        assert t.snapshot()["active_tasks"] == 0
+
+    def test_multiple_concurrent_tasks_stay_executing_until_all_finish(self):
+        t = SelfStateTracker()
+        t.task_started("task one")
+        t.task_started("task two")
         assert t.snapshot()["active_tasks"] == 2
         t.task_finished()
-        assert t.snapshot()["mode"] == "executing"  # one still active
+        assert t.snapshot()["active_tasks"] == 1
         t.task_finished()
-        assert t.snapshot()["mode"] == "idle"
+        assert t.snapshot()["active_tasks"] == 0
 
     def test_active_tasks_never_goes_negative(self):
         t = SelfStateTracker()
@@ -61,6 +77,17 @@ class TestSelfStateTracker:
     def test_set_model_none_reports_as_string_none(self):
         t = SelfStateTracker()
         assert t.snapshot()["model"] == "none"
+
+    def test_set_memory_status_reflected_in_snapshot(self):
+        t = SelfStateTracker()
+        t.set_memory_status("degraded")
+        assert t.snapshot()["memory"] == "degraded"
+
+    def test_a_failed_task_still_returns_to_idle(self):
+        t = SelfStateTracker()
+        t.task_started("risky thing")
+        t.task_finished(succeeded=False, what_happened="It broke.")
+        assert t.snapshot()["mode"] == "idle"
 
 
 class TestSelfStateSingleton:
