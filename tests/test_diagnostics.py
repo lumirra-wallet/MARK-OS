@@ -533,7 +533,7 @@ class TestCheckLLMProvider:
     def test_probe_false_skips_real_call_for_every_provider(self):
         from smartagent.server.api_diagnostics import _check_llm_provider
         for provider, key_env in [
-            ("github", "GITHUB_TOKEN"), ("nvidia", "NVIDIA_API_KEY"),
+            ("github", "GITHUB_TOKEN"), ("nvidia", "NVIDIA_API_KEY"), ("ollama", ""),
             ("openai", "OPENAI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY"),
         ]:
             with patch("smartagent.llm.factory.get_active_provider", return_value=provider), \
@@ -541,11 +541,12 @@ class TestCheckLLMProvider:
                  patch("os.environ.get", side_effect=lambda k, d="", _e=key_env: "present" if k == _e else d), \
                  patch("smartagent.llm.github_provider.GitHubProvider") as ghp, \
                  patch("smartagent.llm.nvidia_provider.NvidiaProvider") as nvp, \
+                 patch("smartagent.models.providers.ollama_provider.OllamaProvider") as olp, \
                  patch("smartagent.llm.openai_provider.OpenAIProvider") as oap, \
                  patch("smartagent.llm.anthropic_provider.AnthropicProvider") as anp:
                 result = self._run(_check_llm_provider(probe=False))
             assert result["status"] in ("ok", "warn"), f"{provider}: {result}"
-            for mock_cls in (ghp, nvp, oap, anp):
+            for mock_cls in (ghp, nvp, olp, oap, anp):
                 mock_cls.assert_not_called()
 
     def test_probe_false_still_reports_no_key_as_error(self):
@@ -557,18 +558,65 @@ class TestCheckLLMProvider:
         assert result["status"] == "error"
         assert "NVIDIA_API_KEY" in result["message"]
 
+    # ── ollama (MARK's local core) ───────────────────────────────────────────
+
+    def test_ollama_ok(self):
+        from smartagent.server.api_diagnostics import _check_llm_provider
+        health = MagicMock(); health.healthy = True; health.message = "Ollama server reachable; llama3.2:3b is installed."
+        p = MagicMock(); p.health.return_value = health; p.supports_tools = True
+        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
+             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "llama3.2:3b"}), \
+             patch("smartagent.models.providers.ollama_provider.OllamaProvider", return_value=p):
+            result = self._run(_check_llm_provider())
+        assert result["status"] == "ok"
+        assert result["provider"] == "ollama"
+        assert result["supports_tools"] is True
+
+    def test_ollama_unreachable_with_nvidia_fallback_is_warn_not_error(self):
+        """Degraded (falls back to NVIDIA), not down — status should be warn."""
+        from smartagent.server.api_diagnostics import _check_llm_provider
+        health = MagicMock(); health.healthy = False; health.message = "Ollama server unreachable"
+        p = MagicMock(); p.health.return_value = health
+        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
+             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "llama3.2:3b"}), \
+             patch("os.environ.get", side_effect=lambda k, d="": "nvapi-test" if k == "NVIDIA_API_KEY" else d), \
+             patch("smartagent.models.providers.ollama_provider.OllamaProvider", return_value=p):
+            result = self._run(_check_llm_provider())
+        assert result["status"] == "warn"
+        assert "NVIDIA fallback" in result["message"]
+
+    def test_ollama_unreachable_without_fallback_is_error(self):
+        from smartagent.server.api_diagnostics import _check_llm_provider
+        health = MagicMock(); health.healthy = False; health.message = "Ollama server unreachable"
+        p = MagicMock(); p.health.return_value = health
+        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
+             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "llama3.2:3b"}), \
+             patch("os.environ.get", return_value=""), \
+             patch("smartagent.models.providers.ollama_provider.OllamaProvider", return_value=p):
+            result = self._run(_check_llm_provider())
+        assert result["status"] == "error"
+
+    def test_ollama_probe_false_skips_real_call(self):
+        from smartagent.server.api_diagnostics import _check_llm_provider
+        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
+             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "llama3.2:3b"}), \
+             patch("smartagent.models.providers.ollama_provider.OllamaProvider") as op:
+            result = self._run(_check_llm_provider(probe=False))
+        assert result["status"] == "ok"
+        op.assert_not_called()
+
     # ── unknown provider ─────────────────────────────────────────────────────
-    # Ollama is not supported — get_active_provider() never returns it in
-    # practice, but _check_llm_provider() still degrades gracefully instead
-    # of crashing for any unrecognized value.
+    # _check_llm_provider() still degrades gracefully instead of crashing for
+    # any genuinely unrecognized value (defensive — get_active_provider()
+    # only ever returns one of the five known providers in practice).
 
     def test_unknown_provider_returns_error(self):
         from smartagent.server.api_diagnostics import _check_llm_provider
-        with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"), \
-             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "llama3.1:8b"}):
+        with patch("smartagent.llm.factory.get_active_provider", return_value="some_future_provider"), \
+             patch("smartagent.llm.factory.get_llm_settings", return_value={"model": "x"}):
             result = self._run(_check_llm_provider())
         assert result["status"] == "error"
-        assert result["provider"] == "ollama"
+        assert result["provider"] == "some_future_provider"
 
     def test_result_has_latency_ms(self):
         # OpenAI/Anthropic paths add latency_ms; Ollama encodes it in the message.
@@ -640,11 +688,19 @@ class TestCheckEmbeddings:
             result = self._run(_check_embeddings())
         assert result["status"] == "warn"
 
-    def test_unknown_provider_returns_error(self):
-        """Ollama is not supported — get_active_provider() never returns it
-        in practice, but _check_embeddings() still degrades gracefully."""
+    def test_ollama_warns_no_embedding_model(self):
+        """Same situation as NVIDIA — the default local-core model is
+        chat-only; never attempt a real network call for this check."""
         from smartagent.server.api_diagnostics import _check_embeddings
         with patch("smartagent.llm.factory.get_active_provider", return_value="ollama"):
+            result = self._run(_check_embeddings())
+        assert result["status"] == "warn"
+
+    def test_unknown_provider_returns_error(self):
+        """_check_embeddings() still degrades gracefully instead of crashing
+        for any genuinely unrecognized provider value."""
+        from smartagent.server.api_diagnostics import _check_embeddings
+        with patch("smartagent.llm.factory.get_active_provider", return_value="some_future_provider"):
             result = self._run(_check_embeddings())
         assert result["status"] == "error"
 

@@ -1,5 +1,15 @@
 # MARK — Identity & Capabilities
 
+> **Superseded.** The canonical specification is
+> [`docs/canonical/`](docs/canonical/README.md) — in particular
+> `MARK_CONSTITUTION.md`, `MARK_OPERATING_PRINCIPLES.md`, and
+> `MARK_PERSONALITY.json`, which cover identity, capabilities, and
+> constraints in far more depth than this file. If MARK's `IdentityEngine`
+> still loads this file at startup, verify that against `docs/canonical/`
+> rather than treating this as the definition — it describes the CLI-era
+> pipeline (`engineer`/`ceo`/`long-run`/`dev-loop` commands) confirmed by
+> audit to be disconnected from the live FastAPI+React product.
+
 This file is read by MARK's IdentityEngine on startup to establish its
 operating identity, capabilities, and constraints.
 

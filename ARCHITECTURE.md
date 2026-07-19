@@ -1,12 +1,14 @@
 # MARK Architecture
 
-> **Read [`docs/mark-operating-system.md`](docs/mark-operating-system.md) first.**
-> MARK is an AI Operating System, not a coding agent — the Engineer, QA,
-> Debugger, and other specialist workers are applications that run *inside*
-> MARK, the same way Word runs inside Windows. MARK plans, delegates,
-> supervises, and reports; workers do the actual engineering and never speak
-> to the user directly. Everything below describes the code-organization
-> layers that vision runs on top of.
+> **Superseded.** The canonical specification is
+> [`docs/canonical/`](docs/canonical/README.md) — read
+> `docs/canonical/CLAUDE_ENGINEER_BOOTSTRAP.md` first, then
+> `docs/canonical/ARCHITECTURE.md` for the current technical architecture.
+> Everything below describes the `smartagent/brain/`-rooted CLI/REPL system
+> (`SmartAgent`, `smartagent/executive/`, `smartagent/multi_agent/`) —
+> confirmed by audit to be disconnected from the live FastAPI+React product
+> and constructed but unused on every request. Kept for historical reference,
+> not as a build target.
 
 ## Overview
 

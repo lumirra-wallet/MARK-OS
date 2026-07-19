@@ -9,12 +9,22 @@
 > user-facing assistants. The user never interacts directly with workers.
 > Every message, update, question, and recommendation comes from MARK.
 
-This document is the authoritative statement of what MARK *is*, written because
-the prior architecture docs (`ARCHITECTURE.md`, `docs/architecture.md`)
-describe MARK as "a full-stack AI engineering assistant" — framing that leads
-every implementation decision back toward "another coding agent." That framing
-is wrong. This document replaces it as the primary mental model. If anything
-in this repo's other docs conflicts with this one, this one wins.
+> **Superseded as the vision document.** The canonical specification for
+> MARK AIOS now lives in [`docs/canonical/`](canonical/README.md) — read
+> `docs/canonical/CLAUDE_ENGINEER_BOOTSTRAP.md` first. Where this document's
+> framing of what MARK *is* differs from that set, the canonical set wins.
+> This document's remaining value is the section below: an honest,
+> code-verified account of how far the live implementation actually is from
+> that vision — keep reading it for status, not for intent.
+
+This document was written because the prior architecture docs
+(`ARCHITECTURE.md`, `docs/architecture.md`) describe MARK as "a full-stack AI
+engineering assistant" — framing that leads every implementation decision back
+toward "another coding agent." That framing is wrong, and this document's
+correction of it (below) still holds. It no longer claims to be the primary
+mental model itself, since `docs/canonical/` now fills that role with a fuller
+specification (Constitution, Worldview, Operating Principles, Mind, DNA,
+Evolution, Life Cycle) than this single file ever attempted.
 
 ## Mission
 

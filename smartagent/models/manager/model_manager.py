@@ -26,7 +26,7 @@ Design decision — no auto-loaded default model:
 from __future__ import annotations
 
 import time
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from smartagent.logs.logger import get_logger
 from smartagent.models.base.base_model import BaseModel, ModelHealth
@@ -71,6 +71,135 @@ class ModelManager:
         self.events = event_bus
         self._active_model_id: str | None = None
         self._switch_count = 0
+        self._fallback_model_id: str | None = None
+        self._fallback_is_failure: Callable[[str], bool] | None = None
+
+    # ------------------------------------------------------------------
+    # Fallback
+    # ------------------------------------------------------------------
+
+    def set_fallback(
+        self,
+        model_id: str | None,
+        is_failure: Callable[[str], bool] | None = None,
+    ) -> None:
+        """
+        Register a model to retry through when the active model signals failure.
+
+        *model_id* must already be (or become, before first use) registered
+        in the registry. *is_failure* inspects a successful-but-failed
+        response's ``content`` string (providers in this codebase swallow
+        their own errors and return an error-prefixed sentinel rather than
+        raising — see ``smartagent.llm.factory.is_llm_error_text``) and
+        returns ``True`` when it should trigger a fallback retry.
+
+        Pass ``model_id=None`` to disable fallback (the default — every
+        existing caller that never calls this method sees no behaviour
+        change at all).
+
+        ModelManager deliberately knows nothing about *which* providers are
+        involved — the caller (``smartagent.llm.factory``, which already
+        knows provider names and failure sentinels) supplies both.
+        """
+        self._fallback_model_id = model_id
+        self._fallback_is_failure = is_failure
+
+    def _fallback_content(self, resolved_id: str, content: str) -> bool:
+        """True when *content* should trigger a fallback retry for this call."""
+        return bool(
+            self._fallback_model_id
+            and self._fallback_model_id != resolved_id
+            and self._fallback_is_failure is not None
+            and self._fallback_is_failure(content)
+        )
+
+    def _call_with_fallback(
+        self,
+        resolved_id: str,
+        call: Callable[[BaseModel], Any],
+        get_content: Callable[[Any], str],
+    ) -> tuple[Any, Exception | None, str]:
+        """
+        Invoke ``call(model)`` against *resolved_id*, retrying once against
+        the configured fallback model if it raises or ``get_content(result)``
+        is a failure sentinel. With no fallback configured (the default),
+        this is exactly ``model = self.load(resolved_id); call(model)`` —
+        identical to the pre-fallback behaviour, including which exceptions
+        propagate to the caller.
+
+        Returns ``(result, exception, model_id_actually_used)``. *result* is
+        ``None`` when *exception* is set.
+        """
+        model = self.load(resolved_id)
+        try:
+            result: Any = call(model)
+            exc: Exception | None = None
+        except Exception as e:  # noqa: BLE001 — caller decides how to surface it
+            result, exc = None, e
+
+        content = "" if exc is not None else (get_content(result) or "")
+        if not (exc is not None or self._fallback_content(resolved_id, content)):
+            return result, exc, resolved_id
+        if not self._fallback_model_id:
+            return result, exc, resolved_id
+
+        logger.warning(
+            "ModelManager: %s %s — falling back to %s",
+            resolved_id,
+            f"raised {exc}" if exc is not None else "returned a failure sentinel",
+            self._fallback_model_id,
+        )
+        fallback_id = self._fallback_model_id
+        fallback_model = self.load(fallback_id)
+        try:
+            return call(fallback_model), None, fallback_id
+        except Exception as e:  # noqa: BLE001
+            return None, e, fallback_id
+
+    def _stream_with_fallback(
+        self,
+        resolved_id: str,
+        stream_fn: Callable[[BaseModel], Iterator[str]],
+    ) -> Iterator[str]:
+        """
+        Stream from *resolved_id*, retrying once against the fallback model
+        if the very first chunk is both a failure sentinel *and* the whole
+        stream (matches this codebase's providers, which yield exactly one
+        sentinel chunk on failure, nothing else). Once any real content has
+        streamed, never retries — that would duplicate output to the caller.
+
+        With no fallback configured, this yields exactly what
+        ``stream_fn(model)`` yields, unchanged.
+        """
+        model = self.load(resolved_id)
+        gen = stream_fn(model)
+        try:
+            first = next(gen)
+        except StopIteration:
+            return  # empty stream — nothing to fall back from
+
+        if self._fallback_content(resolved_id, first):
+            try:
+                second = next(gen)
+            except StopIteration:
+                # Exactly one chunk, and it's a failure sentinel — the
+                # provider's whole response was that error. Safe to retry.
+                logger.warning(
+                    "ModelManager: %s streamed only a failure sentinel — falling back to %s",
+                    resolved_id, self._fallback_model_id,
+                )
+                fallback_model = self.load(self._fallback_model_id)
+                yield from stream_fn(fallback_model)
+                return
+            # More content followed — not a total failure. Yield what we
+            # already pulled and continue draining the original stream.
+            yield first
+            yield second
+            yield from gen
+            return
+
+        yield first
+        yield from gen
 
     # ------------------------------------------------------------------
     # Provider discovery
@@ -210,7 +339,6 @@ class ModelManager:
                 "No model is currently loaded and no default_model_id is configured. "
                 "Call ModelManager.load()/switch() with a registered model id first."
             )
-        model = self.load(resolved_id)
 
         rendered = prompt.render() if isinstance(prompt, Prompt) else prompt
         prompt_size = len(rendered)
@@ -224,24 +352,30 @@ class ModelManager:
 
         kwargs = {**self.settings.generation_kwargs(), **overrides}
         start = time.monotonic()
-        try:
-            raw = model.generate(rendered, **kwargs)
-            error: str | None = None
-        except Exception as exc:  # noqa: BLE001 — a failing provider must not crash the caller
-            elapsed_ms = (time.monotonic() - start) * 1000
-            logger.warning("Model generation failed: model=%s error=%s", resolved_id, exc)
+        raw, exc, used_id = self._call_with_fallback(
+            resolved_id,
+            call=lambda m: m.generate(rendered, **kwargs),
+            get_content=lambda r: r.get("content", "") if isinstance(r, dict) else "",
+        )
+        elapsed_ms = (time.monotonic() - start) * 1000
+
+        if exc is not None:
+            logger.warning("Model generation failed: model=%s error=%s", used_id, exc)
+            used_model = self.registry.find(used_id)
             return ParsedResponse(
                 text="",
                 confidence=0.0,
                 metadata={"error": str(exc)},
                 timing_ms=elapsed_ms,
-                provider=model.provider,
+                provider=used_model.provider if used_model is not None else "unknown",
             )
-        elapsed_ms = (time.monotonic() - start) * 1000
 
-        parsed = self.response_parser.parse(raw, provider=model.provider, timing_ms=elapsed_ms)
-        self.registry.record_generation(resolved_id)
-        logger.info("Model response: model=%s response_time=%.2fms error=%s", resolved_id, elapsed_ms, error)
+        used_model = self.registry.find(used_id)
+        parsed = self.response_parser.parse(
+            raw, provider=used_model.provider if used_model is not None else "unknown", timing_ms=elapsed_ms,
+        )
+        self.registry.record_generation(used_id)
+        logger.info("Model response: model=%s response_time=%.2fms error=%s", used_id, elapsed_ms, None)
 
         if context is not None:
             user_text = prompt.user_message if isinstance(prompt, Prompt) else rendered
@@ -296,10 +430,11 @@ class ModelManager:
                 "No model is currently loaded and no default_model_id is configured. "
                 "Call ModelManager.load()/switch() with a registered model id first."
             )
-        model = self.load(resolved_id)
         rendered = prompt.render() if isinstance(prompt, Prompt) else prompt
         kwargs = {**self.settings.generation_kwargs(), **overrides}
-        yield from model.generate_stream(rendered, **kwargs)
+        yield from self._stream_with_fallback(
+            resolved_id, lambda m: m.generate_stream(rendered, **kwargs),
+        )
 
     def chat_stream(
         self,
@@ -326,9 +461,10 @@ class ModelManager:
                 "No model is currently loaded and no default_model_id is configured. "
                 "Call ModelManager.load()/switch() with a registered model id first."
             )
-        model = self.load(resolved_id)
         kwargs = {**self.settings.generation_kwargs(), **overrides}
-        yield from model.chat_stream(messages, **kwargs)
+        yield from self._stream_with_fallback(
+            resolved_id, lambda m: m.chat_stream(messages, **kwargs),
+        )
 
     def chat_with_tools(
         self,
@@ -364,7 +500,15 @@ class ModelManager:
                 "tool/function calling.  Switch to a provider that implements "
                 "chat_with_tools() (e.g. GitHub Models or OpenAI)."
             )
-        return model.chat_with_tools(messages, tools, **overrides)
+
+        result, exc, _used_id = self._call_with_fallback(
+            resolved_id,
+            call=lambda m: m.chat_with_tools(messages, tools, **overrides),
+            get_content=lambda r: getattr(r, "content", "") or "",
+        )
+        if exc is not None:
+            raise exc
+        return result
 
     # ------------------------------------------------------------------
     # Health / statistics

@@ -1,12 +1,20 @@
 # MARK — AI Operating System
 
+> The canonical specification for MARK AIOS is
+> [`docs/canonical/`](docs/canonical/README.md) — start with
+> `docs/canonical/CLAUDE_ENGINEER_BOOTSTRAP.md`. The `Quick Start` and
+> `Commands Reference` sections below describe the `python -m smartagent`
+> CLI/REPL path, confirmed by audit to be disconnected from the live
+> FastAPI+React dashboard — useful if you're running that specific code path,
+> not a description of MARK AIOS as a whole.
+
 MARK is not a coding agent — it's the operating system a team of specialist
 engineering workers (Engineer, QA, Debugger, Reviewer, Git, and others) runs
 inside of. You talk to MARK; MARK plans the work, delegates it, supervises
 execution, reviews the result, and reports back — the same way an engineering
 manager runs a team, not the way a single coding assistant works alone. See
-[`docs/mark-operating-system.md`](docs/mark-operating-system.md) for the full
-architecture.
+[`docs/mark-operating-system.md`](docs/mark-operating-system.md) for
+implementation status against that vision.
 
 ```
 mark> engineer Build a FastAPI Todo API with JWT authentication

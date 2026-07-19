@@ -254,6 +254,34 @@ async def _check_llm_provider(probe: bool = True) -> dict[str, Any]:
                 "last_error_at": telemetry["last_error_at"],
             }
 
+        elif provider_name == "ollama":
+            base_url = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+            if not probe:
+                return {
+                    "status":  "ok",
+                    "message": "Ollama configured (not probed this poll)",
+                    "provider": "ollama",
+                    "model":    model,
+                    "endpoint": base_url,
+                }
+            from smartagent.models.providers.ollama_provider import OllamaProvider
+            p      = OllamaProvider(model_name=model, base_url=base_url)
+            p.load()
+            health = p.health()
+            ms     = round((time.monotonic() - t0) * 1000)
+            has_fallback = bool(os.environ.get("NVIDIA_API_KEY"))
+            fallback_note = " NVIDIA fallback is configured and will be used." if (not health.healthy and has_fallback) else ""
+            status = "ok" if health.healthy else ("warn" if has_fallback else "error")
+            return {
+                "status":     status,
+                "message":    health.message + fallback_note,
+                "provider":   "ollama",
+                "model":      model,
+                "latency_ms": ms,
+                "endpoint":   base_url,
+                "supports_tools": p.supports_tools if health.healthy else False,
+            }
+
         elif provider_name == "openai":
             import os as _os
             api_key = _os.environ.get("OPENAI_API_KEY", "")
@@ -294,7 +322,7 @@ async def _check_llm_provider(probe: bool = True) -> dict[str, Any]:
 
         else:
             # Unreachable in practice — get_active_provider() only ever
-            # returns nvidia/github/openai/anthropic.
+            # returns ollama/nvidia/github/openai/anthropic.
             return {"status": "error", "message": f"Unknown provider {provider_name!r}", "provider": provider_name}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
@@ -326,6 +354,13 @@ async def _check_embeddings(probe: bool = True) -> dict[str, Any]:
             # would just burn quota for a capability that doesn't exist).
             return {"status": "warn", "message": "NVIDIA: chat model, no embedding endpoint configured."}
 
+        elif provider_name == "ollama":
+            # The default local-core model (MARK_MODEL) is a chat/reasoning
+            # model, not an embedding model — same situation as NVIDIA's
+            # nemotron. Pull a dedicated embedding model (e.g.
+            # nomic-embed-text) to light this check up green.
+            return {"status": "warn", "message": "Ollama: chat model, no embedding model pulled."}
+
         elif provider_name == "openai":
             api_key = os.environ.get("OPENAI_API_KEY", "")
             if not api_key:
@@ -354,7 +389,7 @@ async def _check_embeddings(probe: bool = True) -> dict[str, Any]:
 
         else:
             # Unreachable in practice — get_active_provider() only ever
-            # returns nvidia/github/openai/anthropic.
+            # returns ollama/nvidia/github/openai/anthropic.
             return {"status": "error", "message": f"Unknown provider {provider_name!r}"}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}

@@ -59,6 +59,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Iterator
 
 from smartagent.logs.logger import get_logger
@@ -91,6 +92,7 @@ class OllamaModelInfo:
     family: str
     modified_at: str     # ISO-8601
     status: str = "available"
+    capabilities: tuple[str, ...] = ()   # e.g. ("completion", "tools", "thinking")
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +135,7 @@ class OllamaModelDiscovery:
                         family=str(details.get("family", "unknown")),
                         modified_at=str(entry.get("modified_at", "")),
                         status="available",
+                        capabilities=tuple(entry.get("capabilities") or ()),
                     )
                 )
             return result
@@ -181,6 +184,7 @@ class OllamaProvider(BaseModel):
         self._warmup_enabled = warmup_enabled
         self._status = ModelStatus.UNLOADED
         self._call_count = 0
+        self._supports_tools_cache: bool | None = None
 
     # ------------------------------------------------------------------
     # Identity
@@ -217,7 +221,20 @@ class OllamaProvider(BaseModel):
 
     @property
     def supports_tools(self) -> bool:
-        return False   # tool-call mapping is a future milestone
+        """
+        Whether the installed model advertises native tool-calling support.
+
+        Checked live against ``GET /api/tags`` (Ollama reports a per-model
+        ``capabilities`` list, e.g. ``["completion", "tools", "thinking"]``
+        for qwen3:8b) and cached for the lifetime of this instance — cheap
+        enough to check once, not worth re-querying on every access.
+        Defaults to ``False`` (matching the pre-tool-calling behaviour of
+        this provider) if the server is unreachable or the model isn't found,
+        so callers never see a false positive.
+        """
+        if self._supports_tools_cache is None:
+            self._supports_tools_cache = "tools" in self._live_capabilities()
+        return self._supports_tools_cache
 
     @property
     def supports_images(self) -> bool:
@@ -229,7 +246,15 @@ class OllamaProvider(BaseModel):
 
     @property
     def supports_functions(self) -> bool:
-        return False
+        return self.supports_tools
+
+    def _live_capabilities(self) -> tuple[str, ...]:
+        """Best-effort fetch of this model's capability list. Never raises."""
+        try:
+            info = self.model_info(timeout=5.0)
+            return info.capabilities if info is not None else ()
+        except Exception:  # noqa: BLE001
+            return ()
 
     @property
     def call_count(self) -> int:
@@ -554,6 +579,74 @@ class OllamaProvider(BaseModel):
                         break
         except Exception:  # noqa: BLE001
             yield "Ollama server unavailable."
+
+    # ------------------------------------------------------------------
+    # Tool calling (agentic)
+    # ------------------------------------------------------------------
+
+    def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        max_tokens: int = 4096,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Non-streaming chat call with OpenAI-shaped function-calling tool definitions.
+
+        Returns a lightweight object exposing ``.content`` and ``.tool_calls``
+        (each with ``.id`` and ``.function.name``/``.function.arguments``),
+        matching the shape ``smartagent.engineer.agent_loop`` reads via
+        ``getattr()`` from every other provider's ``chat_with_tools()``.
+
+        Ollama's native ``/api/chat`` accepts the same ``tools`` schema as
+        the OpenAI API, but returns ``arguments`` as an already-parsed JSON
+        object rather than a string — ``agent_loop.py`` calls
+        ``json.loads(tc.function.arguments)`` unconditionally, so this
+        method re-serialises ``arguments`` back to a string to match every
+        other provider's contract. The model's ``thinking`` field (qwen3's
+        reasoning trace) is deliberately dropped here, never surfaced as
+        ``content`` — same convention as NvidiaProvider's reasoning_content.
+
+        Raises:
+            RuntimeError: If the provider is not loaded, or the server is
+                unreachable — callers already handle exceptions from every
+                other provider's ``chat_with_tools()`` the same way.
+        """
+        if self._status != ModelStatus.LOADED:
+            raise RuntimeError(
+                f"OllamaProvider {self._model_name!r} must be load()ed before chat_with_tools()."
+            )
+        self._call_count += 1
+        payload = {
+            "model": self._model_name,
+            "messages": messages,
+            "tools": tools,
+            "stream": False,
+            "options": {"num_predict": max_tokens},
+        }
+        try:
+            data = self._post("/api/chat", payload)
+        except _OllamaUnavailable as exc:
+            raise RuntimeError(f"Ollama server unavailable: {exc}") from exc
+
+        message = data.get("message") or {}
+        raw_tool_calls = message.get("tool_calls") or []
+        tool_calls = [
+            SimpleNamespace(
+                id=tc.get("id") or f"call_{i}",
+                type="function",
+                function=SimpleNamespace(
+                    name=(tc.get("function") or {}).get("name", ""),
+                    arguments=json.dumps((tc.get("function") or {}).get("arguments") or {}),
+                ),
+            )
+            for i, tc in enumerate(raw_tool_calls)
+        ]
+        return SimpleNamespace(
+            content=message.get("content", "") or "",
+            tool_calls=tool_calls,
+        )
 
     # ------------------------------------------------------------------
     # Warmup (Milestone 10)

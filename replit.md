@@ -1,5 +1,12 @@
 # SmartAgent MARK
 
+> **Superseded.** The canonical specification is
+> [`docs/canonical/`](docs/canonical/README.md) — read
+> `docs/canonical/CLAUDE_ENGINEER_BOOTSTRAP.md` first. The package map and
+> milestone table below describe the `smartagent/brain/`-rooted CLI/REPL
+> system, confirmed by audit to be disconnected from the live FastAPI+React
+> product. Historical reference for that code path only.
+
 MARK is an autonomous Python AI agent with a modular architecture covering memory, multi-agent orchestration, self-debugging, project awareness, and a full software-engineer pipeline.
 
 ## Run & Operate

@@ -2,26 +2,31 @@
 ProviderFactory — creates and wires the active LLM provider into ModelManager.
 
 Provider selection order:
-    1. ACTIVE_PROVIDER environment variable (``"nvidia"``, ``"github"``,
-       ``"openai"``, or ``"anthropic"``).
+    1. ACTIVE_PROVIDER environment variable (``"ollama"``, ``"nvidia"``,
+       ``"github"``, ``"openai"``, or ``"anthropic"``).
     2. Persisted state in ``.mark_provider_state.json`` (set by REST API).
     3. Auto-detect: ``"nvidia"`` when NVIDIA_API_KEY is present, else
        ``"github"`` when GITHUB_TOKEN is present, else ``"openai"``, else
        ``"anthropic"``, else ``"nvidia"`` (the unconditional default).
 
-Ollama is not supported — MARK requires a hosted provider.
+Ollama — MARK's local intelligence core (see docs/canonical/MASTER_BLUEPRINT.md):
+    When the active provider is ``"ollama"``, NVIDIA is also registered as a
+    silent fallback (never switched to unless Ollama fails) whenever
+    NVIDIA_API_KEY is present — see ``_load_ollama()``. Model defaults to
+    ``MARK_MODEL`` (falling back to ``OLLAMA_DEFAULT_MODEL``, then the
+    hard-coded "llama3.2:3b") env var, matching the canonical spec's naming.
 
 To switch providers at runtime call the REST API::
 
-    POST /providers/switch  {"provider": "nvidia", "model": "nvidia/nemotron-3-ultra-550b-a55b"}
+    POST /providers/switch  {"provider": "ollama", "model": "llama3.2:3b"}
 
 Or set the env var before starting the server::
 
-    ACTIVE_PROVIDER=nvidia uvicorn smartagent.server.app:app
+    ACTIVE_PROVIDER=ollama uvicorn smartagent.server.app:app
 
 Architecture rule:
     Only ModelManager talks to providers.
-    Only this factory imports GitHubProvider/NvidiaProvider directly.
+    Only this factory imports GitHubProvider/NvidiaProvider/OllamaProvider directly.
     Feature code (workers, RAG, etc.) calls ModelManager — never providers directly.
 """
 
@@ -47,6 +52,15 @@ GITHUB_EMBEDDING_MODEL = "text-embedding-3-small"
 
 NVIDIA_DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 
+# MARK_MODEL is the canonical spec's name (docs/canonical/MASTER_BLUEPRINT.md
+# section 4) for MARK's local-core model. OLLAMA_DEFAULT_MODEL is kept as a
+# secondary alias since smartagent/server/config.py already reads it.
+OLLAMA_DEFAULT_MODEL = (
+    os.environ.get("MARK_MODEL")
+    or os.environ.get("OLLAMA_DEFAULT_MODEL")
+    or "llama3.2:3b"
+)
+
 _STATE_FILE = Path(".mark_provider_state.json")
 
 # GitHubProvider/NvidiaProvider deliberately swallow API exceptions and
@@ -58,7 +72,11 @@ _STATE_FILE = Path(".mark_provider_state.json")
 # user as if MARK had said it. Use ``is_llm_error_text()`` wherever
 # chat_stream()/chat() output is about to be published or parsed as real
 # content.
-LLM_ERROR_PREFIXES = ("GitHub Models error: ", "NVIDIA API error: ")
+LLM_ERROR_PREFIXES = (
+    "GitHub Models error: ",
+    "NVIDIA API error: ",
+    "Ollama server unavailable.",
+)
 
 
 def is_llm_error_text(text: str) -> bool:
@@ -70,19 +88,26 @@ def is_llm_error_text(text: str) -> bool:
 # State helpers
 # ---------------------------------------------------------------------------
 
-_VALID_PROVIDERS = {"github", "nvidia", "openai", "anthropic"}
+_VALID_PROVIDERS = {"ollama", "github", "nvidia", "openai", "anthropic"}
 
 
 def _auto_default_provider() -> str:
     """Detect the best default provider without requiring explicit configuration.
 
     Selection order:
-      1. ACTIVE_PROVIDER env var (explicit override)
+      1. ACTIVE_PROVIDER env var (explicit override — this repo's .env sets
+         this explicitly to "ollama", so auto-detect below is only reached
+         when that var is absent/invalid)
       2. NVIDIA_API_KEY present → "nvidia"
       3. GITHUB_TOKEN present  → "github"
       4. OPENAI_API_KEY present → "openai"
       5. ANTHROPIC_API_KEY present → "anthropic"
       6. Fallback               → "nvidia" (the product default)
+
+    Deliberately does not probe Ollama's reachability here — auto-detect is
+    a fast, side-effect-free decision function; unreachability is handled at
+    call time by ModelManager's configured fallback (see wire_agent()),
+    not by second-guessing the selection up front.
     """
     explicit = os.environ.get("ACTIVE_PROVIDER", "").strip().lower()
     if explicit in _VALID_PROVIDERS:
@@ -113,6 +138,7 @@ def _load_state() -> dict[str, Any]:
         "github_model": GITHUB_DEFAULT_MODEL,
         "github_coding_model": GITHUB_CODING_MODEL,
         "nvidia_model": NVIDIA_DEFAULT_MODEL,
+        "ollama_model": OLLAMA_DEFAULT_MODEL,
         "temperature": 0.7,
         "max_tokens": 4096,
         "streaming": True,
@@ -196,6 +222,9 @@ def get_llm_settings() -> dict[str, Any]:
     elif provider == "nvidia":
         model        = state.get("nvidia_model", NVIDIA_DEFAULT_MODEL)
         coding_model = model
+    elif provider == "ollama":
+        model        = state.get("ollama_model", OLLAMA_DEFAULT_MODEL)
+        coding_model = model
     elif provider == "openai":
         model        = state.get("openai_model",        os.environ.get("OPENAI_DEFAULT_MODEL", "gpt-4o-mini"))
         coding_model = state.get("openai_coding_model", "gpt-4o")
@@ -217,6 +246,7 @@ def get_llm_settings() -> dict[str, Any]:
         "streaming":          state.get("streaming", True),
         "github_available":   bool(os.environ.get("GITHUB_TOKEN")),
         "nvidia_available":   bool(os.environ.get("NVIDIA_API_KEY")),
+        "ollama_available":   True,  # local — no key required; see /diagnostics for live reachability
         "openai_available":   bool(os.environ.get("OPENAI_API_KEY")),
         "anthropic_available": bool(os.environ.get("ANTHROPIC_API_KEY")),
     }
@@ -266,6 +296,7 @@ def switch_provider(
     state["provider"] = provider
     if model:
         key = {"github": "github_model", "nvidia": "nvidia_model",
+               "ollama": "ollama_model",
                "openai": "openai_model",
                "anthropic": "anthropic_model"}[provider]
         state[key] = model
@@ -295,6 +326,8 @@ def _default_model(provider: str, state: dict[str, Any]) -> str:
         return state.get("github_model", GITHUB_DEFAULT_MODEL)
     if provider == "nvidia":
         return state.get("nvidia_model", NVIDIA_DEFAULT_MODEL)
+    if provider == "ollama":
+        return state.get("ollama_model", OLLAMA_DEFAULT_MODEL)
     if provider == "openai":
         return state.get("openai_model", os.environ.get("OPENAI_DEFAULT_MODEL", "gpt-4o-mini"))
     return state.get("anthropic_model", os.environ.get("ANTHROPIC_DEFAULT_MODEL", "claude-haiku-3-5"))
@@ -302,10 +335,16 @@ def _default_model(provider: str, state: dict[str, Any]) -> str:
 
 def _wire_provider(provider: str, model: str, model_manager: Any) -> None:
     """Register provider models in model_manager and switch to *model*."""
+    # Clear any fallback left over from a previous provider (e.g. switching
+    # away from "ollama") — _load_ollama() re-establishes it if applicable.
+    if hasattr(model_manager, "set_fallback"):
+        model_manager.set_fallback(None)
     if provider == "github":
         _load_github(model, model_manager)
     elif provider == "nvidia":
         _load_nvidia(model, model_manager)
+    elif provider == "ollama":
+        _load_ollama(model, model_manager)
     else:
         # OpenAI / Anthropic don't register models with ModelManager yet —
         # they operate through the REST API layer directly. No-op here.
@@ -352,6 +391,47 @@ def _load_nvidia(model: str, model_manager: Any) -> None:
         logger.info("ProviderFactory: active NVIDIA model → %s", model)
     except Exception as exc:
         logger.warning("ProviderFactory: failed to load NVIDIA provider: %s", exc)
+
+
+def _load_ollama(model: str, model_manager: Any) -> None:
+    """
+    Register OllamaProvider in model_manager and switch to *model*.
+
+    Ollama needs no API key — connectivity is verified by health(), not
+    registration. When NVIDIA_API_KEY is present, NVIDIA is also silently
+    registered and set as ModelManager's fallback (see
+    ModelManager.set_fallback()) — it's never switched to as the active
+    model, only used automatically when Ollama's own calls fail.
+    """
+    try:
+        from smartagent.models.providers.ollama_provider import OllamaProvider
+        base_url = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+        if model_manager.registry.find(model) is None:
+            p = OllamaProvider(model_name=model, base_url=base_url)
+            model_manager.registry.register(p)
+            logger.info("ProviderFactory: registered Ollama model %s", model)
+        model_manager.switch(model)
+        logger.info("ProviderFactory: active Ollama model → %s", model)
+    except Exception as exc:
+        logger.warning("ProviderFactory: failed to load Ollama provider: %s", exc)
+        return
+
+    api_key = os.environ.get("NVIDIA_API_KEY", "")
+    if not api_key:
+        logger.info("ProviderFactory: NVIDIA_API_KEY not set — no fallback registered for Ollama")
+        return
+    try:
+        from smartagent.llm.nvidia_provider import NvidiaProvider
+        nvidia_model = NVIDIA_DEFAULT_MODEL
+        if model_manager.registry.find(nvidia_model) is None:
+            p = NvidiaProvider(model_name=nvidia_model, api_key=api_key)
+            model_manager.registry.register(p)
+            logger.info("ProviderFactory: registered NVIDIA model %s as Ollama fallback", nvidia_model)
+        if hasattr(model_manager, "set_fallback"):
+            model_manager.set_fallback(nvidia_model, is_failure=is_llm_error_text)
+            logger.info("ProviderFactory: NVIDIA fallback active for Ollama (model=%s)", nvidia_model)
+    except Exception as exc:
+        logger.warning("ProviderFactory: failed to register NVIDIA fallback for Ollama: %s", exc)
 
 
 class ProviderFactory:

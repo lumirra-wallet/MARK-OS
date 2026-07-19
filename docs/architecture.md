@@ -1,5 +1,16 @@
 # MARK AI OS — Architecture
 
+> **Superseded.** The canonical specification is
+> [`docs/canonical/`](canonical/README.md) — read
+> `docs/canonical/CLAUDE_ENGINEER_BOOTSTRAP.md` first, then
+> `docs/canonical/ARCHITECTURE.md`. This file's opening framing ("a
+> full-stack AI engineering assistant") is exactly what the canonical
+> Constitution rules out — MARK is an AI Operating System, not an assistant.
+> The directory layout and provider table below are also stale (no MongoDB,
+> no NVIDIA — both are live in this repo's `.env` today). Kept for the parts
+> of the FastAPI/React layout still accurate; verify anything load-bearing
+> against the actual code first.
+
 ## Overview
 
 MARK (Modular Autonomous Reasoning Kernel) is a full-stack AI engineering assistant. The architecture is split into three layers:

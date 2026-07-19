@@ -23,6 +23,7 @@ import urllib.error
 from http.client import HTTPResponse
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
@@ -1563,3 +1564,349 @@ class TestBackwardCompatibility:
             list(mgr.generate_stream("hello"))
         with pytest.raises(NoActiveModelError):
             list(mgr.chat_stream([{"role": "user", "content": "hi"}]))
+
+
+# ---------------------------------------------------------------------------
+# Ollama as MARK's local core — chat_with_tools, capability detection,
+# ModelManager fallback, factory wiring, and a real worker-pipeline run.
+#
+# All HTTP mocked at the urllib level, same as every other class in this
+# file — no live Ollama server or network access required.
+# ---------------------------------------------------------------------------
+
+def _tags_response_with_capabilities(entries: list[tuple[str, list[str]]]) -> dict:
+    """Like _tags_response() but with a per-model ``capabilities`` list."""
+    return {
+        "models": [
+            {
+                "name": name,
+                "size": 2_000_000_000,
+                "modified_at": "2026-01-01T00:00:00Z",
+                "details": {"family": "llama"},
+                "capabilities": caps,
+            }
+            for name, caps in entries
+        ]
+    }
+
+
+def _tool_call_chat_response(name: str, arguments: dict, call_id: str = "call_test1") -> dict:
+    """Shape of Ollama's POST /api/chat response when the model calls a tool."""
+    return {
+        "model": "llama3.2:3b",
+        "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": call_id, "function": {"index": 0, "name": name, "arguments": arguments}},
+            ],
+        },
+        "done": True,
+    }
+
+
+class TestOllamaProviderCapabilities:
+    """supports_tools / supports_functions — live capability detection."""
+
+    def test_supports_tools_true_when_model_advertises_it(self):
+        p = OllamaProvider(model_name="llama3.2:3b")
+        resp = _make_http_response(_tags_response_with_capabilities(
+            [("llama3.2:3b", ["completion", "tools"])]
+        ))
+        with patch("urllib.request.urlopen", return_value=resp):
+            assert p.supports_tools is True
+            assert p.supports_functions is True
+
+    def test_supports_tools_false_when_model_lacks_it(self):
+        p = OllamaProvider(model_name="llama3:latest")
+        resp = _make_http_response(_tags_response_with_capabilities(
+            [("llama3:latest", ["completion"])]
+        ))
+        with patch("urllib.request.urlopen", return_value=resp):
+            assert p.supports_tools is False
+
+    def test_supports_tools_false_when_server_unreachable(self):
+        """Unreachable server must never raise — defaults to False."""
+        p = OllamaProvider(model_name="llama3.2:3b")
+        with patch("urllib.request.urlopen", side_effect=OSError("refused")):
+            assert p.supports_tools is False
+
+    def test_supports_tools_cached_after_first_check(self):
+        """Only one network call for repeated access — see docstring."""
+        p = OllamaProvider(model_name="llama3.2:3b")
+        resp = _make_http_response(_tags_response_with_capabilities(
+            [("llama3.2:3b", ["completion", "tools"])]
+        ))
+        with patch("urllib.request.urlopen", return_value=resp) as mock_open:
+            assert p.supports_tools is True
+            assert p.supports_tools is True
+            assert mock_open.call_count == 1
+
+
+class TestOllamaProviderChatWithTools:
+    """chat_with_tools() — the method the worker pipeline actually calls."""
+
+    TOOLS = [{
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get current weather for a city",
+            "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+        },
+    }]
+
+    def _loaded(self) -> OllamaProvider:
+        p = OllamaProvider(model_name="llama3.2:3b")
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            p.load()  # load() always succeeds; connectivity is health()'s job
+        return p
+
+    def test_returns_content_and_empty_tool_calls_on_final_answer(self):
+        p = self._loaded()
+        resp = _make_http_response(_chat_response("The answer is 4."))
+        with patch("urllib.request.urlopen", return_value=resp):
+            result = p.chat_with_tools([{"role": "user", "content": "2+2?"}], tools=self.TOOLS)
+        assert result.content == "The answer is 4."
+        assert result.tool_calls == []
+
+    def test_tool_call_shape_matches_agent_loop_contract(self):
+        """
+        agent_loop.py reads response_msg.tool_calls[i].id,
+        .function.name, and json.loads(.function.arguments) — arguments
+        must come back as a JSON *string*, even though Ollama's own API
+        returns an already-parsed object.
+        """
+        p = self._loaded()
+        resp = _make_http_response(
+            _tool_call_chat_response("get_weather", {"city": "Berlin"}, call_id="call_abc")
+        )
+        with patch("urllib.request.urlopen", return_value=resp):
+            result = p.chat_with_tools(
+                [{"role": "user", "content": "Weather in Berlin?"}], tools=self.TOOLS,
+            )
+        assert result.content == ""
+        assert len(result.tool_calls) == 1
+        tc = result.tool_calls[0]
+        assert tc.id == "call_abc"
+        assert tc.function.name == "get_weather"
+        assert isinstance(tc.function.arguments, str)
+        assert json.loads(tc.function.arguments) == {"city": "Berlin"}
+
+    def test_raises_when_server_unavailable(self):
+        """Matches NvidiaProvider.chat_with_tools()'s raise-don't-swallow contract."""
+        p = self._loaded()
+        with patch("urllib.request.urlopen", side_effect=OSError("refused")):
+            with pytest.raises(RuntimeError, match="unavailable"):
+                p.chat_with_tools([{"role": "user", "content": "hi"}], tools=self.TOOLS)
+
+    def test_raises_when_not_loaded(self):
+        p = OllamaProvider(model_name="llama3.2:3b")  # never load()ed
+        with pytest.raises(RuntimeError, match="must be load"):
+            p.chat_with_tools([{"role": "user", "content": "hi"}], tools=self.TOOLS)
+
+    def test_thinking_field_never_surfaces_as_content(self):
+        """qwen3-style reasoning trace must be dropped, matching every other provider."""
+        p = self._loaded()
+        body = _chat_response("Final answer only.")
+        body["message"]["thinking"] = "Let me reason step by step..."
+        with patch("urllib.request.urlopen", return_value=_make_http_response(body)):
+            result = p.chat_with_tools([{"role": "user", "content": "hi"}], tools=self.TOOLS)
+        assert result.content == "Final answer only."
+        assert "reason step by step" not in result.content
+
+
+class TestModelManagerFallback:
+    """set_fallback() — generic mechanism, no knowledge of specific providers."""
+
+    def _manager_with_two_models(self):
+        mm = ModelManager()
+        primary = MagicMock()
+        primary.provider = "primary"
+        primary.status.return_value = MagicMock(value="loaded")
+        secondary = MagicMock()
+        secondary.provider = "secondary"
+        secondary.status.return_value = MagicMock(value="loaded")
+        mm.registry.register = MagicMock()
+        mm.registry.find = MagicMock(side_effect=lambda mid: {"primary": primary, "secondary": secondary}.get(mid))
+        return mm, primary, secondary
+
+    def test_no_fallback_configured_is_unchanged_behavior(self):
+        """Default state (nothing calls set_fallback) — identical to pre-fallback code."""
+        mm, primary, secondary = self._manager_with_two_models()
+        primary.chat_with_tools.return_value = SimpleNamespace(content="Ollama server unavailable.", tool_calls=[])
+        result = mm.chat_with_tools([{"role": "user", "content": "hi"}], tools=[], model_id="primary")
+        assert result.content == "Ollama server unavailable."
+        secondary.chat_with_tools.assert_not_called()
+
+    def test_falls_back_on_sentinel_content(self):
+        mm, primary, secondary = self._manager_with_two_models()
+        primary.chat_with_tools.return_value = SimpleNamespace(content="Ollama server unavailable.", tool_calls=[])
+        secondary.chat_with_tools.return_value = SimpleNamespace(content="Real answer.", tool_calls=[])
+        mm.set_fallback("secondary", is_failure=lambda c: c.startswith("Ollama server unavailable."))
+
+        result = mm.chat_with_tools([{"role": "user", "content": "hi"}], tools=[], model_id="primary")
+
+        assert result.content == "Real answer."
+        secondary.chat_with_tools.assert_called_once()
+
+    def test_falls_back_on_exception(self):
+        mm, primary, secondary = self._manager_with_two_models()
+        primary.chat_with_tools.side_effect = ConnectionError("refused")
+        secondary.chat_with_tools.return_value = SimpleNamespace(content="Real answer.", tool_calls=[])
+        mm.set_fallback("secondary", is_failure=lambda c: False)
+
+        result = mm.chat_with_tools([{"role": "user", "content": "hi"}], tools=[], model_id="primary")
+
+        assert result.content == "Real answer."
+
+    def test_no_fallback_retry_when_primary_succeeds(self):
+        """The success path must never touch the fallback model at all."""
+        mm, primary, secondary = self._manager_with_two_models()
+        primary.chat_with_tools.return_value = SimpleNamespace(content="All good.", tool_calls=[])
+        mm.set_fallback("secondary", is_failure=lambda c: "unavailable" in c)
+
+        result = mm.chat_with_tools([{"role": "user", "content": "hi"}], tools=[], model_id="primary")
+
+        assert result.content == "All good."
+        secondary.chat_with_tools.assert_not_called()
+
+    def test_does_not_fall_back_to_itself(self):
+        """If the active model IS the fallback model, no infinite-retry risk."""
+        mm, primary, _secondary = self._manager_with_two_models()
+        primary.chat_with_tools.return_value = SimpleNamespace(content="Ollama server unavailable.", tool_calls=[])
+        mm.set_fallback("primary", is_failure=lambda c: True)
+
+        result = mm.chat_with_tools([{"role": "user", "content": "hi"}], tools=[], model_id="primary")
+
+        assert result.content == "Ollama server unavailable."
+        assert primary.chat_with_tools.call_count == 1
+
+    def test_streaming_falls_back_when_only_chunk_is_sentinel(self):
+        mm, primary, secondary = self._manager_with_two_models()
+        primary.chat_stream.return_value = iter(["Ollama server unavailable."])
+        secondary.chat_stream.return_value = iter(["Real ", "streamed ", "answer."])
+        mm.set_fallback("secondary", is_failure=lambda c: c.startswith("Ollama server unavailable."))
+
+        chunks = list(mm.chat_stream([{"role": "user", "content": "hi"}], model_id="primary"))
+
+        assert "".join(chunks) == "Real streamed answer."
+
+    def test_streaming_does_not_fall_back_after_real_content_started(self):
+        """A sentinel-looking chunk followed by more content is NOT a total failure."""
+        mm, primary, secondary = self._manager_with_two_models()
+        primary.chat_stream.return_value = iter(["Ollama server unavailable.", " actually continuing"])
+        mm.set_fallback("secondary", is_failure=lambda c: c.startswith("Ollama server unavailable."))
+
+        chunks = list(mm.chat_stream([{"role": "user", "content": "hi"}], model_id="primary"))
+
+        assert "".join(chunks) == "Ollama server unavailable. actually continuing"
+        secondary.chat_stream.assert_not_called()
+
+    def test_streaming_unchanged_when_no_fallback_configured(self):
+        mm, primary, _secondary = self._manager_with_two_models()
+        primary.chat_stream.return_value = iter(["A", "B", "C"])
+        chunks = list(mm.chat_stream([{"role": "user", "content": "hi"}], model_id="primary"))
+        assert chunks == ["A", "B", "C"]
+
+
+class TestProviderFactoryOllamaWiring:
+    """smartagent.llm.factory — _load_ollama() and NVIDIA-as-fallback wiring."""
+
+    def test_ollama_in_valid_providers(self):
+        from smartagent.llm.factory import _VALID_PROVIDERS
+        assert "ollama" in _VALID_PROVIDERS
+
+    def test_load_ollama_registers_and_switches(self, monkeypatch):
+        from smartagent.llm.factory import _load_ollama
+        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+        mm = ModelManager()
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            _load_ollama("llama3.2:3b", mm)
+        assert mm.active_model_id == "llama3.2:3b"
+        assert mm.registry.find("llama3.2:3b") is not None
+
+    def test_load_ollama_registers_nvidia_as_silent_fallback(self, monkeypatch):
+        from smartagent.llm.factory import _load_ollama, NVIDIA_DEFAULT_MODEL
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test-key")
+        mm = ModelManager()
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            _load_ollama("llama3.2:3b", mm)
+        # Active model is still Ollama — NVIDIA is registered but never switched to.
+        assert mm.active_model_id == "llama3.2:3b"
+        assert mm.registry.find(NVIDIA_DEFAULT_MODEL) is not None
+        assert mm._fallback_model_id == NVIDIA_DEFAULT_MODEL
+
+    def test_load_ollama_no_fallback_without_nvidia_key(self, monkeypatch):
+        from smartagent.llm.factory import _load_ollama
+        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+        mm = ModelManager()
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            _load_ollama("llama3.2:3b", mm)
+        assert mm._fallback_model_id is None
+
+    def test_ollama_error_sentinel_recognized(self):
+        from smartagent.llm.factory import is_llm_error_text
+        assert is_llm_error_text("Ollama server unavailable.") is True
+        assert is_llm_error_text("The answer is 4.") is False
+
+    def test_switching_away_from_ollama_clears_fallback(self, monkeypatch):
+        """No stale NVIDIA-fallback left configured after switching to github."""
+        from smartagent.llm.factory import _load_ollama, _wire_provider
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test-key")
+        monkeypatch.setenv("GITHUB_TOKEN", "gh-test-token")
+        mm = ModelManager()
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            _load_ollama("llama3.2:3b", mm)
+        assert mm._fallback_model_id is not None
+        _wire_provider("github", "gpt-4.1", mm)
+        assert mm._fallback_model_id is None
+
+
+class TestWorkerPipelineWithOllama:
+    """
+    End-to-end: run_agent_loop() driven by a REAL ModelManager + real
+    OllamaProvider (HTTP mocked) — proves the actual integration chain the
+    live worker pipeline uses, not just isolated units mocking ModelManager.
+    """
+
+    def test_worker_completes_task_via_real_ollama_chain(self, tmp_path):
+        from smartagent.engineer.agent_loop import run_agent_loop
+
+        mm = ModelManager()
+        with patch("urllib.request.urlopen", side_effect=OSError()):
+            provider = OllamaProvider(model_name="llama3.2:3b")
+            mm.registry.register(provider)
+            mm.switch("llama3.2:3b")
+
+        event_bus = MagicMock()
+        final_response = _chat_response("Task complete — nothing further to do.")
+        with patch("urllib.request.urlopen", return_value=_make_http_response(final_response)):
+            result = run_agent_loop(
+                "Say hello", mm, event_bus, str(tmp_path), allow_direct_reply=False,
+            )
+
+        assert result.success is True
+        assert result.stop_reason == "done"
+        assert "Task complete" in result.final_summary
+
+    def test_worker_pipeline_unaffected_when_model_manager_is_mocked(self, tmp_path):
+        """
+        Regression guard: DevPipeline/agent_loop tests across this suite mock
+        ModelManager entirely (see test_dev_pipeline.py, test_agent_loop.py) —
+        none of this phase's changes touch agent_loop.py or dev_pipeline.py,
+        so a mocked model_manager's chat_with_tools() contract is exactly
+        what it was before. This test just re-confirms that contract here.
+        """
+        from smartagent.engineer.agent_loop import run_agent_loop
+
+        mm = MagicMock()
+        msg = MagicMock()
+        msg.tool_calls = []
+        msg.content = "Done."
+        mm.chat_with_tools.return_value = msg
+        eb = MagicMock()
+
+        result = run_agent_loop("goal", mm, eb, str(tmp_path))
+
+        assert result.success is True
+        assert result.final_summary == "Done."
