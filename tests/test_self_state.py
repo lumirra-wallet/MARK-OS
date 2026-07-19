@@ -1,24 +1,33 @@
-"""Tests for smartagent.server.self_state — MARK's internal self-state.
-
-Wraps a real smartagent.mind.executive.executive_controller.ExecutiveController
-(attention/confidence/homeostasis/state machine), not a bare dataclass — see
-self_state.py's module docstring for why. Tests assert on the tracker's own
-public contract, not on ExecutiveController's internals directly."""
+"""Tests for smartagent.server.self_state — reads/updates MARK's real
+self-state via agent.mind (a real ExecutiveController from
+smartagent.mind), not a second, separate self-model. See self_state.py's
+module docstring for why it's a thin stateless helper now, not a class
+with its own singleton."""
 
 from __future__ import annotations
 
-from smartagent.server.self_state import SelfStateTracker, get_self_state_tracker
+from types import SimpleNamespace
+
+from smartagent.mind.executive.executive_controller import ExecutiveController
+from smartagent.server import self_state
 
 
-class TestSelfStateTracker:
+def _fake_agent(active_model: str | None = None) -> SimpleNamespace:
+    return SimpleNamespace(
+        mind=ExecutiveController(),
+        model_manager=SimpleNamespace(_active_model_id=active_model),
+    )
+
+
+class TestSnapshot:
     def test_default_snapshot_is_idle(self):
-        t = SelfStateTracker()
-        snap = t.snapshot()
+        agent = _fake_agent()
+        snap = self_state.snapshot(agent)
         assert snap["mode"] == "idle"
         assert snap["active_tasks"] == 0
 
     def test_snapshot_shape(self):
-        d = SelfStateTracker().snapshot()
+        d = self_state.snapshot(_fake_agent())
         for key in (
             "identity", "owner", "mode", "state", "current_activity",
             "active_tasks", "model", "memory", "voice", "confidence", "health",
@@ -27,69 +36,59 @@ class TestSelfStateTracker:
         assert d["identity"] == "MARK"
 
     def test_voice_honestly_reports_disabled(self):
-        """Voice hasn't been built — self-state must not overclaim."""
-        assert SelfStateTracker().snapshot()["voice"] == "disabled"
+        assert self_state.snapshot(_fake_agent())["voice"] == "disabled"
 
+    def test_reads_the_live_agent_not_a_cached_copy(self):
+        """Two snapshots of two different agents must never share state —
+        this module holds nothing of its own."""
+        a1, a2 = _fake_agent(), _fake_agent()
+        self_state.task_started(a1, "task on agent one")
+        assert self_state.snapshot(a1)["active_tasks"] == 1
+        assert self_state.snapshot(a2)["active_tasks"] == 0
+
+
+class TestTaskLifecycle:
     def test_task_started_increments_and_sets_executing(self):
-        t = SelfStateTracker()
-        t.task_started("build the API")
-        snap = t.snapshot()
+        agent = _fake_agent()
+        self_state.task_started(agent, "build the API")
+        snap = self_state.snapshot(agent)
         assert snap["active_tasks"] == 1
         assert snap["mode"] == "executing"
         assert snap["current_activity"] == "build the API"
 
-    def test_task_finished_decrements_and_returns_to_idle(self):
-        t = SelfStateTracker()
-        t.task_started("build the API")
-        t.task_finished(succeeded=True, what_happened="Built it.")
-        snap = t.snapshot()
+    def test_task_finished_returns_to_idle(self):
+        agent = _fake_agent()
+        self_state.task_started(agent, "build the API")
+        self_state.task_finished(agent, "build the API", succeeded=True, what_happened="Built it.")
+        snap = self_state.snapshot(agent)
         assert snap["active_tasks"] == 0
         assert snap["mode"] == "idle"
 
-    def test_task_started_and_finished_use_sensible_defaults(self):
-        """Zero-arg calls (as api.py used to make before it started passing
-        the real goal/outcome) must still work without raising."""
-        t = SelfStateTracker()
-        t.task_started()
-        t.task_finished()
-        assert t.snapshot()["active_tasks"] == 0
-
-    def test_multiple_concurrent_tasks_stay_executing_until_all_finish(self):
-        t = SelfStateTracker()
-        t.task_started("task one")
-        t.task_started("task two")
-        assert t.snapshot()["active_tasks"] == 2
-        t.task_finished()
-        assert t.snapshot()["active_tasks"] == 1
-        t.task_finished()
-        assert t.snapshot()["active_tasks"] == 0
-
-    def test_active_tasks_never_goes_negative(self):
-        t = SelfStateTracker()
-        t.task_finished()  # no task_started() first
-        assert t.snapshot()["active_tasks"] == 0
-
-    def test_set_model_reflected_in_snapshot(self):
-        t = SelfStateTracker()
-        t.set_model("llama3.2:3b")
-        assert t.snapshot()["model"] == "llama3.2:3b"
-
-    def test_set_model_none_reports_as_string_none(self):
-        t = SelfStateTracker()
-        assert t.snapshot()["model"] == "none"
-
-    def test_set_memory_status_reflected_in_snapshot(self):
-        t = SelfStateTracker()
-        t.set_memory_status("degraded")
-        assert t.snapshot()["memory"] == "degraded"
+    def test_zero_arg_defaults_still_work(self):
+        agent = _fake_agent()
+        self_state.task_started(agent)
+        self_state.task_finished(agent)
+        assert self_state.snapshot(agent)["active_tasks"] == 0
 
     def test_a_failed_task_still_returns_to_idle(self):
-        t = SelfStateTracker()
-        t.task_started("risky thing")
-        t.task_finished(succeeded=False, what_happened="It broke.")
-        assert t.snapshot()["mode"] == "idle"
+        agent = _fake_agent()
+        self_state.task_started(agent, "risky thing")
+        self_state.task_finished(agent, "risky thing", succeeded=False, what_happened="It broke.")
+        assert self_state.snapshot(agent)["mode"] == "idle"
 
 
-class TestSelfStateSingleton:
-    def test_get_self_state_tracker_returns_same_instance(self):
-        assert get_self_state_tracker() is get_self_state_tracker()
+class TestModelReporting:
+    def test_active_model_reflected_in_snapshot(self):
+        agent = _fake_agent(active_model="llama3.2:3b")
+        assert self_state.snapshot(agent)["model"] == "llama3.2:3b"
+
+    def test_no_active_model_reports_as_string_none(self):
+        assert self_state.snapshot(_fake_agent())["model"] == "none"
+
+
+class TestIdleSnapshot:
+    def test_idle_snapshot_needs_no_agent(self):
+        snap = self_state.idle_snapshot()
+        assert snap["identity"] == "MARK"
+        assert snap["mode"] == "idle"
+        assert snap["current_activity"] == "not started"

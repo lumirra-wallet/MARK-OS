@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -57,7 +58,7 @@ def client():
 @pytest.fixture()
 def fresh_state():
     """Reset the module-level RunState before each test."""
-    from smartagent.server.api import _state
+    from smartagent.server.api import _reset_mark_agent_for_tests, _state
     _state.running = False
     _state.goal = ""
     _state.workspace = "."
@@ -65,11 +66,17 @@ def fresh_state():
     _state.cancel_requested = False
     _state.workers = []
     _state._task = None
+    # The persistent MARK agent (see api.py's _get_mark_agent) is cached
+    # across requests by design — reset it per test so each test's own
+    # patch("smartagent.server.api.SmartAgent") actually takes effect
+    # instead of a previous test's cached instance being reused.
+    _reset_mark_agent_for_tests()
     yield _state
     # Cleanup
     _state.running = False
     _state.cancel_requested = False
     _state._task = None
+    _reset_mark_agent_for_tests()
 
 
 @pytest.fixture()
@@ -555,15 +562,22 @@ class TestIdleProactiveMessage:
          "description": "Move secrets to environment variables.", "file": "auth.py"},
     ]
 
+    def _mock_agent(self, mm: MagicMock) -> AsyncMock:
+        """_get_mark_agent is async and returns the one persistent
+        SmartAgent — mock it directly rather than SmartAgent itself, same
+        as patching _build_model_manager used to stand in for construction."""
+        return AsyncMock(return_value=SimpleNamespace(model_manager=mm))
+
     def test_broadcasts_llm_composed_message(self):
         from smartagent.server.api import _broadcast_idle_chat_message
         broadcast = AsyncMock()
+        mm = MagicMock()
+        mm.chat_stream.return_value = iter(
+            ["While you were away, I found a hardcoded credential in auth.py."]
+        )
         with patch("smartagent.server.api.connection_manager") as mock_cm, \
-             patch("smartagent.server.api._build_model_manager") as mock_build_mm:
+             patch("smartagent.server.api._get_mark_agent", self._mock_agent(mm)):
             mock_cm.broadcast = broadcast
-            mock_build_mm.return_value.chat_stream.return_value = iter(
-                ["While you were away, I found a hardcoded credential in auth.py."]
-            )
             self._run(_broadcast_idle_chat_message(".", self._SUGGESTIONS))
         sent = broadcast.call_args.args[0]
         assert sent["name"] == ServerEvents.MARK_PROACTIVE
@@ -574,10 +588,11 @@ class TestIdleProactiveMessage:
         built directly from the top finding — MARK never goes silent."""
         from smartagent.server.api import _broadcast_idle_chat_message
         broadcast = AsyncMock()
+        mm = MagicMock()
+        mm.chat_stream.side_effect = RuntimeError("rate limited")
         with patch("smartagent.server.api.connection_manager") as mock_cm, \
-             patch("smartagent.server.api._build_model_manager") as mock_build_mm:
+             patch("smartagent.server.api._get_mark_agent", self._mock_agent(mm)):
             mock_cm.broadcast = broadcast
-            mock_build_mm.return_value.chat_stream.side_effect = RuntimeError("rate limited")
             self._run(_broadcast_idle_chat_message(".", self._SUGGESTIONS))
         sent = broadcast.call_args.args[0]
         assert sent["name"] == ServerEvents.MARK_PROACTIVE
@@ -589,12 +604,13 @@ class TestIdleProactiveMessage:
         raw error text as if MARK had said it."""
         from smartagent.server.api import _broadcast_idle_chat_message
         broadcast = AsyncMock()
+        mm = MagicMock()
+        mm.chat_stream.return_value = iter(
+            ["GitHub Models error: Too many requests."]
+        )
         with patch("smartagent.server.api.connection_manager") as mock_cm, \
-             patch("smartagent.server.api._build_model_manager") as mock_build_mm:
+             patch("smartagent.server.api._get_mark_agent", self._mock_agent(mm)):
             mock_cm.broadcast = broadcast
-            mock_build_mm.return_value.chat_stream.return_value = iter(
-                ["GitHub Models error: Too many requests."]
-            )
             self._run(_broadcast_idle_chat_message(".", self._SUGGESTIONS))
         sent = broadcast.call_args.args[0]
         assert sent["name"] == ServerEvents.MARK_PROACTIVE

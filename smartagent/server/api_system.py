@@ -45,8 +45,12 @@ async def get_identity() -> dict[str, Any]:
 @router.get("/self-state")
 async def get_self_state() -> dict[str, Any]:
     """MARK's current mode, active task count, and resource status."""
-    from smartagent.server.self_state import get_self_state_tracker
-    return get_self_state_tracker().snapshot()
+    from smartagent.server.api import _peek_mark_agent
+    from smartagent.server.self_state import idle_snapshot, snapshot
+    agent = _peek_mark_agent()
+    if agent is None:
+        return idle_snapshot()
+    return snapshot(agent)
 
 # ---------------------------------------------------------------------------
 # Helpers

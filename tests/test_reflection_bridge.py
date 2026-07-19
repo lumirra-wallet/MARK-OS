@@ -2,13 +2,18 @@
 mission results into the (previously dormant) reflection/ReflectionEngine.
 See reflection_bridge.py's module docstring for why this translation
 exists: DevPipeline and ReflectionEngine were built for two different,
-never-reconciled pipelines."""
+never-reconciled pipelines, and reflection_bridge is the seam between
+them — not a place learning lives on its own (that's agent.reflection_engine,
+now that smartagent.server.api keeps one persistent agent per process)."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from smartagent.engineer.dev_pipeline import MilestoneResult, PipelineResult
+from smartagent.reflection.reflection_engine import ReflectionEngine
 from smartagent.server.reflection_bridge import (
-    ReflectionBridge, _build_execution_context, get_reflection_bridge,
+    _build_execution_context, reflect_on_pipeline_result,
 )
 
 
@@ -25,6 +30,10 @@ def _pipeline_result(*, all_pass: bool = True) -> PipelineResult:
         total_elapsed=6.3,
         summary="Built the API.",
     )
+
+
+def _fake_agent() -> SimpleNamespace:
+    return SimpleNamespace(reflection_engine=ReflectionEngine())
 
 
 class TestBuildExecutionContext:
@@ -58,34 +67,31 @@ class TestBuildExecutionContext:
         assert bad.state.value == "failed"
 
 
-class TestReflectionBridge:
-    def test_reflects_without_any_subsystems_wired(self):
-        """memory/knowledge/model managers are all optional — reflection
-        must still run and return a real result."""
-        bridge = ReflectionBridge()
-        result = bridge.reflect_on_pipeline_result(_pipeline_result())
+class TestReflectOnPipelineResult:
+    def test_reflects_using_the_agents_own_reflection_engine(self):
+        agent = _fake_agent()
+        result = reflect_on_pipeline_result(_pipeline_result(), agent)
         assert result is not None
         assert result.report.goal == "Build a Flask TODO API"
         assert result.report.task_count == 2
         assert result.report.completed_count == 2
 
     def test_never_raises_on_bad_input(self):
-        bridge = ReflectionBridge()
+        agent = _fake_agent()
         broken = PipelineResult(goal="", success=False, milestone_results=[])
-        result = bridge.reflect_on_pipeline_result(broken)
+        result = reflect_on_pipeline_result(broken, agent)
         assert result is not None  # best-effort contract, same as ReflectionEngine itself
 
-    def test_prompt_registry_and_learning_store_persist_across_calls(self):
-        bridge = ReflectionBridge()
-        bridge.reflect_on_pipeline_result(_pipeline_result())
-        registry_after_first = bridge.prompt_registry
-        store_after_first = bridge._learning_store
-        bridge.reflect_on_pipeline_result(_pipeline_result())
-        assert bridge.prompt_registry is registry_after_first
-        assert bridge._learning_store is store_after_first
-        assert len(store_after_first.execution_history()) == 2
+    def test_accumulates_on_the_agents_persistent_engine_across_calls(self):
+        """Learning persists because it lives on the one persistent agent,
+        not inside this bridge — two calls against the same agent must
+        both land in the same learning store."""
+        agent = _fake_agent()
+        reflect_on_pipeline_result(_pipeline_result(), agent)
+        reflect_on_pipeline_result(_pipeline_result(), agent)
+        assert len(agent.reflection_engine.learning_store.execution_history()) == 2
 
-
-class TestSingleton:
-    def test_get_reflection_bridge_returns_same_instance(self):
-        assert get_reflection_bridge() is get_reflection_bridge()
+    def test_never_raises_if_the_agent_has_no_reflection_engine(self):
+        broken_agent = SimpleNamespace()
+        result = reflect_on_pipeline_result(_pipeline_result(), broken_agent)
+        assert result is None

@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -52,7 +53,7 @@ from smartagent.identity.mark_identity import (
 from smartagent.engineer.agent_tools import execute_tool, git_unpushed_count
 from smartagent.engineer.dev_pipeline import classify_intent
 from smartagent.llm.factory import is_llm_error_text
-from smartagent.server import conversation_store, deploy_awareness
+from smartagent.server import conversation_store, deploy_awareness, self_state
 from smartagent.server.events import ServerEvents, broadcaster, intercept_print
 from smartagent.server.reflection import reflect_on_run
 from smartagent.server.workspace_analyzer import (
@@ -127,15 +128,93 @@ _MARK_OPENING_SYSTEM = build_system_prompt(OPENING_SURFACE_NOTES)
 _MARK_IDLE_SYSTEM    = build_system_prompt(IDLE_SURFACE_NOTES)
 
 
-def _build_model_manager(workspace: str | None) -> Any:
-    """
-    Construct a fresh SmartAgent for *workspace* and return its
-    ``model_manager``. SmartAgent does blocking network calls at
-    construction (NVIDIA/GitHub) — call this via ``asyncio.to_thread``.
-    """
-    s = Settings(workspace_path=workspace)
-    a = SmartAgent(s)
-    return a.model_manager
+# ── The one persistent MARK ──────────────────────────────────────────────
+#
+# SmartAgent used to be constructed fresh on every /run call — a new mind,
+# a new executive, a new reflection engine, discarded the moment the
+# response was sent. That's the opposite of "MARK is one persistent
+# intelligence": it's an identity rebuilt from scratch on every message.
+# _get_mark_agent() is the fix — one SmartAgent, constructed once, reused
+# for the life of the server process. Only memory/knowledge are rescoped
+# when the workspace changes (what MARK knows ABOUT a given project);
+# identity, mind, executive, reflection, skills, tools, and model_manager
+# stay the same continuous instance regardless of which project MARK is
+# pointed at, matching "one persistent identity", not one identity per
+# project.
+#
+# In-place memory/knowledge rescoping relies on this server's existing
+# single-flight assumption (/run rejects a second concurrent request with
+# 409 — see the `_state.running` check above). If that assumption ever
+# changes, this would need real per-request isolation instead.
+_mark_agent: Any = None
+_mark_agent_lock = threading.Lock()
+_mark_agent_memory_cache: dict[str, Any] = {}
+_mark_agent_knowledge_cache: dict[str, Any] = {}
+
+
+async def _get_mark_agent(workspace: str | None) -> Any:
+    """Return THE SmartAgent for this server process, constructing it on
+    first use. SmartAgent does blocking network calls at construction
+    (NVIDIA/GitHub) — kept off the event loop via asyncio.to_thread."""
+    global _mark_agent
+    if _mark_agent is None:
+        def _construct() -> Any:
+            s = Settings(workspace_path=workspace)
+            a = SmartAgent(s)
+            _mark_agent_memory_cache[workspace or ""] = a.memory
+            _mark_agent_knowledge_cache[workspace or ""] = a.knowledge
+            return a
+        with _mark_agent_lock:
+            if _mark_agent is None:
+                _mark_agent = await asyncio.to_thread(_construct)
+        return _mark_agent
+
+    if workspace and workspace not in _mark_agent_memory_cache:
+        def _scope() -> None:
+            from smartagent.knowledge.knowledge_manager import KnowledgeManager
+            from smartagent.memory.memory_manager import MemoryManager
+            s = Settings(workspace_path=workspace)
+            _mark_agent_memory_cache[workspace] = MemoryManager(
+                backend=s.memory_backend, vault_path=s.vault_path,
+                categories=s.memory_categories, event_bus=_mark_agent.events,
+            )
+            _mark_agent_knowledge_cache[workspace] = KnowledgeManager(
+                knowledge_path=getattr(s, "knowledge_path", "knowledge"),
+            )
+        with _mark_agent_lock:
+            if workspace not in _mark_agent_memory_cache:
+                await asyncio.to_thread(_scope)
+
+    if workspace:
+        _mark_agent.memory = _mark_agent_memory_cache[workspace]
+        _mark_agent.knowledge = _mark_agent_knowledge_cache[workspace]
+    return _mark_agent
+
+
+def _peek_mark_agent() -> Any:
+    """The persistent agent if one has been constructed yet, else None —
+    never triggers construction. For passive reads (e.g. /self-state)
+    that shouldn't force a slow SmartAgent startup just to answer a poll."""
+    return _mark_agent
+
+
+def _reset_mark_agent_for_tests() -> None:
+    """Test-only: drop the persistent agent so the next call to
+    _get_mark_agent constructs a fresh one — otherwise a test's
+    ``patch("smartagent.server.api.SmartAgent")`` would have no effect
+    once a real (or previously-mocked) instance is already cached."""
+    global _mark_agent
+    _mark_agent = None
+    _mark_agent_memory_cache.clear()
+    _mark_agent_knowledge_cache.clear()
+
+
+def _outcome_summary(ev_payload: dict, ev_name: str) -> str:
+    """The one deterministic description of what a run actually did —
+    shared by every post-run consumer (mind's self-model, the quick
+    reflect_on_run lesson) so they reason about the same facts instead of
+    each deriving their own summary of the same event."""
+    return str(ev_payload.get("summary") or ev_payload.get("error") or ev_name or "")
 
 
 def _stream_llm_response(
@@ -437,9 +516,6 @@ async def execute(req: ExecuteRequest) -> dict:
             })
             return
 
-        from smartagent.server.self_state import get_self_state_tracker
-        get_self_state_tracker().task_started(req.goal)
-
         try:
             # Use module-level imports (patchable in tests).
             # Create a fresh EventBus so the broadcaster wires to the correct one.
@@ -466,20 +542,14 @@ async def execute(req: ExecuteRequest) -> dict:
                         "timestamp": _now_iso(),
                     })
 
-            # ── Initialise agent in a thread (SmartAgent does blocking network ──
-            # calls to NVIDIA/GitHub at startup — keep the event loop free).
-            def _init_agent() -> Any:
-                s = Settings(workspace_path=_state.workspace)
-                a = SmartAgent(s)
-                a.events = event_bus
-                return a
-
-            agent = await asyncio.to_thread(_init_agent)
+            # ── The one persistent MARK, not a fresh one per message ──────────
+            agent = await _get_mark_agent(_state.workspace)
+            agent.events = event_bus
             _active_model = getattr(agent.model_manager, "_active_model_id", None)
             logger.info(
                 "MARK STATE agent-ready  active_model=%r", _active_model or "none",
             )
-            get_self_state_tracker().set_model(_active_model)
+            self_state.task_started(agent, req.goal)
 
             # ── Understand: the Intent Engine's single decision point ────────
             intent = classify_intent(req.goal)
@@ -608,14 +678,24 @@ async def execute(req: ExecuteRequest) -> dict:
                     # delays the response, never breaks it if it fails
                     # (see reflection_bridge.py for why this only runs
                     # for pipeline missions, not single-shot agent tasks).
+                    # The quick, synchronous lesson (Feature 8, below) and
+                    # mind.complete_task() already recorded what happened
+                    # from the deterministic outcome; once this deeper,
+                    # slower analysis finishes, it feeds its own conclusion
+                    # back into the SAME persistent self-model instead of
+                    # being a write-only side channel nothing else reads.
                     def _reflect() -> None:
-                        from smartagent.server.reflection_bridge import get_reflection_bridge
-                        get_reflection_bridge().reflect_on_pipeline_result(
-                            result,
-                            memory_manager=agent.memory,
-                            knowledge_manager=agent.knowledge,
-                            model_manager=agent.model_manager,
-                        )
+                        from smartagent.server.reflection_bridge import reflect_on_pipeline_result
+                        deep = reflect_on_pipeline_result(result, agent)
+                        if deep is not None:
+                            top_issue = (deep.critic.what_failed or deep.critic.what_succeeded or [None])[0]
+                            agent.mind.reflection_engine.reflect(
+                                task_name=f"deep review: {result.goal[:60]}",
+                                succeeded=result.success,
+                                what_happened=f"Critic scored this mission {deep.critic.overall_score:.0%}.",
+                                what_failed=None if result.success else top_issue,
+                                learned=top_issue if result.success else None,
+                            )
                     asyncio.create_task(
                         asyncio.to_thread(_reflect), name="mark-reflect",
                     )
@@ -677,10 +757,12 @@ async def execute(req: ExecuteRequest) -> dict:
                     broadcaster.uninstall(event_bus)
                 except Exception:
                     pass
-            get_self_state_tracker().task_finished(
-                succeeded=bool(ev_payload.get("success")),
-                what_happened=str(ev_payload.get("summary") or ev_name or ""),
-            )
+            if agent is not None:
+                self_state.task_finished(
+                    agent, req.goal,
+                    succeeded=bool(ev_payload.get("success")),
+                    what_happened=_outcome_summary(ev_payload, ev_name),
+                )
             logger.info(
                 "MARK STATE teardown   running=False  ev=%r", ev_name,
             )
@@ -745,7 +827,10 @@ async def execute(req: ExecuteRequest) -> dict:
 
         # Feature 8 — self-reflection
         try:
-            outcome_summary = ev_payload.get("summary") or ev_payload.get("error", "")
+            # Same summary mind.complete_task() was already given above —
+            # one shared record of what happened, not two independently
+            # derived descriptions of the same run.
+            outcome_summary = _outcome_summary(ev_payload, ev_name)
 
             def _do_reflect() -> Any:
                 return reflect_on_run(
@@ -1004,8 +1089,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         except Exception:
             change_summary = None
 
+        mark_agent = await _get_mark_agent(_state.workspace)
+
         def _compose_opening() -> str:
-            mm = _build_model_manager(_state.workspace)
+            mm = mark_agent.model_manager
             facts = _workspace_preamble(payload)
             if change_summary:
                 facts = f"{facts}\n\n{change_summary}"
@@ -1109,8 +1196,10 @@ async def _broadcast_idle_chat_message(workspace: str, suggestions: list[dict[st
         f"{top['description']} Want me to take care of it?"
     )
 
+    mark_agent = await _get_mark_agent(workspace)
+
     def _compose() -> str:
-        mm = _build_model_manager(workspace)
+        mm = mark_agent.model_manager
         facts = "\n".join(
             f"- [{s.get('priority', 'low')}] {s['title']}: {s['description']}"
             + (f" ({s['file']})" if s.get("file") else "")
