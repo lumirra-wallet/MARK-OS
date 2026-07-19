@@ -307,7 +307,18 @@ class TestExecutiveSynthesis:
 
     def test_emits_reviewing_and_committing_reasoning_stages(self, ws):
         """Timeline's 8-stage stepper needs 'reviewing'/'committing' REASONING_STAGE
-        events — DevPipeline didn't emit any REASONING_STAGE before this milestone."""
+        events — DevPipeline didn't emit any REASONING_STAGE before this milestone.
+        Must actually write a file: 'committing' only fires when something
+        real changed (Git stays asleep on a no-op run)."""
+        write_tc = MagicMock()
+        write_tc.id = "tc1"
+        write_tc.function.name      = "write_file"
+        write_tc.function.arguments = '{"path": "app.py", "content": "print(1)\\n"}'
+
+        write_msg = MagicMock()
+        write_msg.tool_calls = [write_tc]
+        write_msg.content    = ""
+
         done_msg = MagicMock()
         done_msg.tool_calls = []
         done_msg.content    = "Done."
@@ -320,7 +331,7 @@ class TestExecutiveSynthesis:
             iter(["Shipped it."]),
             iter(["All done."]),
         ]
-        mm.chat_with_tools.return_value = done_msg
+        mm.chat_with_tools.side_effect = [write_msg, done_msg]
 
         dp = DevPipeline(mm, eb, ws)
         dp.run("Create app.py")
@@ -534,6 +545,43 @@ class TestWorkerDispatch:
         # reach chat directly — only the executive-composed milestone/final
         # summaries (from the mocked "Shipped it."/"All done." responses).
         assert not any("Created hello.py." == t.strip() for t in streamed_texts)
+
+    def test_git_stays_asleep_when_nothing_changed(self, ws):
+        """Git must never commit — or even be dispatched — on a run where no
+        file was actually created or modified. Committing 'nothing to commit,
+        working tree clean' as a reported success is exactly the false
+        activity this guards against."""
+        done_msg = MagicMock()
+        done_msg.tool_calls = []
+        done_msg.content    = "I looked into it but made no changes."
+
+        eb = make_event_bus()
+        mm = MagicMock()
+        mm.chat_stream.side_effect = [
+            iter(["1. Investigate the issue"]),   # planner
+            iter(["FAIL: nothing was produced."]),  # reviewer
+            iter(["Couldn't ship anything."]),      # milestone synthesis
+            iter(["The run finished without changes."]),  # final synthesis
+        ]
+        mm.chat_with_tools.return_value = done_msg  # never calls write_file
+
+        dp = DevPipeline(mm, eb, ws)
+        result = dp.run("Investigate the issue")
+
+        assert result.files_created == []
+        assert result.files_modified == []
+
+        started = {
+            c.kwargs.get("worker") for c in eb.publish.call_args_list
+            if c.args and c.args[0] == "WorkerStarted"
+        }
+        assert "Git" not in started
+
+        stages = [
+            c.kwargs.get("stage") for c in eb.publish.call_args_list
+            if c.args and c.args[0] == "ReasoningStage"
+        ]
+        assert "committing" not in stages
 
 
 # ── Full pipeline run (mocked LLM + real filesystem) ──────────────────────────

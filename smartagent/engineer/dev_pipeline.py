@@ -323,14 +323,19 @@ class DevPipeline:
             )
             self._emit(summary_text)
 
-        # ── 3. Final checkpoint commit ────────────────────────────────────────
-        self._reasoning_stage("committing")
-        commit_msg = f"MARK: {goal[:60]}"
-        self._worker_started(GIT.name, f"Committing: {commit_msg}")
-        commit_out    = execute_tool("git_commit", {"message": commit_msg}, self._ws)
-        commit_ok     = "error" not in commit_out.lower()
-        self._worker_finished(GIT.name, success=commit_ok)
-        self._activity("commit", "Created checkpoint commit", detail=commit_out.split("\n")[0][:120])
+        # ── 3. Final checkpoint commit — only if something actually changed. ───
+        # Git stays asleep on a no-op run (e.g. every milestone failed before
+        # writing anything): committing "nothing to commit, working tree
+        # clean" as a reported success is exactly the false activity this
+        # guards against.
+        if all_files_created or all_files_modified:
+            self._reasoning_stage("committing")
+            commit_msg = f"MARK: {goal[:60]}"
+            self._worker_started(GIT.name, f"Committing: {commit_msg}")
+            commit_out    = execute_tool("git_commit", {"message": commit_msg}, self._ws)
+            commit_ok     = "error" not in commit_out.lower()
+            self._worker_finished(GIT.name, success=commit_ok)
+            self._activity("commit", "Created checkpoint commit", detail=commit_out.split("\n")[0][:120])
 
         # ── 4. Build result ───────────────────────────────────────────────────
         result.files_created  = all_files_created

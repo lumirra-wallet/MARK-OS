@@ -52,6 +52,7 @@ from smartagent.identity.mark_identity import (
 )
 from smartagent.engineer.agent_tools import execute_tool, git_unpushed_count
 from smartagent.engineer.dev_pipeline import classify_intent
+from smartagent.mind.response_planner import plan_response
 from smartagent.llm.factory import is_llm_error_text
 from smartagent.server import conversation_store, deploy_awareness, self_state
 from smartagent.server.events import ServerEvents, broadcaster, intercept_print
@@ -556,6 +557,17 @@ async def execute(req: ExecuteRequest) -> dict:
             logger.info(
                 "MARK STATE intent  goal=%r  category=%s  route=%s",
                 req.goal[:60], intent.category.value, intent.route,
+            )
+
+            # ── Decide: agent.mind actually gets a say — a real confidence ───
+            # score from the Brain, not just a route label with no
+            # deliberation behind it. Dispatch below still keys off
+            # intent.route directly; this doesn't change behavior, it makes
+            # the reasoning real and visible (see response_planner.py).
+            plan = plan_response(agent, req.goal, intent)
+            logger.info(
+                "MARK STATE plan  action=%s  confidence=%.2f  reasoning=%s",
+                plan.action, plan.confidence, plan.reasoning,
             )
 
             if intent.route == "conversational":

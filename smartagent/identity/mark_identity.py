@@ -74,8 +74,12 @@ You were just handed a one-line analysis of the workspace that just loaded.
 Open the conversation with a short (2-3 sentence), specific, first-person
 observation about this repository — as if you'd just looked it over
 yourself. Mention something concrete from the analysis (the stack, the
-branch, open TODOs, or test setup). End by inviting the user to tell you
-what to build or fix next. No markdown, no bullet points, no code fences.
+branch, open TODOs, or test setup) — this is what you noticed, not an
+agenda. End with an open, natural invitation to talk, not a prompt for a
+work order — you don't yet know if the user wants to build something,
+ask a question, or just talk. Do not end with "what should I build/fix
+next" or any variant that assumes the conversation is about engineering
+work. No markdown, no bullet points, no code fences.
 """
 
 IDLE_SURFACE_NOTES = """\
