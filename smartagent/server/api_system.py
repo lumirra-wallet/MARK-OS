@@ -12,6 +12,8 @@ Covers:
   GET  /metrics             — CPU / RAM / disk snapshot
   GET  /workspace/detect    — detect workspace from CWD
   GET  /workspace/recent    — recently used workspaces
+  GET  /identity            — MARK's structured identity profile
+  GET  /self-state          — MARK's current mode / active tasks / resources
 """
 from __future__ import annotations
 
@@ -27,6 +29,24 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.get("/identity")
+async def get_identity() -> dict[str, Any]:
+    """
+    MARK's structured identity profile — name, purpose, capabilities,
+    limitations, operating principles. No LLM call, no worker dispatch;
+    this is retrieved data, not generated text.
+    """
+    from smartagent.identity.profile import IDENTITY_PROFILE
+    return IDENTITY_PROFILE.as_dict()
+
+
+@router.get("/self-state")
+async def get_self_state() -> dict[str, Any]:
+    """MARK's current mode, active task count, and resource status."""
+    from smartagent.server.self_state import get_self_state_tracker
+    return get_self_state_tracker().snapshot()
 
 # ---------------------------------------------------------------------------
 # Helpers

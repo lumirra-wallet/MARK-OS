@@ -820,8 +820,9 @@ class IntentCategory(str, Enum):
 @dataclass(frozen=True)
 class IntentDecision:
     category:   IntentCategory
-    route:      Literal["conversational", "simple_agent", "complex_pipeline"]
+    route:      Literal["conversational", "simple_agent", "complex_pipeline", "needs_clarification"]
     complexity: "TaskComplexity | None" = None
+    clarification_options: tuple[str, ...] = ()
 
 
 # Pure greeting / acknowledgement patterns — these and only these go to chat.
@@ -886,6 +887,27 @@ _CAPABILITY_QUESTION_OPENER = re.compile(r"^(can|could|are|do|does|will)\s+(you|
 # capability questions ("can you generate images?") — excludes the former.
 _REQUEST_SIGNAL_WORDS = frozenset({"help", "me", "my", "for", "us", "our"})
 
+# ── Vague self-improvement goals ask a clarifying question, they don't ────
+# auto-generate a plan. "Improve yourself" is too broad to hand a worker —
+# MARK doesn't know if that means architecture, reasoning, memory, or
+# skills, and guessing wrong burns a full pipeline run on the wrong thing.
+_SELF_IMPROVEMENT_PATTERNS = [
+    re.compile(p, re.I) for p in [
+        r"\bimprove\s+(yourself|mark)\b",
+        r"\bmake\s+yourself\s+better\b",
+        r"\bupgrade\s+yourself\b",
+        r"\b(become|get)\s+(smarter|better)\b",
+        r"\bself[\s-]improve(?:ment)?\b",
+        r"\boptimi[sz]e\s+yourself\b",
+    ]
+]
+_SELF_IMPROVEMENT_OPTIONS = (
+    "My code architecture",
+    "My reasoning system",
+    "My memory",
+    "My skills",
+)
+
 _QUESTION_WORDS = frozenset({
     "what", "how", "why", "should", "do", "does", "is", "are",
     "can", "could", "would", "who", "when", "where", "will",
@@ -937,6 +959,15 @@ def classify_intent(goal: str) -> IntentDecision:
     for pat in _PURE_GREETING_PATTERNS:
         if pat.match(g):
             return IntentDecision(IntentCategory.CASUAL, "conversational")
+
+    # 1.4. Vague self-improvement goal → ask what "improve" should mean,
+    #      never auto-start a pipeline against a guess.
+    for pat in _SELF_IMPROVEMENT_PATTERNS:
+        if pat.search(g):
+            return IntentDecision(
+                IntentCategory.QUESTION, "needs_clarification",
+                clarification_options=_SELF_IMPROVEMENT_OPTIONS,
+            )
 
     words_lower = {w.lower().strip("?!.,;:'\"") for w in g.split()}
     has_action_keyword = bool(words_lower & _ACTION_KEYWORDS)

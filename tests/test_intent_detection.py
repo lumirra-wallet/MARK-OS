@@ -134,3 +134,37 @@ def test_capability_questions_stay_conversational(goal):
 def test_capability_shaped_work_requests_still_route_to_agent(goal):
     decision = classify_intent(goal)
     assert decision.route != "conversational", f"Expected agent for: {goal!r}"
+
+
+# ── Vague self-improvement goals ask for clarification, not a plan ────────────
+#
+# "Improve yourself" is real intent, not a chat question — but it's too
+# broad to hand a worker without guessing what "improve" means. Must not
+# land in "conversational" (a generic chat reply, no options offered) or
+# silently fall through to "simple_agent"/"complex_pipeline" (auto-starts a
+# pipeline against a guess) — it gets its own route.
+
+@pytest.mark.parametrize("goal", [
+    "improve yourself",
+    "Improve MARK",
+    "make yourself better",
+    "upgrade yourself",
+    "can you become smarter",
+    "self-improve",
+    "optimize yourself",
+])
+def test_vague_self_improvement_needs_clarification(goal):
+    decision = classify_intent(goal)
+    assert decision.route == "needs_clarification", f"Expected clarification for: {goal!r}"
+    assert len(decision.clarification_options) > 0
+
+
+@pytest.mark.parametrize("goal", [
+    "improve the login page",
+    "improve app.py",
+    "improve error handling in the API",
+    "make the website better",
+])
+def test_concrete_improvement_requests_do_not_need_clarification(goal):
+    decision = classify_intent(goal)
+    assert decision.route != "needs_clarification", f"Expected normal routing for: {goal!r}"

@@ -422,6 +422,24 @@ async def execute(req: ExecuteRequest) -> dict:
             req.goal[:80], _state.workspace,
         )
 
+        from smartagent.server.rate_limiter import get_run_rate_limiter
+        if not get_run_rate_limiter().allow(_state.workspace or "."):
+            logger.warning("MARK STATE rate-limited  workspace=%r", _state.workspace)
+            _state.running = False
+            _state._task   = None
+            await connection_manager.broadcast({
+                "type": "event", "name": ServerEvents.RUN_FAILED,
+                "payload": {
+                    "goal": req.goal, "success": False,
+                    "error": "Too many requests in a short window — please wait a moment and try again.",
+                },
+                "timestamp": _now_iso(),
+            })
+            return
+
+        from smartagent.server.self_state import get_self_state_tracker
+        get_self_state_tracker().task_started()
+
         try:
             # Use module-level imports (patchable in tests).
             # Create a fresh EventBus so the broadcaster wires to the correct one.
@@ -457,10 +475,11 @@ async def execute(req: ExecuteRequest) -> dict:
                 return a
 
             agent = await asyncio.to_thread(_init_agent)
+            _active_model = getattr(agent.model_manager, "_active_model_id", None)
             logger.info(
-                "MARK STATE agent-ready  active_model=%r",
-                getattr(agent.model_manager, "_active_model_id", "none"),
+                "MARK STATE agent-ready  active_model=%r", _active_model or "none",
             )
+            get_self_state_tracker().set_model(_active_model)
 
             # ── Route: the single Conversation Manager decision point ────────
             intent = classify_intent(req.goal)
@@ -475,6 +494,17 @@ async def execute(req: ExecuteRequest) -> dict:
                 logger.info("MARK STATE chat  goal=%r", req.goal[:60])
 
                 def _do_chat() -> str:
+                    # Pure identity questions ("who are you?") are answered
+                    # directly from MARK's own identity profile — no LLM
+                    # call, no worker dispatch. Retrieved, not generated.
+                    from smartagent.identity.profile import (
+                        identity_chat_reply, is_identity_question,
+                    )
+                    if is_identity_question(req.goal):
+                        reply = identity_chat_reply()
+                        event_bus.publish(ServerEvents.STREAMING_TOKEN, text=reply, source="mark")
+                        return reply
+
                     history = conversation_store.recent_turns(_state.workspace)
                     system_prompt = _MARK_CHAT_SYSTEM
                     ctx = conversation_store.get_cached_workspace_context(_state.workspace)
@@ -500,6 +530,29 @@ async def execute(req: ExecuteRequest) -> dict:
                     "summary":        "",
                 }
                 logger.info("MARK STATE chat-complete")
+
+            elif intent.route == "needs_clarification":
+                # ── CLARIFICATION PATH — goal is real but too vague to hand ──
+                # a worker without guessing. Ask, don't auto-plan. Composed
+                # directly in Python from the classifier's own options — no
+                # LLM call, no worker dispatch, same as the identity fast path.
+                logger.info("MARK STATE clarify  goal=%r", req.goal[:60])
+                options = intent.clarification_options or ("this",)
+                numbered = "\n".join(f"{i}. {opt}" for i, opt in enumerate(options, start=1))
+                reply_text = f"Do you want me to improve:\n{numbered}\n\nOr something else?"
+                event_bus.publish(ServerEvents.STREAMING_TOKEN, text=reply_text, source="mark")
+                conversation_store.append_turn(_state.workspace, "user", req.goal)
+                conversation_store.append_turn(_state.workspace, "assistant", reply_text)
+                ev_name    = ServerEvents.RUN_COMPLETED
+                ev_payload = {
+                    "goal":           req.goal,
+                    "success":        True,
+                    "elapsed":        time.monotonic() - _state.start_time,
+                    "files_created":  [],
+                    "files_modified": [],
+                    "summary":        "asked for clarification",
+                }
+                logger.info("MARK STATE clarify-complete")
 
             else:
                 # ── AGENT PATH — every non-conversational request goes here ──
@@ -608,6 +661,7 @@ async def execute(req: ExecuteRequest) -> dict:
                     broadcaster.uninstall(event_bus)
                 except Exception:
                     pass
+            get_self_state_tracker().task_finished()
             logger.info(
                 "MARK STATE teardown   running=False  ev=%r", ev_name,
             )
