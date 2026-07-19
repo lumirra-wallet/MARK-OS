@@ -8,7 +8,7 @@ import {
   Folder, FileText, Share2, MoreHorizontal, FlaskConical, Rocket,
 } from 'lucide-react';
 import { ChatView }          from './components/ChatView';
-import { MarkAvatar, MarkAvatarState } from './components/MarkAvatar';
+import { MarkPresence }      from './components/MarkPresence';
 import { ApprovalsSidebar }  from './components/ApprovalsSidebar';
 import { SettingsView }      from './components/SettingsView';
 import { FilesView }         from './components/FilesView';
