@@ -528,6 +528,33 @@ export interface SystemMetrics {
   error?:       string;
 }
 
+// MARK's own internal state — from agent.mind, a real ExecutiveController,
+// not a status string derived from local chat/running flags.
+export interface SelfState {
+  identity:         string;
+  owner:            string;
+  mode:             string;
+  state:            string;
+  current_activity: string;
+  active_tasks:     number;
+  model:            string;
+  memory:           string;
+  voice:            string;
+  confidence:       number;
+  health:           number;
+}
+
+export interface IdentityProfile {
+  name:                  string;
+  type:                  string;
+  purpose:               string;
+  creator:               string;
+  is_human:              boolean;
+  capabilities:          string[];
+  limitations:           string[];
+  operating_principles:  string[];
+}
+
 export interface WorkspaceDetectResponse {
   workspace:  string;
   cwd:        string;
