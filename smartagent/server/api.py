@@ -649,11 +649,27 @@ async def execute(req: ExecuteRequest) -> dict:
                         return reply
 
                     history = conversation_store.recent_turns(_state.workspace)
-                    system_prompt = _MARK_CHAT_SYSTEM
+
+                    # ── Presence-aware context injection ─────────────────────
+                    # The base _MARK_CHAT_SYSTEM is built from CHAT_SURFACE_NOTES
+                    # and frames MARK as a project-management orchestrator, which
+                    # makes every casual exchange feel like a help-desk script
+                    # ("I'm MARK — I plan engineering work…"). For conversational
+                    # replies we prepend a short directive that overrides that
+                    # framing so MARK responds as a present, self-aware colleague
+                    # rather than a task router.
+                    _presence_prefix = (
+                        "You are speaking directly with the person you work alongside. "
+                        "Respond naturally — as a present, curious colleague who knows them. "
+                        "Don't introduce yourself as a project-management tool unless directly "
+                        "asked. Be warm, brief, and genuine. If you don't know something, say so. "
+                        "Skip the corporate framing."
+                    )
+                    system_prompt = f"{_presence_prefix}\n\n{_MARK_CHAT_SYSTEM}"
                     ctx = conversation_store.get_cached_workspace_context(_state.workspace)
                     if ctx:
                         preamble = _workspace_preamble(ctx)
-                        system_prompt = f"{_MARK_CHAT_SYSTEM}\n\nCurrent project: {preamble}"
+                        system_prompt = f"{system_prompt}\n\nCurrent project context: {preamble}"
                     return _stream_llm_response(
                         req.goal, system_prompt,
                         agent.model_manager, event_bus,
@@ -1402,14 +1418,17 @@ async def _speech_engine_check() -> None:
 
 
 async def _idle_inspector_loop() -> None:
-    """Emit proactive workspace suggestions when MARK has been idle for 2 min."""
+    """Emit proactive workspace suggestions when MARK has been idle for 45s."""
     import time as _t
     _last_notified: float = 0.0
     while True:
-        await asyncio.sleep(30)
+        await asyncio.sleep(15)
         try:
             idle_secs = _t.time() - _last_notified
-            if not _state.running and idle_secs > 120 and connection_manager.active_connections:
+            # 45s threshold (was 120s) — short enough that MARK feels present
+            # and proactive, long enough to avoid interrupting a fast back-and-
+            # forth conversation.
+            if not _state.running and idle_secs > 45 and connection_manager.active_connections:
                 ws_path = _state.workspace or "."
                 suggestions = await asyncio.to_thread(_idle_suggestions, ws_path)
                 if suggestions:

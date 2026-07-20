@@ -16,14 +16,17 @@ import { useMarkStore } from '@/store/markStore';
  *         played by markStore's SpeechPlayer (see lib/speechPlayer.ts). No
  *         browser speechSynthesis on this path.
  *
- * The mic stays open continuously — including while MARK is speaking —
- * because that's what makes real interruption possible: the backend's VAD
- * needs to see the owner start talking in order to detect it at all.
- * getUserMedia's echoCancellation is requested so MARK's own voice
- * shouldn't normally trigger a false interruption, but browser echo
- * cancellation isn't perfect for a self-referential playback+capture loop
- * — an occasional false barge-in is a known, disclosed limitation, not a
- * silently swept-under-the-rug one.
+ * Echo cancellation approach (three layers):
+ *   1. getUserMedia echoCancellation + noiseSuppression — browser AEC.
+ *      Works best when AudioContext is at the native hardware rate (NOT at
+ *      a forced 16kHz — that bypasses the browser's AEC pipeline).
+ *   2. Mic gate — while MARK is speaking, PCM frames are only forwarded to
+ *      the backend when the RMS amplitude crosses a barge-in threshold
+ *      (BARGE_IN_RMS). This stops MARK's own voice (replayed through
+ *      speakers) from reaching the VAD as a false speech event, at zero
+ *      cost to intentional interruption — a real barge-in is louder.
+ *   3. Backend VAD threshold (0.65) + Whisper no_speech_prob filter —
+ *      see smartagent/server/voice_pipeline.py.
  *
  * The instant /ws/voice reports speech_start, this hook calls
  * stopMarkSpeech() directly — that's the fast path, a local call with no
@@ -45,6 +48,11 @@ import { useMarkStore } from '@/store/markStore';
 
 const VOICE_SAMPLE_RATE = 16000; // must match smartagent/server/voice_pipeline.py's SAMPLE_RATE
 const PROCESSOR_BUFFER_SIZE = 4096;
+
+// RMS amplitude below which mic frames are suppressed while MARK is speaking.
+// A real barge-in attempt (user talking over MARK) will be louder than this;
+// MARK's own echo from the speakers will be softer after AEC.
+const BARGE_IN_RMS = 0.015;
 
 function resampleTo16k(input: Float32Array, inputRate: number): Float32Array {
   if (inputRate === VOICE_SAMPLE_RATE) return input;
@@ -91,6 +99,14 @@ export function useVoice() {
   const enabledRef = useRef(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Keep a ref in sync with isMarkSpeaking so onaudioprocess (which captures
+  // the ref at processor-creation time, not on every render) can read the
+  // current value without stale closure issues.
+  const isMarkSpeakingRef = useRef(false);
+  useEffect(() => {
+    isMarkSpeakingRef.current = isMarkSpeaking;
+  }, [isMarkSpeaking]);
+
   const pollLevel = useCallback(() => {
     const analyser = analyserRef.current;
     if (analyser) {
@@ -128,19 +144,30 @@ export function useVoice() {
   // ── /ws/voice: real mic streaming + real transcription + interruption ──
   const connectVoiceSocket = useCallback(() => {
     if (!enabledRef.current) return;
-    const wsUrl = serverUrl.replace(/^http/, 'ws') + '/ws/voice';
+    const wsUrl = serverUrl.replace(/^http/, 'ws').replace(/\/$/, '') + '/ws/voice';
     const socket = new WebSocket(wsUrl);
     voiceWsRef.current = socket;
 
     socket.onopen = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression:  true,
+            autoGainControl:   true,
+          },
         });
         if (!enabledRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
         micStreamRef.current = stream;
 
-        const ctx = new AudioContext({ sampleRate: VOICE_SAMPLE_RATE });
+        // ── AudioContext at the native hardware rate ────────────────────────
+        // Do NOT force sampleRate: 16000 here. The browser's AEC (echo
+        // cancellation) requires the AudioContext to run at the hardware's
+        // native rate (typically 44100 or 48000 Hz). Forcing 16kHz bypasses
+        // the AEC pipeline even when echoCancellation: true is requested,
+        // which is why MARK's own voice was being heard as user speech.
+        // The resampleTo16k() call below handles the rate conversion.
+        const ctx = new AudioContext();
         audioCtxRef.current = ctx;
         const source = ctx.createMediaStreamSource(stream);
 
@@ -158,6 +185,19 @@ export function useVoice() {
         processor.onaudioprocess = (e) => {
           if (socket.readyState !== WebSocket.OPEN) return;
           const raw = e.inputBuffer.getChannelData(0);
+
+          // ── Mic gate: suppress echo while MARK is speaking ─────────────
+          // While MARK's audio is playing through the speakers, only forward
+          // mic frames when the user is louder than the barge-in threshold.
+          // This eliminates false VAD triggers from speaker echo without
+          // blocking intentional interruption (which is louder than ambient).
+          if (isMarkSpeakingRef.current) {
+            let sum = 0;
+            for (let i = 0; i < raw.length; i++) sum += raw[i] * raw[i];
+            const rms = Math.sqrt(sum / raw.length);
+            if (rms < BARGE_IN_RMS) return;   // not a real barge-in attempt
+          }
+
           const resampled = resampleTo16k(raw, ctx.sampleRate);
           socket.send(floatTo16BitPCM(resampled));
         };

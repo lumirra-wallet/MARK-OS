@@ -72,14 +72,31 @@ def pcm16_to_float32(raw: bytes) -> np.ndarray:
 def transcribe(audio: np.ndarray, *, partial: bool = False) -> str:
     """Real Faster-Whisper transcription of one accumulated utterance.
     partial=True uses a fast greedy decode for a quick interim transcript
-    while the owner is still talking; the final pass is unconstrained."""
+    while the owner is still talking; the final pass is unconstrained.
+
+    Segments where Whisper itself thinks there is no speech
+    (no_speech_prob > 0.55) are discarded — this filters out background
+    noise and MARK's own echo that slipped through the mic gate.
+    Very short results (< 3 chars) are also rejected as noise artifacts.
+    """
     if audio.size == 0:
         return ""
     model = _get_whisper_model()
     segments, _ = model.transcribe(
         audio, language="en", beam_size=1 if partial else 5, vad_filter=False,
     )
-    return " ".join(seg.text.strip() for seg in segments).strip()
+    texts: list[str] = []
+    for seg in segments:
+        # no_speech_prob is available on all recent faster-whisper versions;
+        # fall back gracefully if it's missing on an older build.
+        if getattr(seg, "no_speech_prob", 0.0) > 0.55:
+            continue   # Whisper itself thinks this is silence/noise
+        t = seg.text.strip()
+        if t:
+            texts.append(t)
+    result = " ".join(texts).strip()
+    # Reject single characters / punctuation — almost always noise
+    return result if len(result) >= 3 else ""
 
 
 class VoiceSession:
@@ -93,7 +110,13 @@ class VoiceSession:
         from silero_vad import VADIterator
         self._vad = VADIterator(
             _get_vad_model(), sampling_rate=SAMPLE_RATE,
-            threshold=0.5, min_silence_duration_ms=500,
+            # Raised from 0.5 → 0.65: requires stronger speech signal before
+            # firing speech_start.  Reduces false positives from ambient audio,
+            # MARK's own voice echo, and background TV/music.
+            threshold=0.65,
+            # Slightly longer silence window (was 500ms) so short pauses mid-
+            # sentence don't prematurely end the utterance.
+            min_silence_duration_ms=650,
         )
         self._pending = np.array([], dtype=np.float32)  # not yet VAD-processed
         self._utterance: list[np.ndarray] = []
