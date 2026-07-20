@@ -74,3 +74,5 @@ vault/*/*.md
 .env.local
 .env.*.local
 /env
+.mark_storage/livekit/
+*.livekit.yaml

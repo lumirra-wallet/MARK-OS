@@ -2,6 +2,6 @@
   "name": "@workspace/mark-api",
   "private": true,
   "scripts": {
-    "dev": "cd ../.. && pip install -q -r requirements.minimal.txt 2>&1 | tail -3 && PYTHONUTF8=1 python -m smartagent.server.watchdog"
+    "dev": "cd ../.. && pip install -q -r requirements.minimal.txt 2>&1 | tail -3 && PYTHONUTF8=1 python -m smartagent.server.mark_supervisor"
   }
 }

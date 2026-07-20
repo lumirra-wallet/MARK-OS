@@ -1367,76 +1367,124 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         connection_manager.disconnect(ws)
 
 
-@router.websocket("/ws/voice")
-async def voice_websocket(ws: WebSocket) -> None:
-    """
-    Real-time voice input: the browser streams raw PCM16 microphone audio
-    as binary frames; this runs it through VoiceSession's real local
-    VAD + Whisper pipeline and sends transcript/interruption events back
-    on the same connection — {"type": "speech_start"}, {"type": "partial",
-    "text": ...}, {"type": "final", "text": ...}.
+# ---------------------------------------------------------------------------
+# LiveKit voice endpoints (M1 + WebSocket proxy for signaling)
+# ---------------------------------------------------------------------------
 
-    Deliberately separate from /ws: this is one owner's live microphone
-    audio, not something every connected dashboard client should receive.
-    speech_start is the interruption signal — the frontend uses it to stop
-    TTS playback the moment the owner starts talking, before any
-    transcription has even happened.
+@router.get("/voice/token")
+async def voice_token(role: str = "browser") -> dict:
+    """Issue a LiveKit JWT for the browser or the MARK agent."""
+    try:
+        import uuid
+        from smartagent.server.livekit_token import (
+            create_browser_token, create_agent_token, livekit_configured,
+        )
+        if not livekit_configured():
+            raise HTTPException(
+                503,
+                "LiveKit not configured — run `python -m smartagent.server.livekit_setup`",
+            )
+        if role == "agent":
+            token = create_agent_token()
+        else:
+            token = create_browser_token(identity=f"browser-{uuid.uuid4().hex[:8]}")
+        return {"token": token, "role": role}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@router.get("/voice/config")
+async def voice_config() -> dict:
+    """Return LiveKit connection config for the browser.
+
+    The browser uses the returned *url* to connect its LiveKit Room.
+    On Replit (and any reverse-proxied deployment), *url* points at the
+    /livekit-rtc WebSocket proxy on this same server so no extra port is
+    needed.  Set LIVEKIT_BROWSER_URL to override with an external LiveKit
+    host.
     """
-    from smartagent.server.voice_pipeline import VoiceSession
+    from smartagent.server.livekit_token import LIVEKIT_ROOM, livekit_configured
+
+    lk_url  = os.environ.get("LIVEKIT_URL", "ws://localhost:7880")
+    # Explicit override wins — useful for LiveKit Cloud or a custom domain.
+    browser_url = os.environ.get("LIVEKIT_BROWSER_URL", "")
+
+    if not browser_url:
+        # Auto-derive: route signaling through this server's own base URL so
+        # no second port needs to be exposed.  Works on Replit and any HTTPS
+        # reverse proxy.
+        api_base = os.environ.get("API_BASE_URL", "").rstrip("/")
+        if api_base:
+            ws_base = api_base.replace("https://", "wss://").replace("http://", "ws://")
+            browser_url = f"{ws_base}/livekit-rtc"
+        else:
+            # Local dev fallback: browser → LiveKit direct (works when both
+            # run on the same machine, i.e. `pnpm dev` on a dev laptop).
+            browser_url = "ws://localhost:7880"
+
+    is_cloud = "livekit.cloud" in lk_url or "livekit.cloud" in browser_url
+    return {
+        "url":       browser_url,
+        "room":      LIVEKIT_ROOM,
+        "mode":      "cloud" if is_cloud else "self-hosted",
+        "available": livekit_configured(),
+    }
+
+
+@router.websocket("/livekit-rtc")
+async def livekit_rtc_proxy(ws: WebSocket) -> None:
+    """Proxy LiveKit WebSocket signaling through MARK's server.
+
+    The browser connects to MARK at /livekit-rtc?access_token=...
+    and this handler forwards the connection to the local LiveKit server
+    on localhost:7880.  This makes LiveKit reachable through MARK's
+    existing port — no extra firewall rules or port exposure needed.
+
+    In self-hosted mode the LiveKit binary runs locally (started by
+    mark_supervisor.py) and never needs to be directly accessible from
+    the internet for signaling — only for WebRTC media (UDP 50000-60000),
+    which the browser attempts via ICE candidates.
+    """
+    import websockets as _wsl
 
     await ws.accept()
-    logger.info("MARK STATE voice-ws  connected")
-    try:
-        session = await asyncio.to_thread(VoiceSession)
-    except Exception as exc:
-        logger.warning("voice_websocket: failed to start VoiceSession: %s", exc)
-        await ws.close(code=1011, reason="voice pipeline unavailable")
-        return
+    lk_port   = int(os.environ.get("LIVEKIT_PORT", "7880"))
+    query_str = str(ws.url.query)
+    upstream  = f"ws://127.0.0.1:{lk_port}/rtc"
+    if query_str:
+        upstream += f"?{query_str}"
 
     try:
-        while True:
-            # Use receive() instead of receive_bytes() so we can handle both
-            # binary audio frames and text control frames on the same socket.
-            raw = await ws.receive()
-
-            if raw.get("bytes"):
-                # ── Binary frame: mic audio PCM16 ───────────────────────────
-                events = await asyncio.to_thread(session.feed, raw["bytes"])
-                for event in events:
-                    if event.get("type") == "speech_start":
-                        # User started talking — stop generation immediately.
-                        speech_runtime.interrupt()
-                        if _current_inference_task is not None and not _current_inference_task.done():
-                            _current_inference_task.cancel()
-                        if _brain is not None:
-                            await _brain.voice_interrupted()
-                    await ws.send_json(event)
-
-            elif raw.get("text"):
-                # ── Text frame: TTS state control ───────────────────────────
-                # The frontend sends {"type":"tts_start"} when MARK begins
-                # speaking and {"type":"tts_end"} when it stops.  We use
-                # this to mute low-energy VAD output (echo suppression) on
-                # the backend without blocking real barge-in interruption.
+        async with _wsl.connect(upstream, max_size=None, ping_interval=None) as lk:
+            async def _fwd_to_lk() -> None:
                 try:
-                    msg = json.loads(raw["text"])
-                    ctrl = msg.get("type", "")
-                    if ctrl == "tts_start":
-                        session.mute()
-                    elif ctrl == "tts_end":
-                        # 350ms holdoff mirrors the frontend; absorbs AEC
-                        # settling time and room reverb before unmuting.
-                        await asyncio.sleep(0.35)
-                        session.unmute()
+                    async for chunk in ws.iter_bytes():
+                        await lk.send(chunk)
                 except Exception:
-                    pass   # ignore malformed control frames
+                    pass
 
+            async def _fwd_to_ws() -> None:
+                try:
+                    async for msg in lk:
+                        if isinstance(msg, bytes):
+                            await ws.send_bytes(msg)
+                        else:
+                            await ws.send_text(msg)
+                except Exception:
+                    pass
+
+            done, pending = await asyncio.wait(
+                [asyncio.create_task(_fwd_to_lk()), asyncio.create_task(_fwd_to_ws())],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in pending:
+                t.cancel()
     except WebSocketDisconnect:
         pass
     except Exception as exc:
-        logger.warning("voice_websocket: %s", exc)
-    finally:
-        logger.info("MARK STATE voice-ws  disconnected")
+        logger.debug("livekit_rtc_proxy: %s", exc)
 
 
 # ---------------------------------------------------------------------------

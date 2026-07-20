@@ -98,6 +98,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _scan_interval = float(_os.environ.get("PREVIEW_SCAN_INTERVAL", "15"))
     preview_manager.start_detection(loop, connection_manager, interval=_scan_interval)
 
+    # Start MARK's LiveKit agent — joins 'mark-presence' room and stays connected.
+    # No-op if LIVEKIT_API_KEY / LIVEKIT_API_SECRET are not configured, or if
+    # the 'livekit' package is not installed.  Safe to remove entirely if you
+    # never want LiveKit.
+    try:
+        from smartagent.server.livekit_agent import livekit_agent as _lk_agent
+        from smartagent.server.speech_runtime import speech_runtime as _sr
+        _sr.attach_livekit(_lk_agent)
+        await _lk_agent.start()
+    except Exception as _lk_exc:
+        logger.warning("LiveKit agent init failed (non-fatal): %s", _lk_exc)
+
     yield
     logger.info("MARK server shutting down")
     preview_manager.stop_detection()

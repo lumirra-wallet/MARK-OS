@@ -51,3 +51,7 @@ structlog
 loguru
 typer
 rich
+
+# LiveKit — self-hosted WebRTC voice transport (M0-M6)
+livekit
+livekit-api

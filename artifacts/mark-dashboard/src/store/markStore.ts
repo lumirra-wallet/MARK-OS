@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { markApi, PermissionInfo, SelfState } from '@/lib/markApi';
-import { SpeechPlayer } from '@/lib/speechPlayer';
+// SpeechPlayer was used for binary-frame PCM audio on /ws.
+// Voice now travels over a LiveKit WebRTC track — no binary frames.
 
 // ── Chat message model ────────────────────────────────────────────────────────
 
@@ -319,10 +320,8 @@ let reconnectAttempts = 0;
 const RECONNECT_BASE_MS = 250;
 const RECONNECT_MAX_MS  = 30_000;  // back off to 30 s max — never gives up
 let liveRecoveryListenersInstalled = false;
-// MARK's real voice player — receives binary PCM16 frames on the same /ws
-// connection (see connectWebSocket's onmessage). Lazily constructed at
-// 24000Hz (Kokoro's native rate — see smartagent/server/tts_engine.py).
-let speechPlayer: SpeechPlayer | null = null;
+// Voice audio is now delivered via a LiveKit WebRTC audio track (use-voice.ts).
+// No module-level speech player is needed on the /ws path any more.
 
 // ── Store ─────────────────────────────────────────────────────────────────────
 
@@ -505,7 +504,9 @@ export const useMarkStore = create<MarkState>((set, get) => {
     memoryActivity:   [],
     knowledgeGrowth:  0,
     stopMarkSpeech: () => {
-      speechPlayer?.stop();
+      // On the LiveKit path, MARK's audio stops naturally when the agent
+      // drains its PCM queue without publishing. Marking isMarkSpeaking=false
+      // here unmutes the mic gate in use-voice.ts (after the 350ms holdoff).
       set({ isMarkSpeaking: false });
     },
 
@@ -623,16 +624,11 @@ export const useMarkStore = create<MarkState>((set, get) => {
         ws.onerror = () => { /* handled by close */ };
 
         ws.onmessage = (event) => {
-          // Binary frame = real synthesized speech audio (PCM16 mono,
-          // 24kHz) from speech_runtime.py — never JSON, routed straight to
-          // the player rather than through the event switch below.
-          if (event.data instanceof ArrayBuffer) {
-            if (!speechPlayer) {
-              speechPlayer = new SpeechPlayer(24000, speaking => set({ isMarkSpeaking: speaking }));
-            }
-            speechPlayer.enqueue(event.data);
-            return;
-          }
+          // Binary frames previously carried raw PCM audio on the WebSocket
+          // path. In the LiveKit transport, audio arrives as a WebRTC track
+          // directly in the browser — no binary frames come over /ws any
+          // more. If any stray binary frame does arrive, drop it silently.
+          if (event.data instanceof ArrayBuffer) return;
           try {
             const data = JSON.parse(event.data);
             if (data.type !== 'event') return;
@@ -701,14 +697,18 @@ export const useMarkStore = create<MarkState>((set, get) => {
                 break;
               }
 
-              // MARK's real voice — SpeechStart/SpeechEnd just bracket the
-              // binary audio frames handled above (isMarkSpeaking itself
-              // reflects the player's actual state, not these events).
-              // SpeechInterrupted is the backend-confirmed stop; the
-              // frontend usually already stopped playback faster, directly
-              // from /ws/voice's own speech_start — see use-voice.ts.
+              // MARK's voice via LiveKit WebRTC track.
+              // SpeechStart/SpeechEnd drive isMarkSpeaking directly —
+              // the echo gate in use-voice.ts reads this to mute the mic
+              // while MARK is speaking.  SpeechInterrupted is the
+              // backend-confirmed stop; the frontend usually stops first
+              // via the LiveKit data channel speech_start event.
               case 'SpeechStart':
+                set({ isMarkSpeaking: true });
+                break;
+
               case 'SpeechEnd':
+                set({ isMarkSpeaking: false });
                 break;
 
               case 'SpeechInterrupted': {
