@@ -2,6 +2,6 @@
   "name": "@workspace/mark-api",
   "private": true,
   "scripts": {
-    "dev": "if [ \"$OS\" = \"Windows_NT\" ]; then RELOAD=\"\"; else RELOAD=\"--reload --reload-dir smartagent\"; fi; cd ../.. && PYTHONUTF8=1 python -m uvicorn smartagent.server.app:app --host 0.0.0.0 --port ${PORT:-18949} $RELOAD"
+    "dev": "cd ../.. && PYTHONUTF8=1 python -m uvicorn smartagent.server.app:app --host 0.0.0.0 --port ${PORT:-18949} --reload --reload-dir smartagent"
   }
 }

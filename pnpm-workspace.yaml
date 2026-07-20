@@ -9,11 +9,6 @@ allowBuilds:
 
 autoInstallPeers: false
 
-# Workspace scripts use POSIX syntax (VAR=val cmd, ${VAR:-default}, cd ../..).
-# Route them through Git for Windows' bash instead of cmd.exe so they still
-# work on Windows without rewriting every script.
-scriptShell: "C:\\Program Files\\Git\\bin\\bash.exe"
-
 catalog:
   '@replit/vite-plugin-cartographer': ^0.5.21
   '@replit/vite-plugin-dev-banner': ^0.1.1

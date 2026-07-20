@@ -151,7 +151,14 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     camera.position.set(0, 0.15, 7.2);
     camera.lookAt(0, 0, 0);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    } catch {
+      // WebGL not available in this environment (e.g. server-side preview).
+      // Render nothing rather than crashing the whole dashboard.
+      return;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
