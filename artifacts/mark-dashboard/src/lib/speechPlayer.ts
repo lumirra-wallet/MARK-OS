@@ -39,6 +39,7 @@ export class SpeechPlayer {
   /** Enqueue one raw PCM16 mono chunk for gapless playback. */
   enqueue(pcm16: ArrayBuffer): void {
     if (pcm16.byteLength === 0) return;
+    if (import.meta.env.DEV) console.debug('[MARK speech] audio chunk received:', pcm16.byteLength, 'bytes');
     const ctx = this.ensureContext();
     if (ctx.state === 'suspended') void ctx.resume();
 
