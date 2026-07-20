@@ -5,16 +5,22 @@ import { useSelfState } from '@/hooks/use-self-state';
 import { NeuralPresence } from './NeuralPresence';
 
 /**
- * PresenceEngine — MARK's neural core.
+ * PresenceEngine — MARK's 3-D neural core.
  *
- * Visual language matches the reference: electric blue/cyan brain mesh with
- * visible cortical fold wireframe, neural-network "antenna" lines radiating
- * outward from the surface into surrounding space with glowing endpoint nodes,
- * a red/orange energy core that fires on thinking/speaking, and a dark
- * blue-black space backdrop with subtle depth fog.
+ * Matches the reference aesthetic:
+ *   • Electric-blue/cyan brain wireframe with visible cortical fold texture
+ *   • Background constellation network (floating nodes + lines, slow drift)
+ *   • Radial deep-blue glow plane behind the brain
+ *   • Red/orange branching lightning core (frontal-lobe energy flash)
+ *   • Two Fresnel glow shells (tight cyan rim + wide atmospheric halo)
+ *   • Dense surface point-cloud, brain-surface synapse nodes + antenna spikes
  *
- * All animated values are driven by real agent signals — mode, confidence,
- * health, mic level, token stream, timeline events. No fake timers.
+ * Glitch fixes vs previous version:
+ *   • No per-frame geometry vertex mutation (was the main glitch source).
+ *     Brain shape is baked once; energy pulse uses Group.scale instead.
+ *   • All THREE.Color / THREE.Vector3 helpers pre-allocated — zero GC
+ *     allocations inside the render loop.
+ *   • computeVertexNormals() removed from the hot path entirely.
  */
 interface PresenceEngineProps {
   className?: string;
@@ -23,78 +29,55 @@ interface PresenceEngineProps {
   isVoiceSpeaking?: boolean;
 }
 
-// Electric blue-cyan, matching the reference image palette
-const BASE_HUE  = 200 / 360;   // cyan-blue
-const ERROR_HUE = 6   / 360;   // red on error
+const BASE_HUE  = 200 / 360;  // electric cyan-blue
+const ERROR_HUE =   6 / 360;  // error red
 const BRAIN_RADIUS = 1.5;
 
 const MODE_ENERGY: Record<string, number> = {
-  idle: 0.18, listening: 0.35, waiting: 0.14, sleeping: 0.06,
-  thinking: 0.65, planning: 0.7, researching: 0.6,
-  executing: 0.9, reflecting: 0.55, learning: 0.6,
-  error: 0.45, recovering: 0.4,
+  idle: 0.18, listening: 0.38, waiting: 0.14, sleeping: 0.05,
+  thinking: 0.65, planning: 0.70, researching: 0.60,
+  executing: 0.90, reflecting: 0.55, learning: 0.60,
+  error: 0.50, recovering: 0.42,
 };
 
-// ── Brain shape ────────────────────────────────────────────────────────────
-// Displaces a unit-sphere normal into the anatomical brain silhouette:
-// gyri/sulci folds, longitudinal fissure, temporal-lobe bulges, cerebellum.
+// ─── Brain shape ────────────────────────────────────────────────────────────
 function shapeBrainPoint(
-  nx: number, ny: number, nz: number,
-  radius: number,
-  out: THREE.Vector3,
+  nx: number, ny: number, nz: number, radius: number, out: THREE.Vector3,
 ): THREE.Vector3 {
+  // Gyri / sulci folds — three octaves of sine noise
   let fold = 0;
-  fold += Math.sin(nx * 4.1 + nz * 3.3) * Math.cos(ny * 3.7) * 0.5;
-  fold += Math.sin(nx * 8.6 - ny * 7.2 + nz * 6.1) * 0.28;
-  fold += Math.sin(nx * 15.0 + ny * 13.0 - nz * 11.0) * 0.13;
+  fold += Math.sin(nx * 4.1 + nz * 3.3) * Math.cos(ny * 3.7) * 0.50;
+  fold += Math.sin(nx * 8.6 - ny * 7.2 + nz * 6.1)           * 0.28;
+  fold += Math.sin(nx * 15  + ny * 13   - nz * 11)            * 0.13;
   const foldMul = 1 + fold * 0.045;
 
-  const topWeight = Math.max(0, Math.min(1, ny + 0.35));
-  const fissure   = Math.exp(-(nx * nx) / 0.012) * topWeight * 0.13;
-  const temporal  = Math.exp(-((Math.abs(nx) - 0.72) ** 2) / 0.032) *
-                    Math.exp(-((ny - 0.02)           ** 2) / 0.09)   * 0.14;
+  // Longitudinal fissure (dorsal groove)
+  const topW   = Math.max(0, Math.min(1, ny + 0.35));
+  const fissure = Math.exp(-(nx * nx) / 0.012) * topW * 0.13;
+
+  // Temporal-lobe bulges
+  const temporal = Math.exp(-((Math.abs(nx) - 0.72) ** 2) / 0.032) *
+                   Math.exp(-((ny - 0.02) ** 2) / 0.09) * 0.14;
 
   const rm = foldMul * (1 - fissure) * (1 + temporal);
   let x = nx * radius * 1.05 * rm;
   let y = ny * radius * 0.92 * rm;
   let z = nz * radius * 1.20 * rm;
 
-  // Cerebellum bulge — makes the silhouette read as a brain from every angle
+  // Cerebellum bulge — makes back-bottom read as a brain from all angles
   const cx = 0, cy = -radius * 0.6, cz = -radius * 0.82;
   const dx = x - cx, dy = y - cy, dz = z - cz;
-  const spread = radius * 0.4;
-  const cb = Math.exp(-(dx*dx + dy*dy + dz*dz) / (2*spread*spread)) * radius * 0.24;
+  const cb = Math.exp(-(dx*dx + dy*dy + dz*dz) / (2 * (radius*0.4)**2)) * radius * 0.24;
   if (cb > 0.0005) {
     const len = Math.sqrt(x*x + y*y + z*z) || 1;
-    x += (x / len) * cb;
-    y += (y / len) * cb * 0.5;
-    z += (z / len) * cb;
+    x += (x / len) * cb; y += (y / len) * cb * 0.5; z += (z / len) * cb;
   }
   return out.set(x, y, z);
 }
 
-// Soft glowing sprite — used for every point/dot so they render as
-// glowing circles rather than Three.js's default hard squares.
-function createDotTexture(r = 255, g = 255, b = 255): THREE.Texture {
-  const sz  = 64;
-  const cv  = document.createElement('canvas');
-  cv.width  = cv.height = sz;
-  const ctx = cv.getContext('2d')!;
-  const gr  = ctx.createRadialGradient(sz/2, sz/2, 0, sz/2, sz/2, sz/2);
-  gr.addColorStop(0,   `rgba(${r},${g},${b},1)`);
-  gr.addColorStop(0.4, `rgba(${r},${g},${b},0.7)`);
-  gr.addColorStop(1,   `rgba(${r},${g},${b},0)`);
-  ctx.fillStyle = gr;
-  ctx.fillRect(0, 0, sz, sz);
-  const tex       = new THREE.CanvasTexture(cv);
-  tex.needsUpdate = true;
-  return tex;
-}
-
-function bakeBrainGeometry(geo: THREE.BufferGeometry, radius: number): Float32Array {
+function bakeBrainGeo(geo: THREE.BufferGeometry, radius: number): void {
   const posAttr = geo.attributes.position;
-  const tmp = new THREE.Vector3();
-  const shaped = new THREE.Vector3();
+  const tmp = new THREE.Vector3(), shaped = new THREE.Vector3();
   for (let i = 0; i < posAttr.count; i++) {
     tmp.fromBufferAttribute(posAttr, i).normalize();
     shapeBrainPoint(tmp.x, tmp.y, tmp.z, radius, shaped);
@@ -102,32 +85,63 @@ function bakeBrainGeometry(geo: THREE.BufferGeometry, radius: number): Float32Ar
   }
   posAttr.needsUpdate = true;
   geo.computeVertexNormals();
-  return (posAttr.array as Float32Array).slice();
 }
 
-// Fresnel rim-glow shader — gives each shell its bright holographic edge
-const FRESNEL_VERTEX = `
-  varying vec3 vNorm;
-  varying vec3 vView;
+// ─── Textures ────────────────────────────────────────────────────────────────
+/** Soft circular glow sprite — no external asset needed */
+function makeDotTex(r = 255, g = 255, b = 255, sz = 64): THREE.Texture {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = sz;
+  const ctx = cv.getContext('2d')!;
+  const gr  = ctx.createRadialGradient(sz/2, sz/2, 0, sz/2, sz/2, sz/2);
+  gr.addColorStop(0,   `rgba(${r},${g},${b},1)`);
+  gr.addColorStop(0.35,`rgba(${r},${g},${b},0.75)`);
+  gr.addColorStop(0.7, `rgba(${r},${g},${b},0.25)`);
+  gr.addColorStop(1,   `rgba(${r},${g},${b},0)`);
+  ctx.fillStyle = gr;
+  ctx.fillRect(0, 0, sz, sz);
+  const t = new THREE.CanvasTexture(cv);
+  t.needsUpdate = true;
+  return t;
+}
+
+/** Large radial-glow billboard placed behind the brain (the "deep blue light") */
+function makeBackgroundGlowTex(): THREE.Texture {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 512;
+  const ctx = cv.getContext('2d')!;
+  const gr  = ctx.createRadialGradient(256, 256, 0, 256, 256, 256);
+  gr.addColorStop(0,    'rgba(0, 60, 160, 0.55)');
+  gr.addColorStop(0.25, 'rgba(0, 30, 100, 0.35)');
+  gr.addColorStop(0.55, 'rgba(0, 10,  50, 0.15)');
+  gr.addColorStop(1,    'rgba(0,  0,   0, 0)');
+  ctx.fillStyle = gr;
+  ctx.fillRect(0, 0, 512, 512);
+  const t = new THREE.CanvasTexture(cv);
+  t.needsUpdate = true;
+  return t;
+}
+
+// ─── Fresnel shader ──────────────────────────────────────────────────────────
+const FRESNEL_VERT = `
+  varying vec3 vN; varying vec3 vV;
   void main() {
-    vNorm = normalize(normalMatrix * normal);
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    vView = normalize(-mv.xyz);
+    vN = normalize(normalMatrix * normal);
+    vec4 mv = modelViewMatrix * vec4(position,1.0);
+    vV = normalize(-mv.xyz);
     gl_Position = projectionMatrix * mv;
   }
 `;
-const FRESNEL_FRAGMENT = `
-  uniform vec3  uColor;
-  uniform float uOpacity;
-  uniform float uPower;
-  varying vec3 vNorm;
-  varying vec3 vView;
+const FRESNEL_FRAG = `
+  uniform vec3 uColor; uniform float uOpacity; uniform float uPower;
+  varying vec3 vN; varying vec3 vV;
   void main() {
-    float f = pow(1.0 - max(dot(normalize(vNorm), normalize(vView)), 0.0), uPower);
+    float f = pow(1.0 - max(dot(normalize(vN),normalize(vV)),0.0), uPower);
     gl_FragColor = vec4(uColor, f * uOpacity);
   }
 `;
 
+// ─── Component ───────────────────────────────────────────────────────────────
 export function PresenceEngine({
   className = '', micLevel = 0, isListening = false, isVoiceSpeaking = false,
 }: PresenceEngineProps) {
@@ -149,15 +163,15 @@ export function PresenceEngine({
     const container = containerRef.current;
     if (!container) return;
 
-    // ── Scene & Camera ──────────────────────────────────────────────────
+    // ── Scene ─────────────────────────────────────────────────────────────
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x04080f);   // deep blue-black space
-    scene.fog        = new THREE.FogExp2(0x04080f, 0.048); // subtle depth
+    scene.background = new THREE.Color(0x030810);
+    scene.fog        = new THREE.FogExp2(0x030810, 0.040);
 
-    const camera = new THREE.PerspectiveCamera(44, 1, 0.1, 100);
-    // Slight 3/4 angle like the reference — camera offset right, elevated
-    camera.position.set(0.8, 0.4, 6.8);
-    camera.lookAt(0, -0.25, 0);
+    // ── Camera: side-on view like the reference ───────────────────────────
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 120);
+    camera.position.set(1.2, 0.45, 7.0);
+    camera.lookAt(0, -0.2, 0);
 
     let renderer!: THREE.WebGLRenderer;
     try {
@@ -167,11 +181,12 @@ export function PresenceEngine({
       return;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = false;
     container.appendChild(renderer.domElement);
 
     const resize = () => {
       const { clientWidth: w, clientHeight: h } = container;
-      if (w === 0 || h === 0) return;
+      if (!w || !h) return;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
@@ -180,558 +195,634 @@ export function PresenceEngine({
     const ro = new ResizeObserver(resize);
     ro.observe(container);
     window.addEventListener('resize', resize);
-    const retryTimers = [50, 200, 500, 1000].map(ms => window.setTimeout(resize, ms));
+    const retryT = [50, 200, 500, 1000].map(ms => window.setTimeout(resize, ms));
 
-    const blueColor = new THREE.Color().setHSL(BASE_HUE, 1, 0.55);
+    // ── Pre-allocate loop helpers (zero GC in hot path) ───────────────────
+    const _c   = new THREE.Color();
+    const _c2  = new THREE.Color();
+    const _v3  = new THREE.Vector3();
 
-    // ── Lights ──────────────────────────────────────────────────────────
-    // Dark blue ambient keeps unlit faces from going pure black
-    const ambientLight = new THREE.AmbientLight(0x0a1830, 1.0);
+    // ── Textures ─────────────────────────────────────────────────────────
+    const dotTex  = makeDotTex(160, 220, 255);  // blue-white glow
+    const bgGlow  = makeBackgroundGlowTex();
 
-    // Main key from front-right (matches reference lighting angle)
-    const keyLight = new THREE.DirectionalLight(0xffffff, 0.7);
-    keyLight.position.set(3, 2.5, 4);
+    // ── Lighting ──────────────────────────────────────────────────────────
+    // Dark blue ambient — prevents unlit faces going black
+    const ambLight = new THREE.AmbientLight(0x061220, 1.2);
 
-    // Cyan rim from left — the strong blue-white edge glow in the reference
-    const cyanRim = new THREE.PointLight(0x00bbff, 2.8, 18, 2);
-    cyanRim.position.set(-3.5, 1.5, 3);
+    // Key from front-right (matches reference)
+    const keyLight = new THREE.DirectionalLight(0xffffff, 0.65);
+    keyLight.position.set(4, 3, 5);
 
-    // Soft teal fill from below
-    const tealFill = new THREE.PointLight(0x007799, 1.2, 14, 2);
-    tealFill.position.set(0, -3, 1);
+    // Strong cyan rim from left — the blue edge glow
+    const rimLight = new THREE.PointLight(0x00bbff, 3.2, 20, 2);
+    rimLight.position.set(-4.0, 1.5, 3.5);
 
-    // RED/ORANGE energy core — the lightning bolt effect in the reference.
-    // Lives inside the brain; intensity driven by energy every frame.
-    const energyCore = new THREE.PointLight(0xff3300, 0.0, 8, 2);
-    energyCore.position.set(0.3, 0.1, 0.4); // frontal lobe region
+    // Soft blue fill from below
+    const fillLight = new THREE.PointLight(0x003399, 1.4, 16, 2);
+    fillLight.position.set(0.5, -4, 1);
 
-    scene.add(ambientLight, keyLight, cyanRim, tealFill, energyCore);
+    // Red/orange energy core light (inside brain, frontal-lobe region)
+    const coreLight = new THREE.PointLight(0xff4400, 0, 7, 2);
+    coreLight.position.set(0.35, 0.12, 0.55);
 
-    // ── Brain group ─────────────────────────────────────────────────────
+    scene.add(ambLight, keyLight, rimLight, fillLight, coreLight);
+
+    // ── Background: large radial glow billboard ───────────────────────────
+    // Sits behind the brain; creates the "deep blue light source" from the ref
+    const bgSpriteMat = new THREE.SpriteMaterial({
+      map: bgGlow, transparent: true, opacity: 0.85,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const bgSprite = new THREE.Sprite(bgSpriteMat);
+    bgSprite.scale.set(32, 22, 1);
+    bgSprite.position.set(0, 0, -5);
+    scene.add(bgSprite);
+
+    // Secondary tighter glow just behind the brain
+    const bgSprite2Mat = new THREE.SpriteMaterial({
+      map: bgGlow, transparent: true, opacity: 0.55,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const bgSprite2 = new THREE.Sprite(bgSprite2Mat);
+    bgSprite2.scale.set(14, 10, 1);
+    bgSprite2.position.set(0.3, 0.1, -2.5);
+    scene.add(bgSprite2);
+
+    // ── Background constellation network ──────────────────────────────────
+    // Floating nodes + connecting lines scattered across the whole scene —
+    // the "neural web" visible throughout the reference image background.
+    const BG_NODE_COUNT = 72;
+    type BgNode = { pos: THREE.Vector3; vel: THREE.Vector3 };
+    const bgNodes: BgNode[] = [];
+    for (let i = 0; i < BG_NODE_COUNT; i++) {
+      // Distribute on a wide ellipsoid skewed toward the edges of the frame
+      const theta = Math.random() * Math.PI * 2;
+      const phi   = Math.acos(2 * Math.random() - 1);
+      const rBase = 4.5 + Math.random() * 7;
+      // Flatten depth (Z) so they read as a 2D background network
+      const rx = rBase * 1.6, ry = rBase * 1.1, rz = rBase * 0.5;
+      const pos = new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta) * rx,
+        Math.cos(phi) * ry,
+        Math.sin(phi) * Math.sin(theta) * rz - 3,
+      );
+      // Very slow drift
+      const vel = new THREE.Vector3(
+        (Math.random() - 0.5) * 0.0006,
+        (Math.random() - 0.5) * 0.0004,
+        0,
+      );
+      bgNodes.push({ pos, vel });
+    }
+
+    // Edges between nearby nodes
+    type BgEdge = { a: number; b: number };
+    const bgEdges: BgEdge[] = [];
+    for (let i = 0; i < BG_NODE_COUNT; i++) {
+      for (let j = i + 1; j < BG_NODE_COUNT; j++) {
+        if (bgNodes[i].pos.distanceTo(bgNodes[j].pos) < 4.8) {
+          bgEdges.push({ a: i, b: j });
+        }
+      }
+    }
+
+    const bgLineGeo = new THREE.BufferGeometry();
+    const bgLinePos = new Float32Array(bgEdges.length * 6);
+    bgEdges.forEach((e, i) => {
+      const a = bgNodes[e.a].pos, b = bgNodes[e.b].pos;
+      bgLinePos.set([a.x,a.y,a.z, b.x,b.y,b.z], i*6);
+    });
+    bgLineGeo.setAttribute('position', new THREE.BufferAttribute(bgLinePos, 3));
+    const bgLineMat = new THREE.LineBasicMaterial({
+      color: 0x0055bb, transparent: true, opacity: 0.28,
+      blending: THREE.AdditiveBlending,
+    });
+    const bgLines = new THREE.LineSegments(bgLineGeo, bgLineMat);
+    scene.add(bgLines);
+
+    // Glowing dots at each background node
+    const bgDotGeo = new THREE.BufferGeometry();
+    const bgDotPos = new Float32Array(BG_NODE_COUNT * 3);
+    bgNodes.forEach((n, i) => {
+      bgDotPos[i*3] = n.pos.x; bgDotPos[i*3+1] = n.pos.y; bgDotPos[i*3+2] = n.pos.z;
+    });
+    bgDotGeo.setAttribute('position', new THREE.BufferAttribute(bgDotPos, 3));
+    const bgDotMat = new THREE.PointsMaterial({
+      color: 0x0088ff, size: 0.14, map: dotTex,
+      transparent: true, opacity: 0.75,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    scene.add(new THREE.Points(bgDotGeo, bgDotMat));
+
+    // ── Brain group ───────────────────────────────────────────────────────
     const brainGroup = new THREE.Group();
     scene.add(brainGroup);
 
-    // ── Animated hull (drives per-frame ripple) ─────────────────────────
-    const coreGeo      = new THREE.IcosahedronGeometry(1, 5);
-    const basePositions = bakeBrainGeometry(coreGeo, BRAIN_RADIUS);
-
+    // ── Hull: baked once, NEVER mutated per frame ─────────────────────────
+    // This eliminates the geometry-glitch from the previous version.
+    const hullGeo = new THREE.IcosahedronGeometry(1, 5);
+    bakeBrainGeo(hullGeo, BRAIN_RADIUS);
     const hullMat = new THREE.MeshPhysicalMaterial({
-      color:              blueColor,
-      transparent:        true,
-      opacity:            0.28,
-      roughness:          0.25,
-      metalness:          0.05,
-      clearcoat:          0.5,
-      clearcoatRoughness: 0.2,
-      emissive:           blueColor,
-      emissiveIntensity:  0.55,
-      side:               THREE.FrontSide,
+      color: new THREE.Color().setHSL(BASE_HUE, 1, 0.50),
+      transparent: true, opacity: 0.22,
+      roughness: 0.20, metalness: 0.0,
+      clearcoat: 0.6, clearcoatRoughness: 0.15,
+      emissive: new THREE.Color().setHSL(BASE_HUE, 1, 0.45),
+      emissiveIntensity: 0.65,
+      side: THREE.FrontSide,
     });
-    brainGroup.add(new THREE.Mesh(coreGeo, hullMat));
+    brainGroup.add(new THREE.Mesh(hullGeo, hullMat));
 
-    // ── Dense surface point-cloud — the "glowing scan" texture ──────────
-    const dotTex          = createDotTexture(120, 210, 255); // blue-white glow
-    const SURFACE_DOTS    = 28000;
-    const dotGeo          = new THREE.BufferGeometry();
-    const dotPos          = new Float32Array(SURFACE_DOTS * 3);
+    // ── Fine wireframe: the dominant visual — cortical fold grid ──────────
+    // High-resolution, baked once. This IS the mesh you see in the reference.
+    const fineGeo = new THREE.IcosahedronGeometry(1, 7);
+    bakeBrainGeo(fineGeo, BRAIN_RADIUS * 1.004);
+    const fineMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color().setHSL(BASE_HUE, 1, 0.62),
+      wireframe: true, transparent: true, opacity: 0.52,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    brainGroup.add(new THREE.Mesh(fineGeo, fineMat));
+
+    // ── Medium wireframe: slightly different scale for depth layering ─────
+    const medGeo = new THREE.IcosahedronGeometry(1, 5);
+    bakeBrainGeo(medGeo, BRAIN_RADIUS * 1.010);
+    const medMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color().setHSL(BASE_HUE, 1, 0.55),
+      wireframe: true, transparent: true, opacity: 0.20,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    brainGroup.add(new THREE.Mesh(medGeo, medMat));
+
+    // ── Dense surface point cloud ─────────────────────────────────────────
+    // Stippled hologram-scan texture sitting just above the hull.
+    const SURFACE_N  = 30000;
+    const surfaceGeo = new THREE.BufferGeometry();
+    const surfacePos = new Float32Array(SURFACE_N * 3);
     {
-      const dir    = new THREE.Vector3();
-      const shaped = new THREE.Vector3();
-      for (let i = 0; i < SURFACE_DOTS; i++) {
-        const y = 1 - (i / (SURFACE_DOTS - 1)) * 2;
-        const r = Math.sqrt(Math.max(0, 1 - y*y));
+      const dir = new THREE.Vector3(), sh = new THREE.Vector3();
+      for (let i = 0; i < SURFACE_N; i++) {
+        const y  = 1 - (i / (SURFACE_N - 1)) * 2;
+        const r  = Math.sqrt(Math.max(0, 1 - y*y));
         const th = Math.PI * (1 + Math.sqrt(5)) * i;
         dir.set(Math.cos(th)*r, y, Math.sin(th)*r);
-        shapeBrainPoint(dir.x, dir.y, dir.z, BRAIN_RADIUS * 1.012, shaped);
-        dotPos[i*3]   = shaped.x;
-        dotPos[i*3+1] = shaped.y;
-        dotPos[i*3+2] = shaped.z;
+        shapeBrainPoint(dir.x, dir.y, dir.z, BRAIN_RADIUS * 1.015, sh);
+        surfacePos[i*3] = sh.x; surfacePos[i*3+1] = sh.y; surfacePos[i*3+2] = sh.z;
       }
     }
-    dotGeo.setAttribute('position', new THREE.BufferAttribute(dotPos, 3));
-    const dotMat = new THREE.PointsMaterial({
-      color:          blueColor,
-      size:           0.028,
-      map:            dotTex,
-      transparent:    true,
-      opacity:        0.92,
-      blending:       THREE.AdditiveBlending,
-      depthWrite:     false,
-      sizeAttenuation: true,
+    surfaceGeo.setAttribute('position', new THREE.BufferAttribute(surfacePos, 3));
+    const surfaceMat = new THREE.PointsMaterial({
+      color: new THREE.Color().setHSL(BASE_HUE, 1, 0.72),
+      size: 0.024, map: dotTex,
+      transparent: true, opacity: 0.90,
+      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
     });
-    const surfaceDots = new THREE.Points(dotGeo, dotMat);
-    brainGroup.add(surfaceDots);
+    brainGroup.add(new THREE.Points(surfaceGeo, surfaceMat));
 
-    // ── Animated low-poly wireframe (ripple-driven, faint) ───────────────
-    const wireMat = new THREE.MeshBasicMaterial({
-      color:       blueColor,
-      wireframe:   true,
-      transparent: true,
-      opacity:     0.14,
-      blending:    THREE.AdditiveBlending,
-      depthWrite:  false,
-    });
-    const wireMesh = new THREE.Mesh(coreGeo, wireMat);
-    wireMesh.scale.setScalar(1.008);
-    brainGroup.add(wireMesh);
-
-    // ── Static high-res wireframe — the dominant visible mesh texture ────
-    // Higher subdivision baked once; the fine grid makes cortical folds
-    // read clearly without any per-frame CPU cost.
-    const fineWireGeo = new THREE.IcosahedronGeometry(1, 6);
-    bakeBrainGeometry(fineWireGeo, BRAIN_RADIUS * 1.006);
-    const fineWireMat = new THREE.MeshBasicMaterial({
-      color:       blueColor,
-      wireframe:   true,
-      transparent: true,
-      opacity:     0.38,          // prominent — this is the mesh in the reference
-      blending:    THREE.AdditiveBlending,
-      depthWrite:  false,
-    });
-    brainGroup.add(new THREE.Mesh(fineWireGeo, fineWireMat));
-
-    // ── Inner Fresnel glow shell (tight rim glow, bright cyan) ───────────
+    // ── Inner Fresnel rim (tight bright cyan edge) ────────────────────────
     const innerGlowGeo = new THREE.IcosahedronGeometry(1, 5);
-    bakeBrainGeometry(innerGlowGeo, BRAIN_RADIUS * 1.08);
+    bakeBrainGeo(innerGlowGeo, BRAIN_RADIUS * 1.06);
     const innerGlowMat = new THREE.ShaderMaterial({
       uniforms: {
         uColor:   { value: new THREE.Color(0x00ddff) },
-        uOpacity: { value: 0.65 },
-        uPower:   { value: 1.8 },
+        uOpacity: { value: 0.70 },
+        uPower:   { value: 1.7  },
       },
-      vertexShader:   FRESNEL_VERTEX,
-      fragmentShader: FRESNEL_FRAGMENT,
-      transparent:    true,
-      blending:       THREE.AdditiveBlending,
-      depthWrite:     false,
-      side:           THREE.FrontSide,
+      vertexShader: FRESNEL_VERT, fragmentShader: FRESNEL_FRAG,
+      transparent: true, blending: THREE.AdditiveBlending,
+      depthWrite: false, side: THREE.FrontSide,
     });
     brainGroup.add(new THREE.Mesh(innerGlowGeo, innerGlowMat));
 
-    // ── Outer Fresnel glow shell (wide atmospheric halo) ─────────────────
-    const outerGlowGeo = new THREE.IcosahedronGeometry(1, 5);
-    bakeBrainGeometry(outerGlowGeo, BRAIN_RADIUS * 1.32);
+    // ── Outer Fresnel halo (wide atmospheric blue glow) ───────────────────
+    const outerGlowGeo = new THREE.IcosahedronGeometry(1, 4);
+    bakeBrainGeo(outerGlowGeo, BRAIN_RADIUS * 1.30);
     const outerGlowMat = new THREE.ShaderMaterial({
       uniforms: {
-        uColor:   { value: new THREE.Color(0x0066cc) },
-        uOpacity: { value: 0.32 },
-        uPower:   { value: 3.2 },
+        uColor:   { value: new THREE.Color(0x0055cc) },
+        uOpacity: { value: 0.35 },
+        uPower:   { value: 3.5  },
       },
-      vertexShader:   FRESNEL_VERTEX,
-      fragmentShader: FRESNEL_FRAGMENT,
-      transparent:    true,
-      blending:       THREE.AdditiveBlending,
-      depthWrite:     false,
-      side:           THREE.FrontSide,
+      vertexShader: FRESNEL_VERT, fragmentShader: FRESNEL_FRAG,
+      transparent: true, blending: THREE.AdditiveBlending,
+      depthWrite: false, side: THREE.FrontSide,
     });
     brainGroup.add(new THREE.Mesh(outerGlowGeo, outerGlowMat));
 
     // ── Brainstem ─────────────────────────────────────────────────────────
     const stemGeo = new THREE.CylinderGeometry(
-      BRAIN_RADIUS * 0.15, BRAIN_RADIUS * 0.22, BRAIN_RADIUS * 0.55, 12,
+      BRAIN_RADIUS * 0.13, BRAIN_RADIUS * 0.21, BRAIN_RADIUS * 0.52, 10,
     );
     const stem = new THREE.Mesh(stemGeo, hullMat);
-    stem.position.set(0, -BRAIN_RADIUS * 1.02, -BRAIN_RADIUS * 0.48);
-    stem.rotation.x = 0.4;
+    stem.position.set(0, -BRAIN_RADIUS * 1.00, -BRAIN_RADIUS * 0.46);
+    stem.rotation.x = 0.42;
     brainGroup.add(stem);
 
-    // ── Red/orange energy core sphere ────────────────────────────────────
-    // A small additive sphere at the frontal lobe — the "lightning bolt"
-    // energy burst seen in the reference image. Scales with energy.
-    const coreSphereGeo = new THREE.SphereGeometry(0.18, 12, 12);
-    const coreSphereMat = new THREE.MeshBasicMaterial({
-      color:       0xff4400,
-      transparent: true,
-      opacity:     0.0,
-      blending:    THREE.AdditiveBlending,
-      depthWrite:  false,
+    // ── Red/orange energy core ────────────────────────────────────────────
+    // The "lightning bolt" seen in the reference: a bright red-orange sphere
+    // + halo + coreLight. Driven by thinking/speaking/error energy.
+    const coreInnerGeo = new THREE.SphereGeometry(0.14, 10, 10);
+    const coreInnerMat = new THREE.MeshBasicMaterial({
+      color: 0xff5500, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
     });
-    const coreSphere = new THREE.Mesh(coreSphereGeo, coreSphereMat);
-    coreSphere.position.set(0.3, 0.1, 0.4);
-    brainGroup.add(coreSphere);
+    const coreInner = new THREE.Mesh(coreInnerGeo, coreInnerMat);
+    coreInner.position.set(0.35, 0.12, 0.55);
+    brainGroup.add(coreInner);
 
-    // Softer outer orange halo around the core
-    const coreHaloGeo = new THREE.SphereGeometry(0.42, 12, 12);
+    const coreHaloGeo = new THREE.SphereGeometry(0.38, 10, 10);
     const coreHaloMat = new THREE.MeshBasicMaterial({
-      color:       0xff2200,
-      transparent: true,
-      opacity:     0.0,
-      blending:    THREE.AdditiveBlending,
-      depthWrite:  false,
+      color: 0xff2200, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
     });
-    brainGroup.add(new THREE.Mesh(coreHaloGeo, coreHaloMat));
-    coreSphere.userData.haloMat = coreHaloMat;
+    const coreHalo = new THREE.Mesh(coreHaloGeo, coreHaloMat);
+    coreHalo.position.copy(coreInner.position);
+    brainGroup.add(coreHalo);
 
-    // ── Synapse surface network ───────────────────────────────────────────
-    // Nodes distributed over the brain surface; lines connect nearest
-    // neighbours. Brightness = ambient energy + real event fire pulse.
-    const NODE_COUNT = 90;
-    const nodePositions: THREE.Vector3[] = [];
+    // Lightning branches radiating from the core
+    // 8 short line-pairs that flicker on/off to simulate branching electricity
+    const LIGHTNING_COUNT = 8;
+    const lightningMats: THREE.LineBasicMaterial[] = [];
+    const lightningMeshes: THREE.LineSegments[] = [];
+    for (let k = 0; k < LIGHTNING_COUNT; k++) {
+      const geo = new THREE.BufferGeometry();
+      // Each "bolt" is 3 segments (root → mid → tip), slightly randomised
+      const rng = (s: number) => ((Math.sin(s * 127.1 + 311.7) * 43758.5) % 1 + 1) % 1;
+      const ox = coreInner.position.x, oy = coreInner.position.y, oz = coreInner.position.z;
+      const angle = (k / LIGHTNING_COUNT) * Math.PI * 2;
+      const dx = Math.cos(angle) * 0.55 + (rng(k)   - 0.5) * 0.25;
+      const dy = Math.sin(angle) * 0.55 + (rng(k+1) - 0.5) * 0.25;
+      const dz = (rng(k+2) - 0.5) * 0.35;
+      // 3 segments: center → mid-jitter → tip-jitter
+      const verts = new Float32Array([
+        ox, oy, oz,
+        ox + dx*0.45 + (rng(k+3)-0.5)*0.15, oy + dy*0.45 + (rng(k+4)-0.5)*0.15, oz + dz*0.5,
+        ox + dx*0.45 + (rng(k+3)-0.5)*0.15, oy + dy*0.45 + (rng(k+4)-0.5)*0.15, oz + dz*0.5,
+        ox + dx      + (rng(k+5)-0.5)*0.20, oy + dy      + (rng(k+6)-0.5)*0.20, oz + dz,
+      ]);
+      geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+      const mat = new THREE.LineBasicMaterial({
+        color: 0xff7700, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending,
+      });
+      const mesh = new THREE.LineSegments(geo, mat);
+      brainGroup.add(mesh);
+      lightningMats.push(mat);
+      lightningMeshes.push(mesh);
+    }
+
+    // ── Synapse surface nodes ─────────────────────────────────────────────
+    const NODE_N = 90;
+    const nodePos3: THREE.Vector3[] = [];
     {
       const td = new THREE.Vector3(), sv = new THREE.Vector3();
-      for (let i = 0; i < NODE_COUNT; i++) {
-        const y  = 1 - (i / (NODE_COUNT - 1)) * 2;
-        const r  = Math.sqrt(Math.max(0, 1 - y*y));
-        const th = Math.PI * (1 + Math.sqrt(5)) * i;
+      for (let i = 0; i < NODE_N; i++) {
+        const y = 1 - (i/(NODE_N-1))*2, r = Math.sqrt(Math.max(0,1-y*y));
+        const th = Math.PI*(1+Math.sqrt(5))*i;
         td.set(Math.cos(th)*r, y, Math.sin(th)*r).normalize();
-        shapeBrainPoint(td.x, td.y, td.z, BRAIN_RADIUS * 1.04, sv);
-        nodePositions.push(sv.clone());
+        shapeBrainPoint(td.x,td.y,td.z, BRAIN_RADIUS*1.04, sv);
+        nodePos3.push(sv.clone());
       }
     }
-    type Synapse = { a: THREE.Vector3; b: THREE.Vector3; fire: number };
-    const synapses: Synapse[] = [];
-    for (let i = 0; i < NODE_COUNT; i++) {
-      const sorted = [...Array(NODE_COUNT).keys()]
-        .filter(j => j !== i)
-        .sort((a, b) => nodePositions[i].distanceTo(nodePositions[a]) -
-                        nodePositions[i].distanceTo(nodePositions[b]));
-      for (const j of sorted.slice(0, 2)) {
-        if (i < j) synapses.push({ a: nodePositions[i], b: nodePositions[j], fire: 0 });
+    type Syn = { a: THREE.Vector3; b: THREE.Vector3; fire: number };
+    const synapses: Syn[] = [];
+    for (let i = 0; i < NODE_N; i++) {
+      const sorted = [...Array(NODE_N).keys()].filter(j=>j!==i)
+        .sort((a,b) => nodePos3[i].distanceTo(nodePos3[a]) - nodePos3[i].distanceTo(nodePos3[b]));
+      for (const j of sorted.slice(0,2)) {
+        if (i < j) synapses.push({ a: nodePos3[i], b: nodePos3[j], fire: 0 });
       }
     }
-    const synapseGeo = new THREE.BufferGeometry();
-    const synapsePos = new Float32Array(synapses.length * 6);
-    synapses.forEach((s, i) => synapsePos.set(
-      [s.a.x, s.a.y, s.a.z, s.b.x, s.b.y, s.b.z], i * 6,
-    ));
-    synapseGeo.setAttribute('position', new THREE.BufferAttribute(synapsePos, 3));
-    const synapseColors = new Float32Array(synapses.length * 6);
-    synapseGeo.setAttribute('color', new THREE.BufferAttribute(synapseColors, 3));
-    const synapseMat = new THREE.LineBasicMaterial({
-      vertexColors: true, transparent: true, opacity: 0.7,
+    const synGeo = new THREE.BufferGeometry();
+    const synPos = new Float32Array(synapses.length * 6);
+    synapses.forEach((s,i) => synPos.set([s.a.x,s.a.y,s.a.z,s.b.x,s.b.y,s.b.z],i*6));
+    synGeo.setAttribute('position', new THREE.BufferAttribute(synPos, 3));
+    const synColors = new Float32Array(synapses.length * 6);
+    synGeo.setAttribute('color', new THREE.BufferAttribute(synColors, 3));
+    const synMat = new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.70,
       blending: THREE.AdditiveBlending,
     });
-    const synapseLines = new THREE.LineSegments(synapseGeo, synapseMat);
-    scene.add(synapseLines);
+    const synLines = new THREE.LineSegments(synGeo, synMat);
+    scene.add(synLines);
 
-    // ── Glowing node dots on the brain surface ───────────────────────────
+    // Glowing node dots at each synapse position
     const nodeDotGeo = new THREE.BufferGeometry();
-    const nodeDotPos = new Float32Array(NODE_COUNT * 3);
-    nodePositions.forEach((p, i) => {
-      nodeDotPos[i*3] = p.x; nodeDotPos[i*3+1] = p.y; nodeDotPos[i*3+2] = p.z;
-    });
+    const nodeDotPos = new Float32Array(NODE_N * 3);
+    nodePos3.forEach((p,i) => { nodeDotPos[i*3]=p.x; nodeDotPos[i*3+1]=p.y; nodeDotPos[i*3+2]=p.z; });
     nodeDotGeo.setAttribute('position', new THREE.BufferAttribute(nodeDotPos, 3));
     const nodeDotMat = new THREE.PointsMaterial({
-      color: 0x44ddff, size: 0.065, map: dotTex,
+      color: 0x44ddff, size: 0.058, map: dotTex,
       transparent: true, opacity: 0.95,
       blending: THREE.AdditiveBlending, depthWrite: false,
     });
     const nodeDots = new THREE.Points(nodeDotGeo, nodeDotMat);
     scene.add(nodeDots);
 
-    // ── Neural antenna network ─────────────────────────────────────────────
-    // This is the defining feature of the reference image: long lines
-    // radiating FROM the brain surface outward into surrounding space, with
-    // glowing dots at the tips, connected to nearby antenna tips.
-    // Creates the "connected neural web" / constellation look.
-    const ANTENNA_COUNT = 55;
-    type Antenna = {
-      surface: THREE.Vector3;   // point on brain surface
-      tip: THREE.Vector3;       // endpoint in space
-      fire: number;
-    };
-    const antennas: Antenna[] = [];
+    // ── Antenna spikes: lines radiating from surface outward into space ───
+    const ANT_N = 55;
+    type Ant = { surface: THREE.Vector3; tip: THREE.Vector3; fire: number };
+    const ants: Ant[] = [];
     {
       const td = new THREE.Vector3(), sv = new THREE.Vector3();
-      for (let i = 0; i < ANTENNA_COUNT; i++) {
-        const y  = 1 - (i / (ANTENNA_COUNT - 1)) * 2;
-        const r  = Math.sqrt(Math.max(0, 1 - y*y));
-        const th = Math.PI * (1 + Math.sqrt(5)) * i * 1.618;
+      for (let i = 0; i < ANT_N; i++) {
+        const y = 1-(i/(ANT_N-1))*2, r = Math.sqrt(Math.max(0,1-y*y));
+        const th = Math.PI*(1+Math.sqrt(5))*i*1.618;
         td.set(Math.cos(th)*r, y, Math.sin(th)*r).normalize();
-        shapeBrainPoint(td.x, td.y, td.z, BRAIN_RADIUS * 1.02, sv);
-
-        // Extend outward along the surface normal — varying lengths
-        const extLen = 1.2 + ((i * 7919) % 100) / 100 * 1.8; // 1.2 – 3.0
-        const dir    = td.clone().normalize();
-        const tip    = sv.clone().addScaledVector(dir, extLen);
-        antennas.push({ surface: sv.clone(), tip, fire: 0 });
+        shapeBrainPoint(td.x,td.y,td.z, BRAIN_RADIUS*1.02, sv);
+        const ext = 1.1 + ((i*7919)%100)/100*2.0;
+        const tip = sv.clone().addScaledVector(td, ext);
+        ants.push({ surface: sv.clone(), tip, fire: 0 });
       }
     }
-
-    // Lines: surface → tip (the "spike" lines in the reference)
-    const antLineGeo = new THREE.BufferGeometry();
-    const antLinePos = new Float32Array(ANTENNA_COUNT * 6);
-    antennas.forEach((a, i) => {
-      antLinePos.set([a.surface.x, a.surface.y, a.surface.z,
-                      a.tip.x,     a.tip.y,     a.tip.z], i * 6);
-    });
-    antLineGeo.setAttribute('position', new THREE.BufferAttribute(antLinePos, 3));
-    const antLineColors = new Float32Array(ANTENNA_COUNT * 6);
-    antLineGeo.setAttribute('color', new THREE.BufferAttribute(antLineColors, 3));
-    const antLineMat = new THREE.LineBasicMaterial({
-      vertexColors: true, transparent: true, opacity: 0.75,
+    const antGeo = new THREE.BufferGeometry();
+    const antPos = new Float32Array(ANT_N * 6);
+    ants.forEach((a,i) => antPos.set([a.surface.x,a.surface.y,a.surface.z,a.tip.x,a.tip.y,a.tip.z],i*6));
+    antGeo.setAttribute('position', new THREE.BufferAttribute(antPos, 3));
+    const antColors = new Float32Array(ANT_N * 6);
+    antGeo.setAttribute('color', new THREE.BufferAttribute(antColors, 3));
+    const antMat = new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.80,
       blending: THREE.AdditiveBlending,
     });
-    const antennaLines = new THREE.LineSegments(antLineGeo, antLineMat);
-    scene.add(antennaLines);
+    const antLines = new THREE.LineSegments(antGeo, antMat);
+    scene.add(antLines);
 
-    // Cross-connections between nearby antenna tips (the "web" in the reference)
-    type WebEdge = { a: THREE.Vector3; b: THREE.Vector3; fire: number };
-    const webEdges: WebEdge[] = [];
-    for (let i = 0; i < ANTENNA_COUNT; i++) {
-      const sorted = [...Array(ANTENNA_COUNT).keys()]
-        .filter(j => j !== i)
-        .sort((a, b) => antennas[i].tip.distanceTo(antennas[a].tip) -
-                        antennas[i].tip.distanceTo(antennas[b].tip));
-      for (const j of sorted.slice(0, 2)) {
-        if (i < j && antennas[i].tip.distanceTo(antennas[j].tip) < 2.6) {
-          webEdges.push({ a: antennas[i].tip, b: antennas[j].tip, fire: 0 });
-        }
+    // Glowing dots at antenna tips
+    const tipDotGeo = new THREE.BufferGeometry();
+    const tipDotPos = new Float32Array(ANT_N * 3);
+    ants.forEach((a,i) => { tipDotPos[i*3]=a.tip.x; tipDotPos[i*3+1]=a.tip.y; tipDotPos[i*3+2]=a.tip.z; });
+    tipDotGeo.setAttribute('position', new THREE.BufferAttribute(tipDotPos, 3));
+    const tipDotMat = new THREE.PointsMaterial({
+      color: 0x88eeff, size: 0.082, map: dotTex,
+      transparent: true, opacity: 0.92,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const tipDots = new THREE.Points(tipDotGeo, tipDotMat);
+    scene.add(tipDots);
+
+    // Web connections between nearby antenna tips
+    type Web = { a: THREE.Vector3; b: THREE.Vector3; fire: number };
+    const webs: Web[] = [];
+    for (let i = 0; i < ANT_N; i++) {
+      const sorted = [...Array(ANT_N).keys()].filter(j=>j!==i)
+        .sort((a,b) => ants[i].tip.distanceTo(ants[a].tip) - ants[i].tip.distanceTo(ants[b].tip));
+      for (const j of sorted.slice(0,2)) {
+        if (i < j && ants[i].tip.distanceTo(ants[j].tip) < 2.8)
+          webs.push({ a: ants[i].tip, b: ants[j].tip, fire: 0 });
       }
     }
     const webGeo = new THREE.BufferGeometry();
-    const webPos = new Float32Array(webEdges.length * 6);
-    webEdges.forEach((e, i) => {
-      webPos.set([e.a.x, e.a.y, e.a.z, e.b.x, e.b.y, e.b.z], i * 6);
-    });
+    const webPos = new Float32Array(webs.length * 6);
+    webs.forEach((w,i) => webPos.set([w.a.x,w.a.y,w.a.z,w.b.x,w.b.y,w.b.z],i*6));
     webGeo.setAttribute('position', new THREE.BufferAttribute(webPos, 3));
-    const webColors = new Float32Array(webEdges.length * 6);
+    const webColors = new Float32Array(webs.length * 6);
     webGeo.setAttribute('color', new THREE.BufferAttribute(webColors, 3));
     const webMat = new THREE.LineBasicMaterial({
-      vertexColors: true, transparent: true, opacity: 0.55,
+      vertexColors: true, transparent: true, opacity: 0.50,
       blending: THREE.AdditiveBlending,
     });
     const webLines = new THREE.LineSegments(webGeo, webMat);
     scene.add(webLines);
 
-    // Glowing dot at each antenna tip
-    const antennaTipGeo = new THREE.BufferGeometry();
-    const antennaTipPos = new Float32Array(ANTENNA_COUNT * 3);
-    antennas.forEach((a, i) => {
-      antennaTipPos[i*3] = a.tip.x; antennaTipPos[i*3+1] = a.tip.y; antennaTipPos[i*3+2] = a.tip.z;
-    });
-    antennaTipGeo.setAttribute('position', new THREE.BufferAttribute(antennaTipPos, 3));
-    const antennaTipMat = new THREE.PointsMaterial({
-      color: 0x88eeff, size: 0.09, map: dotTex,
-      transparent: true, opacity: 0.95,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-    });
-    const antennaTips = new THREE.Points(antennaTipGeo, antennaTipMat);
-    scene.add(antennaTips);
-
     // ── Ambient particle halo ─────────────────────────────────────────────
-    const PARTICLE_COUNT = 500;
-    const particleGeo   = new THREE.BufferGeometry();
-    const particlePos   = new Float32Array(PARTICLE_COUNT * 3);
-    type PAngle = { theta: number; phi: number; baseR: number; speed: number; boost: number };
-    const particleAngles: PAngle[] = [];
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi   = Math.acos(2 * Math.random() - 1);
-      const baseR = 2.6 + Math.random() * 1.8;
-      particleAngles.push({
-        theta, phi, baseR,
-        speed: (Math.random() < 0.5 ? -1 : 1) * (0.04 + Math.random() * 0.18),
+    const PART_N = 520;
+    const partGeo = new THREE.BufferGeometry();
+    const partPos = new Float32Array(PART_N * 3);
+    type PA = { theta: number; phi: number; baseR: number; speed: number; boost: number };
+    const partAngles: PA[] = [];
+    for (let i = 0; i < PART_N; i++) {
+      partAngles.push({
+        theta: Math.random()*Math.PI*2,
+        phi:   Math.acos(2*Math.random()-1),
+        baseR: 2.7 + Math.random()*1.9,
+        speed: (Math.random()<0.5?-1:1)*(0.04+Math.random()*0.16),
         boost: 0,
       });
     }
-    particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
-    const particleMat = new THREE.PointsMaterial({
-      color:          new THREE.Color().setHSL(BASE_HUE, 1, 0.72),
-      size:           0.048,
-      map:            dotTex,
-      transparent:    true,
-      opacity:        0.80,
-      blending:       THREE.AdditiveBlending,
-      depthWrite:     false,
-      sizeAttenuation: true,
+    partGeo.setAttribute('position', new THREE.BufferAttribute(partPos, 3));
+    const partMat = new THREE.PointsMaterial({
+      color: new THREE.Color().setHSL(BASE_HUE, 1, 0.70),
+      size: 0.046, map: dotTex,
+      transparent: true, opacity: 0.78,
+      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
     });
-    const particles = new THREE.Points(particleGeo, particleMat);
+    const particles = new THREE.Points(partGeo, partMat);
     scene.add(particles);
 
-    // ── Animation loop ────────────────────────────────────────────────────
+    // ── Animation ─────────────────────────────────────────────────────────
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    let energy = 0.25;
-    let hue    = BASE_HUE;
-    let frame  = 0;
+    let energy  = 0.22;
+    let hue     = BASE_HUE;
+    let coreEnergy = 0;
+    let frame   = 0;
     const clock = new THREE.Clock();
 
     renderer.setAnimationLoop(() => {
       frame++;
-      const { selfState, isTextSpeaking, tokenTimestamps, micLevel, isListening, isVoiceSpeaking } =
-        stateRef.current;
       const t = clock.getElapsedTime();
+      const {
+        selfState, isTextSpeaking, tokenTimestamps,
+        micLevel, isListening, isVoiceSpeaking,
+      } = stateRef.current;
 
-      // ── Real signals → energy target ──────────────────────────────────
+      // ── Real-signal energy ────────────────────────────────────────────
       const mode       = selfState?.mode ?? 'idle';
-      const modeEnergy = MODE_ENERGY[mode] ?? 0.2;
+      const modeE      = MODE_ENERGY[mode] ?? 0.2;
       const confidence = selfState?.confidence ?? 0.5;
-      const health     = selfState?.health     ?? 1;
-      const isErrorMode = mode === 'error' || mode === 'recovering';
+      const health     = selfState?.health     ?? 1.0;
+      const isError    = mode === 'error' || mode === 'recovering';
+      const isThinking = modeE > 0.55;
 
-      const now          = Date.now();
-      const recentTokens = tokenTimestamps.filter((ts: number) => now - ts < 500).length;
-      const streamBurst  = isTextSpeaking ? Math.min(1, 0.4 + recentTokens * 0.05) : 0;
-      const speakBurst   = Math.max(streamBurst, isVoiceSpeaking ? 0.75 : 0);
-      const listenBurst  = isListening ? Math.min(1, 0.28 + micLevel * 0.9) : 0;
+      const now    = Date.now();
+      const recent = tokenTimestamps.filter((ts: number) => now - ts < 500).length;
+      const sBurst = isTextSpeaking ? Math.min(1, 0.4 + recent * 0.05) : 0;
+      const speak  = Math.max(sBurst, isVoiceSpeaking ? 0.75 : 0);
+      const listen = isListening ? Math.min(1, 0.28 + micLevel * 0.9) : 0;
 
-      const targetEnergy = Math.max(modeEnergy, speakBurst, listenBurst) * (0.5 + confidence * 0.5);
-      const targetHue    = isErrorMode ? ERROR_HUE : BASE_HUE;
-      energy += (targetEnergy - energy) * (reduceMotion ? 0.02 : 0.06);
-      hue    += (targetHue    - hue)    * 0.05;
+      const targetE = Math.max(modeE, speak, listen) * (0.5 + confidence * 0.5);
+      const targetH = isError ? ERROR_HUE : BASE_HUE;
+      energy += (targetE - energy) * (reduceMotion ? 0.02 : 0.055);
+      hue    += (targetH - hue)    * 0.05;
 
-      const jitterAmt = health < 0.5 ? (1 - health) * 0.08 : 0.006;
-      const spin      = reduceMotion ? 0 : 0.05 + energy * 0.10;
+      // Core energy: spikes on speaking/thinking/error, pulses with time
+      const targetCore = isError   ? 0.95 :
+                         speak > 0.3 ? 0.78 + Math.sin(t*7)*0.18 :
+                         isThinking  ? 0.55 + Math.sin(t*4.5)*0.22 :
+                         energy * 0.30;
+      coreEnergy += (targetCore - coreEnergy) * 0.08;
 
-      // ── Hull ripple (on top of baked brain shape) ──────────────────────
-      const posAttr = coreGeo.attributes.position;
-      for (let i = 0; i < posAttr.count; i++) {
-        const ix = i * 3;
-        const bx = basePositions[ix], by = basePositions[ix+1], bz = basePositions[ix+2];
-        const n  = Math.sin(bx * 3.0 + t * (0.5 + energy)) *
-                   Math.cos(by * 2.6 + t * 0.35) *
-                   Math.sin(bz * 3.2 - t * 0.45);
-        const mul = 1 + n * (0.045 + energy * 0.10) + (Math.random() - 0.5) * jitterAmt;
-        posAttr.setXYZ(i, bx * mul, by * mul, bz * mul);
+      const jitter = health < 0.5 ? (1 - health) * 0.006 : 0;
+
+      // ── Color (pre-alloc, no GC) ──────────────────────────────────────
+      _c.setHSL(hue, 1, 0.52 + energy * 0.13);
+
+      // ── Hull (no vertex mutation — just material) ─────────────────────
+      hullMat.color.copy(_c);
+      hullMat.emissive.copy(_c);
+      hullMat.emissiveIntensity = 0.50 + energy * 0.50;
+      hullMat.opacity           = 0.14 + energy * 0.14;
+
+      // ── Wireframes ───────────────────────────────────────────────────
+      fineMat.color.copy(_c);
+      fineMat.opacity = 0.38 + energy * 0.22;   // stays dominant & visible
+      medMat.color.copy(_c);
+      medMat.opacity  = 0.12 + energy * 0.10;
+
+      // ── Surface dots ─────────────────────────────────────────────────
+      surfaceMat.color.copy(_c);
+      surfaceMat.opacity = 0.72 + energy * 0.24;
+
+      // ── Fresnel shells ───────────────────────────────────────────────
+      innerGlowMat.uniforms.uColor.value.setHSL(hue, 1, 0.74);
+      innerGlowMat.uniforms.uOpacity.value = 0.55 + energy * 0.35;
+      outerGlowMat.uniforms.uColor.value.setHSL(hue, 0.9, 0.52);
+      outerGlowMat.uniforms.uOpacity.value = 0.20 + energy * 0.25;
+
+      // ── Lights ───────────────────────────────────────────────────────
+      rimLight.color.setHSL(hue, 1, 0.65);
+      rimLight.intensity  = 2.5 + energy * 1.6;
+      fillLight.intensity = 1.0 + energy * 0.6;
+
+      // ── Energy core ──────────────────────────────────────────────────
+      coreLight.intensity     = coreEnergy * 4.5;
+      coreInnerMat.opacity    = coreEnergy * 0.92;
+      coreHaloMat.opacity     = coreEnergy * 0.35;
+      // White-hot at max, deep orange at idle
+      const coreL = 0.58 + coreEnergy * 0.32;
+      coreInnerMat.color.setHSL(0.05, 1, coreL);
+      coreHaloMat.color.setHSL(0.04, 1, 0.45 + coreEnergy*0.2);
+      coreLight.color.setHSL(0.05, 1, coreL);
+
+      // Lightning bolt flicker
+      for (let k = 0; k < LIGHTNING_COUNT; k++) {
+        // Each bolt has its own flicker frequency so they don't all flash together
+        const flicker = Math.sin(t * (4.0 + k * 0.7) + k * 1.3) * 0.5 + 0.5;
+        const boltAlpha = coreEnergy * flicker * 0.85;
+        lightningMats[k].opacity = boltAlpha;
+        // Inner bolts white-hot, outer bolts orange
+        lightningMats[k].color.setRGB(1, 0.3 + flicker*0.5, flicker*0.1);
       }
-      posAttr.needsUpdate = true;
-      coreGeo.computeVertexNormals();
 
-      // ── Color updates ──────────────────────────────────────────────────
-      const color = new THREE.Color().setHSL(hue, 1, 0.52 + energy * 0.14);
-      hullMat.color.copy(color);
-      hullMat.emissive.copy(color);
-      hullMat.emissiveIntensity = 0.4 + energy * 0.45;
-      hullMat.opacity           = 0.18 + energy * 0.12;
-      wireMat.color.copy(color);
-      wireMat.opacity = 0.08 + energy * 0.06;
-      fineWireMat.color.copy(color);
-      fineWireMat.opacity = 0.28 + energy * 0.18;  // stays prominent
-      dotMat.color.copy(color);
-      dotMat.opacity = 0.75 + energy * 0.22;
+      // ── Brain group rotation — slow orbit, slight energy-driven bob ───
+      const rotSpeed = (reduceMotion ? 0.0008 : 0.0030) + energy * 0.0014;
+      brainGroup.rotation.y += rotSpeed;
+      brainGroup.rotation.x  = Math.sin(t * 0.13) * 0.05 + jitter * (Math.random()-0.5);
+      brainGroup.position.y  = Math.sin(t * 0.37) * 0.05;
+      // Subtle scale pulse instead of vertex mutation — smooth & cheap
+      const scalePulse = 1 + Math.sin(t * 1.2) * 0.005 * energy;
+      brainGroup.scale.setScalar(scalePulse);
 
-      innerGlowMat.uniforms.uColor.value.setHSL(hue, 1, 0.72);
-      innerGlowMat.uniforms.uOpacity.value = 0.50 + energy * 0.30;
-      outerGlowMat.uniforms.uColor.value.setHSL(hue, 0.9, 0.50);
-      outerGlowMat.uniforms.uOpacity.value = 0.18 + energy * 0.22;
-
-      cyanRim.color.setHSL(hue, 1, 0.65);
-      cyanRim.intensity = 2.2 + energy * 1.4;
-      tealFill.intensity = 0.8 + energy * 0.5;
-      particleMat.color.copy(color);
-
-      // ── Red/orange energy core — driven by thinking/speaking/error ────
-      // This is the "lightning bolt" / energy flash in the reference.
-      const isSpeaking  = speakBurst > 0.3;
-      const isThinking  = modeEnergy > 0.5;
-      const coreTarget  = isErrorMode   ? 0.95 :
-                          isSpeaking    ? 0.80 + Math.sin(t * 8) * 0.15 :
-                          isThinking    ? 0.60 + Math.sin(t * 5) * 0.20 :
-                          energy * 0.35;
-      energyCore.intensity    = coreTarget * 3.5;
-      coreSphereMat.opacity   = coreTarget * 0.88;
-      coreHaloMat.opacity     = coreTarget * 0.30;
-      // Color shifts: normal = orange-red, error = white-hot
-      const coreHue = isErrorMode ? 0.05 : 0.04;
-      energyCore.color.setHSL(coreHue, 1, 0.55 + coreTarget * 0.25);
-      coreSphereMat.color.setHSL(coreHue, 1, 0.6 + coreTarget * 0.3);
-      coreHaloMat.color.setHSL(coreHue, 1, 0.5);
-
-      // ── Brain rotation + bob ──────────────────────────────────────────
-      brainGroup.rotation.y += (reduceMotion ? 0.0010 : 0.0035) + energy * 0.0018;
-      brainGroup.rotation.x  = Math.sin(t * 0.14) * 0.055;
-      brainGroup.position.y  = Math.sin(t * 0.38) * 0.055;
-      surfaceDots.rotation.y += reduceMotion ? 0 : 0.0005;
-
-      // Antenna/web/tip/node layers follow brain rotation
-      const ry = brainGroup.rotation.y;
-      const rx = brainGroup.rotation.x;
+      // Mirror rotation to all satellite layers
+      const ry = brainGroup.rotation.y, rx = brainGroup.rotation.x;
       const py = brainGroup.position.y;
-      synapseLines.rotation.y  = ry; synapseLines.rotation.x  = rx; synapseLines.position.y  = py;
-      nodeDots.rotation.y      = ry; nodeDots.rotation.x      = rx; nodeDots.position.y      = py;
-      antennaLines.rotation.y  = ry; antennaLines.rotation.x  = rx; antennaLines.position.y  = py;
-      webLines.rotation.y      = ry; webLines.rotation.x      = rx; webLines.position.y      = py;
-      antennaTips.rotation.y   = ry; antennaTips.rotation.x   = rx; antennaTips.position.y   = py;
+      [synLines, nodeDots, antLines, tipDots, webLines].forEach(obj => {
+        obj.rotation.y = ry; obj.rotation.x = rx; obj.position.y = py;
+      });
 
-      particles.rotation.y    += spin * 0.0026;
-      particles.rotation.x     = Math.sin(t * 0.10) * 0.09;
+      // Particles orbit
+      particles.rotation.y += (reduceMotion ? 0 : 0.0022) + energy * 0.0010;
+      particles.rotation.x  = Math.sin(t * 0.09) * 0.08;
 
-      // ── Timeline event → synapse + antenna fire ───────────────────────
-      const currentTimeline = timelineRef.current;
-      for (let i = 0; i < Math.min(currentTimeline.length, 6); i++) {
-        const ev = currentTimeline[i];
+      // Background constellation: very slow drift
+      if (!reduceMotion) {
+        const bgPosArr = bgLineGeo.attributes.position.array as Float32Array;
+        const bgDotArr = bgDotGeo.attributes.position.array as Float32Array;
+        bgNodes.forEach((n, ni) => {
+          n.pos.addScaledVector(n.vel, 1);
+          // Soft boundary bounce
+          if (Math.abs(n.pos.x) > 14) n.vel.x *= -1;
+          if (Math.abs(n.pos.y) > 9)  n.vel.y *= -1;
+          bgDotArr[ni*3] = n.pos.x; bgDotArr[ni*3+1] = n.pos.y; bgDotArr[ni*3+2] = n.pos.z;
+        });
+        bgEdges.forEach((e, ei) => {
+          const a = bgNodes[e.a].pos, b = bgNodes[e.b].pos;
+          bgPosArr.set([a.x,a.y,a.z,b.x,b.y,b.z], ei*6);
+        });
+        bgLineGeo.attributes.position.needsUpdate = true;
+        bgDotGeo.attributes.position.needsUpdate  = true;
+      }
+      bgLineMat.opacity = 0.18 + energy * 0.14;
+      bgDotMat.opacity  = 0.55 + energy * 0.22;
+
+      // ── Timeline events → fire synapses / antennas ────────────────────
+      const tl = timelineRef.current;
+      for (let i = 0; i < Math.min(tl.length, 6); i++) {
+        const ev = tl[i];
         if (!seenEventsRef.current.has(ev.id)) {
           seenEventsRef.current.add(ev.id);
-          for (let k = 0; k < 5; k++)
-            synapses[Math.floor(Math.random() * synapses.length)].fire = 1;
-          for (let k = 0; k < 6; k++)
-            antennas[Math.floor(Math.random() * ANTENNA_COUNT)].fire = 1;
-          for (let k = 0; k < 4; k++)
-            webEdges[Math.floor(Math.random() * webEdges.length)].fire = 1;
-          for (let k = 0; k < 30; k++)
-            particleAngles[Math.floor(Math.random() * PARTICLE_COUNT)].boost = 1;
+          for (let k=0; k<5; k++) synapses[Math.floor(Math.random()*synapses.length)].fire = 1;
+          for (let k=0; k<5; k++) ants[Math.floor(Math.random()*ANT_N)].fire = 1;
+          for (let k=0; k<3; k++) webs[Math.floor(Math.random()*webs.length)].fire = 1;
+          for (let k=0; k<32; k++) partAngles[Math.floor(Math.random()*PART_N)].boost = 1;
         }
       }
-
-      // Random ambient antenna flicker (subtle ongoing activity)
-      if (frame % 40 === 0) {
+      // Ambient antenna flicker (subtle ongoing activity)
+      if (frame % 38 === 0) {
         const n = 1 + Math.floor(energy * 3);
-        for (let k = 0; k < n; k++)
-          antennas[Math.floor(Math.random() * ANTENNA_COUNT)].fire =
-            Math.max(antennas[Math.floor(Math.random() * ANTENNA_COUNT)].fire, 0.4);
+        for (let k=0; k<n; k++)
+          ants[Math.floor(Math.random()*ANT_N)].fire =
+            Math.max(ants[Math.floor(Math.random()*ANT_N)].fire, 0.45);
       }
 
-      // ── Update synapse colors ─────────────────────────────────────────
-      const sCol = synapseGeo.attributes.color;
+      // ── Synapse colors ────────────────────────────────────────────────
+      const sCA = synGeo.attributes.color;
       for (let i = 0; i < synapses.length; i++) {
         const s = synapses[i];
-        if (s.fire > 0) s.fire = Math.max(0, s.fire - 0.038);
+        if (s.fire > 0) s.fire = Math.max(0, s.fire - 0.036);
         const bright = Math.min(1, 0.10 + energy * 0.40 + s.fire);
-        const c = new THREE.Color().setHSL(hue, 1, 0.38 + bright * 0.42);
-        sCol.setXYZ(i*2, c.r, c.g, c.b);
-        sCol.setXYZ(i*2+1, c.r, c.g, c.b);
+        _c2.setHSL(hue, 1, 0.35 + bright * 0.44);
+        sCA.setXYZ(i*2,   _c2.r, _c2.g, _c2.b);
+        sCA.setXYZ(i*2+1, _c2.r, _c2.g, _c2.b);
       }
-      sCol.needsUpdate = true;
-      synapseMat.opacity = 0.45 + energy * 0.40;
+      sCA.needsUpdate = true;
+      synMat.opacity = 0.50 + energy * 0.38;
 
-      // ── Update antenna line colors ────────────────────────────────────
-      const aCol = antLineGeo.attributes.color;
-      for (let i = 0; i < ANTENNA_COUNT; i++) {
-        const a = antennas[i];
-        if (a.fire > 0) a.fire = Math.max(0, a.fire - 0.030);
-        const bright  = Math.min(1, 0.15 + energy * 0.35 + a.fire);
-        const cBase   = new THREE.Color().setHSL(hue, 1, 0.25 + bright * 0.30);
-        const cTip    = new THREE.Color().setHSL(hue, 1, 0.50 + bright * 0.45); // tip is brighter
-        aCol.setXYZ(i*2,   cBase.r, cBase.g, cBase.b);
-        aCol.setXYZ(i*2+1, cTip.r,  cTip.g,  cTip.b);
+      // ── Antenna line colors ───────────────────────────────────────────
+      const aCA = antGeo.attributes.color;
+      for (let i = 0; i < ANT_N; i++) {
+        const a = ants[i];
+        if (a.fire > 0) a.fire = Math.max(0, a.fire - 0.028);
+        const bright = Math.min(1, 0.15 + energy * 0.35 + a.fire);
+        _c2.setHSL(hue, 1, 0.22 + bright * 0.30);  // dimmer at base
+        aCA.setXYZ(i*2, _c2.r, _c2.g, _c2.b);
+        _c2.setHSL(hue, 1, 0.50 + bright * 0.44);  // bright at tip
+        aCA.setXYZ(i*2+1, _c2.r, _c2.g, _c2.b);
       }
-      aCol.needsUpdate = true;
-      antLineMat.opacity = 0.55 + energy * 0.35;
+      aCA.needsUpdate = true;
+      antMat.opacity = 0.60 + energy * 0.30;
+      tipDotMat.color.setHSL(hue, 1, 0.70 + energy*0.20);
+      tipDotMat.opacity = 0.82 + energy*0.16;
+      nodeDotMat.color.setHSL(hue, 1, 0.68 + energy*0.22);
 
-      // ── Update web edge colors ────────────────────────────────────────
-      const wCol = webGeo.attributes.color;
-      for (let i = 0; i < webEdges.length; i++) {
-        const e = webEdges[i];
-        if (e.fire > 0) e.fire = Math.max(0, e.fire - 0.028);
-        const bright = Math.min(1, 0.08 + energy * 0.25 + e.fire);
-        const c = new THREE.Color().setHSL(hue, 1, 0.30 + bright * 0.35);
-        wCol.setXYZ(i*2, c.r, c.g, c.b);
-        wCol.setXYZ(i*2+1, c.r, c.g, c.b);
+      // ── Web edge colors ───────────────────────────────────────────────
+      const wCA = webGeo.attributes.color;
+      for (let i = 0; i < webs.length; i++) {
+        const w = webs[i];
+        if (w.fire > 0) w.fire = Math.max(0, w.fire - 0.026);
+        const bright = Math.min(1, 0.08 + energy * 0.26 + w.fire);
+        _c2.setHSL(hue, 1, 0.28 + bright * 0.35);
+        wCA.setXYZ(i*2, _c2.r, _c2.g, _c2.b);
+        wCA.setXYZ(i*2+1, _c2.r, _c2.g, _c2.b);
       }
-      wCol.needsUpdate = true;
-      webMat.opacity = 0.35 + energy * 0.30;
+      wCA.needsUpdate = true;
+      webMat.opacity = 0.30 + energy * 0.30;
 
-      // ── Antenna tip dot brightness ────────────────────────────────────
-      antennaTipMat.color.setHSL(hue, 1, 0.72 + energy * 0.18);
-      antennaTipMat.opacity = 0.80 + energy * 0.18;
-      antennaTipMat.size    = 0.075 + energy * 0.04;
-      nodeDotMat.color.setHSL(hue, 1, 0.68 + energy * 0.22);
-      nodeDotMat.opacity = 0.88 + energy * 0.10;
-
-      // ── Ambient particles ─────────────────────────────────────────────
-      const pArr = particleGeo.attributes.position.array as Float32Array;
-      for (let i = 0; i < PARTICLE_COUNT; i++) {
-        const p = particleAngles[i];
-        if (!reduceMotion) p.theta += p.speed * 0.011 * (0.3 + energy * 1.2);
-        if (p.boost > 0) p.boost = Math.max(0, p.boost - 0.014);
-        const inward = isListening ? micLevel * 0.85 : 0;
-        const r      = p.baseR * (1 - inward * 0.35) + p.boost * 1.5;
-        const ix     = i * 3;
-        pArr[ix]     = Math.sin(p.phi) * Math.cos(p.theta) * r * 1.05;
-        pArr[ix + 1] = Math.cos(p.phi) * r * 0.90;
-        pArr[ix + 2] = Math.sin(p.phi) * Math.sin(p.theta) * r * 1.15;
+      // ── Particle halo ─────────────────────────────────────────────────
+      const pA = partGeo.attributes.position.array as Float32Array;
+      for (let i = 0; i < PART_N; i++) {
+        const p = partAngles[i];
+        if (!reduceMotion) p.theta += p.speed * 0.011 * (0.3 + energy * 1.1);
+        if (p.boost > 0) p.boost = Math.max(0, p.boost - 0.013);
+        const inward = isListening ? micLevel * 0.80 : 0;
+        const r = p.baseR * (1 - inward * 0.35) + p.boost * 1.4;
+        pA[i*3]   = Math.sin(p.phi) * Math.cos(p.theta) * r * 1.05;
+        pA[i*3+1] = Math.cos(p.phi) * r * 0.90;
+        pA[i*3+2] = Math.sin(p.phi) * Math.sin(p.theta) * r * 1.12;
       }
-      particleGeo.attributes.position.needsUpdate = true;
+      partGeo.attributes.position.needsUpdate = true;
+      partMat.color.setHSL(hue, 1, 0.68 + energy * 0.22);
 
       renderer.render(scene, camera);
     });
@@ -740,15 +831,27 @@ export function PresenceEngine({
       renderer.setAnimationLoop(null);
       ro.disconnect();
       window.removeEventListener('resize', resize);
-      retryTimers.forEach(id => window.clearTimeout(id));
-      renderer.dispose();
-      [coreGeo, fineWireGeo, innerGlowGeo, outerGlowGeo, stemGeo,
-       dotGeo, synapseGeo, nodeDotGeo, antLineGeo, webGeo, antennaTipGeo,
-       particleGeo, coreSphereGeo, coreHaloGeo].forEach(g => g.dispose());
-      [hullMat, wireMat, fineWireMat, innerGlowMat, outerGlowMat,
-       dotMat, synapseMat, nodeDotMat, antLineMat, webMat, antennaTipMat,
-       particleMat, coreSphereMat, coreHaloMat].forEach(m => m.dispose());
+      retryT.forEach(id => window.clearTimeout(id));
+      [
+        hullGeo, fineGeo, medGeo, surfaceGeo,
+        innerGlowGeo, outerGlowGeo, stemGeo,
+        coreInnerGeo, coreHaloGeo,
+        synGeo, nodeDotGeo, antGeo, tipDotGeo, webGeo,
+        partGeo, bgLineGeo, bgDotGeo,
+      ].forEach(g => g.dispose());
+      [
+        hullMat, fineMat, medMat, surfaceMat,
+        innerGlowMat, outerGlowMat,
+        coreInnerMat, coreHaloMat,
+        synMat, nodeDotMat, antMat, tipDotMat, webMat,
+        partMat, bgLineMat, bgDotMat,
+        bgSpriteMat, bgSprite2Mat,
+      ].forEach(m => m.dispose());
+      lightningMats.forEach(m => m.dispose());
+      lightningMeshes.forEach(m => m.geometry.dispose());
       dotTex.dispose();
+      bgGlow.dispose();
+      renderer.dispose();
       if (renderer.domElement.parentNode === container) {
         container.removeChild(renderer.domElement);
       }
@@ -771,7 +874,7 @@ export function PresenceEngine({
       ref={containerRef}
       className={`w-full h-full ${className}`}
       role="img"
-      aria-label="MARK's live cognitive state — 3D neural brain visualization"
+      aria-label="MARK's live cognitive state — 3D neural brain"
     />
   );
 }
