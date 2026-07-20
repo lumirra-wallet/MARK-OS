@@ -26,3 +26,8 @@ description: Voice pipeline wiring, watchdog supervisor, and dependency bootstra
 
 ## WebGL / PresenceEngine
 - `PresenceEngine.tsx` line ~189: `new THREE.WebGLRenderer()` wrapped in try/catch — Replit preview has no GPU; dashboard loads cleanly with blank center instead of crashing the whole app.
+
+## Echo Suppression Architecture (three synchronised layers)
+1. **Frontend mic gate** (`use-voice.ts`): `isMarkSpeakingRef` updated via `useMarkStore.subscribe()` (synchronous, no render-cycle delay). 350 ms holdoff after speaking ends absorbs AEC tail + room reverb. `BARGE_IN_RMS = 0.015` gates low-amplitude frames.
+2. **Voice WS tts_start/tts_end control frames**: frontend sends `{"type":"tts_start"}` / `{"type":"tts_end"}` as **text** frames. `voice_websocket` must use `ws.receive()` (NOT `receive_bytes()`) to handle both binary audio and text control. `tts_start` → `session.mute()`; `tts_end` → `asyncio.sleep(0.35)` + `session.unmute()`. Requires `import json` in `api.py`.
+3. **Backend VAD mute** (`voice_pipeline.py`): while `_tts_playing=True`, `speech_start` ALWAYS emitted (barge-in must work), `partial` suppressed, `final` suppressed if utterance RMS < `_BARGE_IN_ENERGY_THRESHOLD` (0.04). VAD threshold lowered 0.65 → 0.5 (Silero default) for better laptop mic sensitivity.

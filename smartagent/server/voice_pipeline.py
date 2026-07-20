@@ -40,6 +40,12 @@ logger = logging.getLogger(__name__)
 SAMPLE_RATE = 16000
 VAD_CHUNK_SAMPLES = 512  # Silero VAD's required chunk size at 16kHz
 
+# During TTS playback the frontend mic gate blocks frames below 0.015 RMS.
+# Any speech that reaches the backend while TTS is active must clear a
+# higher bar to be treated as a real barge-in (not MARK's own echo that
+# barely slipped through the gate).
+_BARGE_IN_ENERGY_THRESHOLD = 0.04  # ~3× the frontend BARGE_IN_RMS gate
+
 _whisper_model: Any = None
 _vad_model: Any = None
 
@@ -110,18 +116,36 @@ class VoiceSession:
         from silero_vad import VADIterator
         self._vad = VADIterator(
             _get_vad_model(), sampling_rate=SAMPLE_RATE,
-            # Raised from 0.5 → 0.65: requires stronger speech signal before
-            # firing speech_start.  Reduces false positives from ambient audio,
-            # MARK's own voice echo, and background TV/music.
-            threshold=0.65,
-            # Slightly longer silence window (was 500ms) so short pauses mid-
-            # sentence don't prematurely end the utterance.
+            # 0.5 is the Silero default — sensitive enough for a laptop mic.
+            # Echo suppression is handled by the frontend mic gate and the
+            # _tts_playing flag below, so we don't need a raised threshold here.
+            threshold=0.5,
+            # Slightly longer silence window so short pauses mid-sentence
+            # don't prematurely end the utterance.
             min_silence_duration_ms=650,
         )
         self._pending = np.array([], dtype=np.float32)  # not yet VAD-processed
         self._utterance: list[np.ndarray] = []
         self.speech_active = False
         self.samples_since_partial = 0
+        # Toggled by mute()/unmute() when the frontend reports TTS playback
+        # state.  While True, low-energy VAD events are treated as echo and
+        # suppressed; high-energy events (real barge-in) still pass through.
+        self._tts_playing = False
+
+    # ── TTS mute/unmute API ──────────────────────────────────────────────────
+    # Called by voice_websocket when the frontend sends tts_start / tts_end
+    # control frames over the voice WebSocket.
+
+    def mute(self) -> None:
+        """MARK started speaking — block low-energy VAD output (echo guard)."""
+        self._tts_playing = True
+        logger.debug("voice_pipeline: muted (TTS started)")
+
+    def unmute(self) -> None:
+        """MARK finished speaking (post-holdoff) — resume normal VAD output."""
+        self._tts_playing = False
+        logger.debug("voice_pipeline: unmuted (TTS ended + holdoff)")
 
     def feed(self, raw_pcm: bytes) -> list[dict]:
         """
@@ -130,6 +154,13 @@ class VoiceSession:
           {"type": "speech_start"}           — the interruption signal
           {"type": "partial", "text": "..."} — interim transcript
           {"type": "final", "text": "..."}   — utterance finished
+
+        Echo suppression while _tts_playing:
+          • speech_start is ALWAYS emitted — the user must be able to barge
+            in and stop MARK even while TTS is active.
+          • partial and final are suppressed when the utterance energy is below
+            _BARGE_IN_ENERGY_THRESHOLD, meaning it's MARK's own echo leaking
+            through the mic gate rather than real user speech.
         """
         events: list[dict] = []
         self._pending = np.concatenate([self._pending, pcm16_to_float32(raw_pcm)])
@@ -147,12 +178,24 @@ class VoiceSession:
                 self.speech_active = True
                 self._utterance = [chunk]
                 self.samples_since_partial = 0
+                # Always emit speech_start — barge-in must work even during TTS
                 events.append({"type": "speech_start"})
 
             elif result and "end" in result:
                 self.speech_active = False
                 if self._utterance:
                     audio = np.concatenate(self._utterance)
+                    # While TTS is playing, gate transcription on energy:
+                    # real user speech is meaningfully louder than speaker echo
+                    if self._tts_playing:
+                        rms = float(np.sqrt(np.mean(audio ** 2)))
+                        if rms < _BARGE_IN_ENERGY_THRESHOLD:
+                            logger.debug(
+                                "voice_pipeline: suppressed echo utterance "
+                                "(rms=%.4f < threshold=%.4f)", rms, _BARGE_IN_ENERGY_THRESHOLD,
+                            )
+                            self._utterance = []
+                            continue
                     text = transcribe(audio, partial=False)
                     if text:
                         events.append({"type": "final", "text": text})
@@ -160,10 +203,12 @@ class VoiceSession:
 
             elif self.speech_active and self.samples_since_partial >= SAMPLE_RATE:
                 self.samples_since_partial = 0
-                audio = np.concatenate(self._utterance)
-                text = transcribe(audio, partial=True)
-                if text:
-                    events.append({"type": "partial", "text": text})
+                # Suppress partials during TTS — they'd show MARK's own words
+                if not self._tts_playing:
+                    audio = np.concatenate(self._utterance)
+                    text = transcribe(audio, partial=True)
+                    if text:
+                        events.append({"type": "partial", "text": text})
 
         return events
 

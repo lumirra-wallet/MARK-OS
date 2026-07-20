@@ -19,6 +19,7 @@ WS   /ws           — event stream (all MARK events as JSON)
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import threading
@@ -1394,24 +1395,42 @@ async def voice_websocket(ws: WebSocket) -> None:
 
     try:
         while True:
-            data = await ws.receive_bytes()
-            events = await asyncio.to_thread(session.feed, data)
-            for event in events:
-                if event.get("type") == "speech_start":
-                    # The owner started talking — stop MARK's speech
-                    # generation immediately (see speech_runtime.interrupt).
-                    # The frontend independently stops PLAYBACK the instant
-                    # it sees this same event below; this call is what
-                    # stops the backend from generating any more of it.
-                    speech_runtime.interrupt()
-                    # Cancel the running inference too — no more tokens needed.
-                    # Complementary to stopMarkSpeech() on the frontend which
-                    # stops audio; this stops the text being generated behind it.
-                    if _current_inference_task is not None and not _current_inference_task.done():
-                        _current_inference_task.cancel()
-                    if _brain is not None:
-                        await _brain.voice_interrupted()
-                await ws.send_json(event)
+            # Use receive() instead of receive_bytes() so we can handle both
+            # binary audio frames and text control frames on the same socket.
+            raw = await ws.receive()
+
+            if raw.get("bytes"):
+                # ── Binary frame: mic audio PCM16 ───────────────────────────
+                events = await asyncio.to_thread(session.feed, raw["bytes"])
+                for event in events:
+                    if event.get("type") == "speech_start":
+                        # User started talking — stop generation immediately.
+                        speech_runtime.interrupt()
+                        if _current_inference_task is not None and not _current_inference_task.done():
+                            _current_inference_task.cancel()
+                        if _brain is not None:
+                            await _brain.voice_interrupted()
+                    await ws.send_json(event)
+
+            elif raw.get("text"):
+                # ── Text frame: TTS state control ───────────────────────────
+                # The frontend sends {"type":"tts_start"} when MARK begins
+                # speaking and {"type":"tts_end"} when it stops.  We use
+                # this to mute low-energy VAD output (echo suppression) on
+                # the backend without blocking real barge-in interruption.
+                try:
+                    msg = json.loads(raw["text"])
+                    ctrl = msg.get("type", "")
+                    if ctrl == "tts_start":
+                        session.mute()
+                    elif ctrl == "tts_end":
+                        # 350ms holdoff mirrors the frontend; absorbs AEC
+                        # settling time and room reverb before unmuting.
+                        await asyncio.sleep(0.35)
+                        session.unmute()
+                except Exception:
+                    pass   # ignore malformed control frames
+
     except WebSocketDisconnect:
         pass
     except Exception as exc:

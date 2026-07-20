@@ -108,13 +108,50 @@ export function useVoice() {
   const isRunning = useMarkStore(s => s.running);
   useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
 
-  // Keep a ref in sync with isMarkSpeaking so onaudioprocess (which captures
-  // the ref at processor-creation time, not on every render) can read the
-  // current value without stale closure issues.
+  // ── Mic gate: synchronous isMarkSpeaking tracking ───────────────────────
+  // The gate in onaudioprocess reads isMarkSpeakingRef. This MUST update
+  // without waiting for a React render cycle — a useEffect sync introduces
+  // a 50-100ms lag during which MARK's own TTS audio leaks to the backend
+  // as a false mic signal.  Zustand's subscribe() fires synchronously on
+  // state change (same tick), eliminating the render-cycle delay.
+  //
+  // Post-speech holdoff: keep the gate active for 350ms after MARK finishes
+  // speaking so that room reverb and AEC settling don't trigger a false VAD.
   const isMarkSpeakingRef = useRef(false);
+  const speakingHoldoffRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    isMarkSpeakingRef.current = isMarkSpeaking;
-  }, [isMarkSpeaking]);
+    return useMarkStore.subscribe((state, prev) => {
+      if (state.isMarkSpeaking === prev.isMarkSpeaking) return;
+
+      // Clear any in-flight holdoff timer
+      if (speakingHoldoffRef.current) {
+        clearTimeout(speakingHoldoffRef.current);
+        speakingHoldoffRef.current = null;
+      }
+
+      if (state.isMarkSpeaking) {
+        // Gate the mic immediately — no render delay
+        isMarkSpeakingRef.current = true;
+        // Tell the backend to activate its echo guard
+        const ws = voiceWsRef.current;
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'tts_start' }));
+        }
+      } else {
+        // Keep gate + backend mute active during the reverb/AEC tail,
+        // then open up after 350ms.
+        speakingHoldoffRef.current = setTimeout(() => {
+          isMarkSpeakingRef.current = false;
+          speakingHoldoffRef.current = null;
+          const ws = voiceWsRef.current;
+          if (ws?.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'tts_end' }));
+          }
+        }, 350);
+      }
+    });
+  }, []);  // subscribe once — voiceWsRef is a ref, not a dep
 
   const pollLevel = useCallback(() => {
     const analyser = analyserRef.current;
