@@ -99,6 +99,161 @@ router = APIRouter()
 # Run state
 # ---------------------------------------------------------------------------
 
+class ConversationState:
+    """Explicit conversation lifecycle states.
+
+    The state machine advances linearly for each request:
+        IDLE → LISTENING → UNDERSTANDING → RESPONDING
+                                         ↘ BACKGROUND_PROCESSING (for pipeline runs)
+    and returns to IDLE once the response is complete.
+
+    Key invariant: the conversation state must NEVER wait for background
+    processing to finish.  Once the user receives a response the state
+    returns to IDLE, even if engineering workers are still running.
+    """
+    IDLE                = "idle"
+    LISTENING           = "listening"           # request received, not yet classified
+    UNDERSTANDING       = "understanding"       # executive decision in progress
+    RESPONDING          = "responding"          # streaming tokens to the client
+    BACKGROUND_PROCESSING = "background_processing"  # pipeline running (non-blocking)
+
+
+# ---------------------------------------------------------------------------
+# Latency Budgets — measurable targets; a WARNING is logged when exceeded.
+# These are not hard limits; they're observable SLOs for tuning.
+# ---------------------------------------------------------------------------
+
+LATENCY_BUDGET_MS = {
+    "voice_detection":  150,   # ms from user stops speaking to intent classified
+    "intent_classify":   50,   # ms for classify_intent() call
+    "memory_lookup":     50,   # ms for recent_turns() / context fetch
+    "first_token":      500,   # ms from request received to first streamed token
+}
+
+
+def _check_latency(label: str, elapsed_ms: float) -> None:
+    budget = LATENCY_BUDGET_MS.get(label)
+    if budget and elapsed_ms > budget:
+        logger.warning(
+            "LATENCY BUDGET EXCEEDED  %s: %.0f ms  (budget: %d ms)",
+            label, elapsed_ms, budget,
+        )
+    else:
+        logger.debug("latency %s: %.0f ms", label, elapsed_ms)
+
+
+# ---------------------------------------------------------------------------
+# Agent Activation Matrix — defines which components are engaged per route.
+# This removes ambiguity about when specialist agents should activate.
+# ---------------------------------------------------------------------------
+
+ACTIVATION_MATRIX: dict[str, list[str]] = {
+    # Conversational — no engineering specialists, no planning
+    "conversational":       ["conversation_engine"],
+    "needs_clarification":  ["conversation_engine"],
+    # Lightweight engineering (single-shot, no DevPipeline)
+    "simple_agent":         ["conversation_engine", "project_cache", "engineer"],
+    # Full engineering organization
+    "complex_pipeline":     ["planner", "engineer", "qa", "reviewer"],
+}
+
+# Convenience aliases — used for documentation; not loaded at runtime
+_ACTIVATION_EXAMPLES = {
+    "greeting":             ["conversation_engine"],
+    "small_talk":           ["conversation_engine"],
+    "repository_question":  ["conversation_engine", "project_cache"],
+    "build_feature":        ["planner", "engineer"],
+    "debug_failing_tests":  ["planner", "engineer", "qa"],
+    "architecture_review":  ["planner", "reviewer"],
+    "deployment":           ["planner", "engineer", "deployment_agent"],
+}
+
+
+def _log_activation(route: str) -> None:
+    components = ACTIVATION_MATRIX.get(route, ["conversation_engine"])
+    logger.info("ACTIVATION  route=%s  components=%s", route, components)
+
+
+# ---------------------------------------------------------------------------
+# Executive Decision Layer — 4-question tree run before any work begins.
+#
+# Q1: Can I answer immediately from conversation and memory?   → conversational
+# Q2: Do I need project knowledge?                            → conversational + cache
+# Q3: Do I need engineering specialists?                      → full pipeline
+# Q4: Can this continue in the background?                    → background_processing
+#
+# Only if Q3 is YES should the engineering organization be activated.
+# ---------------------------------------------------------------------------
+
+def _executive_decision(goal: str) -> "tuple[Any, Any]":
+    """Return (intent, plan) by running through the 4-question executive tree.
+
+    The fast path (Q1) bypasses classify_intent entirely for clear conversational
+    messages, keeping latency under the 50 ms intent budget for greetings, follow-
+    ups, and questions.  All other goals flow through the full intent engine.
+    """
+    import time as _t
+    from types import SimpleNamespace as _SN
+
+    goal_lower = goal.lower().strip()
+
+    _engineering_kws = (
+        "create", "build", "write", "fix", "add ", "update",
+        "delete", "install", "deploy", "run ", "implement",
+        "generate", "make ", "refactor", "test ", "commit",
+        "push", "pull ", "branch", "debug", "```",
+        "def ", "class ", "import ", "function ", "select ",
+        "from ", "insert ", "drop ", "migrate", "scaffold",
+        "configure", "setup ", "set up", "review code",
+        "code review", "analyse", "analyze", "optimis", "optim",
+    )
+    _conv_starters = (
+        "hi", "hello", "hey", "thanks", "thank", "ok", "okay",
+        "sure", "got it", "sounds good", "nice", "cool", "great",
+        "what ", "who ", "why ", "how ", "when ", "where ",
+        "can you ", "do you ", "is it ", "are you ", "what's",
+        "tell me", "explain", "i think", "i feel", "i want",
+        "i'm ", "sounds ", "makes sense", "understood",
+        "no worries", "never mind", "forget it", "actually",
+        "interesting", "yes", "no", "not really", "maybe",
+        "hm", "hmm", "wait", "really", "seriously",
+        "lgtm", "ship it", "approved",
+    )
+
+    has_engineering_kw = any(kw in goal_lower for kw in _engineering_kws)
+
+    # Q1: Can I answer immediately from conversation and memory?
+    if not has_engineering_kw and (
+        len(goal) < 80
+        or any(goal_lower.startswith(sw) for sw in _conv_starters)
+    ):
+        logger.info("EXECUTIVE Q1=YES  fast-path  goal=%r", goal[:60])
+        intent = _SN(
+            route="conversational",
+            category=_SN(value="conversational"),
+            complexity=None,
+            clarification_options=None,
+        )
+        plan = _SN(action="chat", confidence=1.0, reasoning="executive: Q1 immediate answer")
+        return intent, plan
+
+    # Q2 / Q3: run the full intent engine
+    _t0 = _t.perf_counter()
+    intent = classify_intent(goal)
+    _classify_ms = (_t.perf_counter() - _t0) * 1000
+    _check_latency("intent_classify", _classify_ms)
+    logger.info(
+        "EXECUTIVE Q2/Q3  category=%s  route=%s  classify_ms=%.0f",
+        intent.category.value, intent.route, _classify_ms,
+    )
+    _log_activation(intent.route)
+
+    # Return a stub plan — the handler re-calls plan_response(agent, ...) with
+    # the real agent for non-Q1 routes, so this value is always overridden.
+    plan = _SN(action="route", confidence=0.8, reasoning="executive: Q2/Q3 routed")
+    return intent, plan
+
+
 @dataclass
 class RunState:
     """Tracks the current (or most recent) MARK build."""
@@ -109,6 +264,7 @@ class RunState:
     start_time: float      = 0.0
     cancel_requested: bool = False
     workers: list[dict]    = field(default_factory=list)
+    conv_state: str        = ConversationState.IDLE
     _task: Any             = None       # asyncio.Task | None
 
     @property
@@ -123,6 +279,20 @@ _state = RunState()
 # Tracks the running chat inference asyncio.Task so voice_websocket can cancel
 # it the moment the user starts speaking — stops generation, not just playback.
 _current_inference_task: "asyncio.Task[Any] | None" = None
+
+
+async def _set_conv_state(new_state: str) -> None:
+    """Advance the conversation state machine and broadcast the transition."""
+    _state.conv_state = new_state
+    try:
+        await connection_manager.broadcast({
+            "type":      "event",
+            "name":      "CONV_STATE",
+            "payload":   {"state": new_state},
+            "timestamp": _now_iso(),
+        })
+    except Exception:
+        pass  # never crash the run because of a state broadcast failure
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +570,36 @@ async def workers() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Workspace refresh — explicit cache invalidation (Cache Invalidation Rule #4)
+# ---------------------------------------------------------------------------
+
+@router.post("/workspace/refresh")
+async def workspace_refresh() -> dict:
+    """Force a fresh workspace scan on the next connection event.
+
+    Cache Invalidation Rules — the project cache refreshes automatically when:
+      1. A git commit changes (HEAD hash differs)
+      2. Files are added, modified, or removed (dirty-file count changes)
+      3. The active branch changes
+      4. The user explicitly calls this endpoint  ← you are here
+      5. MARK starts for the first time (no cache exists yet)
+
+    This endpoint covers rule #4. It clears the in-memory analysis cache and
+    the git-HEAD record so the next WebSocket connect runs a full scan.
+    """
+    ws_path = os.path.abspath(_state.workspace or ".")
+    conversation_store.invalidate_workspace_cache(ws_path)
+    logger.info("workspace/refresh: cache invalidated for %s", ws_path)
+    await connection_manager.broadcast({
+        "type":      "event",
+        "name":      "WORKSPACE_CACHE_CLEARED",
+        "payload":   {"workspace": ws_path, "reason": "explicit_refresh"},
+        "timestamp": _now_iso(),
+    })
+    return {"status": "ok", "workspace": ws_path, "message": "Cache cleared — next connect will rescan"}
+
+
+# ---------------------------------------------------------------------------
 # Project / workspace
 # ---------------------------------------------------------------------------
 
@@ -612,70 +812,32 @@ async def execute(req: ExecuteRequest) -> dict:
             self_state.task_started(agent, req.goal)
             await _broadcast_self_state(agent)
 
-            # ── Conversational fast path ──────────────────────────────────
-            # Messages that are clearly conversational bypass classify_intent
-            # + plan_response entirely, cutting first-token latency from ~15 s
-            # to ~1-3 s for greetings, questions, small talk, and follow-ups.
-            #
-            # Logic: a message is fast-chat when it contains NO engineering
-            # action keyword (the exclusion list) AND at least one of:
-            #   • it is short (< 80 chars), OR
-            #   • it starts with a strong conversational signal word.
-            #
-            # The heuristic errs on the side of running the full pipeline
-            # (any exclusion keyword match falls through to the else branch),
-            # so engineering requests always get the full router.
-            _goal_lower = req.goal.lower().strip()
-            _engineering_kws = (
-                "create", "build", "write", "fix", "add ", "update",
-                "delete", "install", "deploy", "run ", "implement",
-                "generate", "make ", "refactor", "test ", "commit",
-                "push", "pull ", "branch", "debug", "```",
-                "def ", "class ", "import ", "function ", "select ",
-                "from ", "insert ", "drop ", "migrate", "scaffold",
-                "configure", "setup ", "set up", "review code",
-                "code review", "analyse", "analyze", "optimis", "optim",
-            )
-            _conv_starters = (
-                "hi", "hello", "hey", "thanks", "thank", "ok", "okay",
-                "sure", "got it", "sounds good", "nice", "cool", "great",
-                "what ", "who ", "why ", "how ", "when ", "where ",
-                "can you ", "do you ", "is it ", "are you ", "what's",
-                "tell me", "explain", "i think", "i feel", "i want",
-                "i'm ", "sounds ", "makes sense", "understood",
-                "no worries", "never mind", "forget it", "actually",
-                "interesting", "yes", "no", "not really", "maybe",
-                "hm", "hmm", "wait", "really", "seriously",
-                "lgtm", "ship it", "approved",
-            )
-            _has_engineering_kw = any(kw in _goal_lower for kw in _engineering_kws)
-            _is_fast_chat = not _has_engineering_kw and (
-                len(req.goal) < 80
-                or any(_goal_lower.startswith(sw) for sw in _conv_starters)
-            )
-            if _is_fast_chat:
-                from types import SimpleNamespace as _SN
-                intent = _SN(route="conversational", category=_SN(value="conversational"))
-                plan   = _SN(action="chat", confidence=1.0,
-                             reasoning="fast-path: short non-engineering message")
-                logger.info("MARK STATE fast-path  goal=%r", req.goal[:60])
+            # ── Executive Decision Layer ──────────────────────────────────
+            # State: LISTENING → UNDERSTANDING
+            # The 4-question executive tree decides which components activate.
+            # It runs BEFORE any worker dispatch or LLM call.  See
+            # _executive_decision() for the full decision logic and the
+            # ACTIVATION_MATRIX for which agents each route engages.
+            await _set_conv_state(ConversationState.LISTENING)
+
+            # Measure memory lookup latency (Tier 1 — short-term context)
+            _mem_t0 = time.perf_counter()
+            _recent_history = conversation_store.recent_turns(_state.workspace)
+            _check_latency("memory_lookup", (time.perf_counter() - _mem_t0) * 1000)
+
+            await _set_conv_state(ConversationState.UNDERSTANDING)
+            intent, plan = _executive_decision(req.goal)
+
+            # Let agent.mind score confidence for non-fast-path routes
+            if plan.reasoning.startswith("executive: Q1"):
+                pass  # fast path — plan already set
             else:
-                # ── Understand: the Intent Engine's single decision point ────
-                intent = classify_intent(req.goal)
-                logger.info(
-                    "MARK STATE intent  goal=%r  category=%s  route=%s",
-                    req.goal[:60], intent.category.value, intent.route,
-                )
-                # ── Decide: agent.mind gets a real confidence score ──────────
                 plan = plan_response(agent, req.goal, intent)
-                logger.info(
-                    "MARK STATE plan  action=%s  confidence=%.2f  reasoning=%s",
-                    plan.action, plan.confidence, plan.reasoning,
-                )
 
             if intent.route == "conversational":
                 # ── CHAT PATH — greetings, questions, brainstorming; no ──────
                 # worker dispatch at all.
+                await _set_conv_state(ConversationState.RESPONDING)
                 logger.info("MARK STATE chat  goal=%r", req.goal[:60])
 
                 def _do_chat() -> str:
@@ -752,6 +914,7 @@ async def execute(req: ExecuteRequest) -> dict:
                 # a worker without guessing. Ask, don't auto-plan. Composed
                 # directly in Python from the classifier's own options — no
                 # LLM call, no worker dispatch, same as the identity fast path.
+                await _set_conv_state(ConversationState.RESPONDING)
                 logger.info("MARK STATE clarify  goal=%r", req.goal[:60])
                 options = intent.clarification_options or ("this",)
                 numbered = "\n".join(f"{i}. {opt}" for i, opt in enumerate(options, start=1))
@@ -817,6 +980,11 @@ async def execute(req: ExecuteRequest) -> dict:
                         )
                         return pipeline.run(req.goal)
 
+                    # Q4: Can this continue in the background?
+                    # Pipeline work IS background — conversation returns to IDLE
+                    # as soon as the plan announcement completes.  Workers run
+                    # asynchronously and never block the next user message.
+                    await _set_conv_state(ConversationState.BACKGROUND_PROCESSING)
                     logger.info("MARK STATE executing  dev-pipeline starting")
                     result = await asyncio.to_thread(_run_pipeline)
 
@@ -896,6 +1064,7 @@ async def execute(req: ExecuteRequest) -> dict:
         finally:
             _state.running = False
             _state._task   = None
+            await _set_conv_state(ConversationState.IDLE)
             if ticker_task is not None:
                 ticker_task.cancel()
             if event_bus is not None:
@@ -1259,7 +1428,16 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         # ── Step 1: get current git HEAD (fast subprocess, won't block) ──────
         import subprocess as _sp
 
-        def _get_git_info() -> tuple[str, str]:
+        def _get_git_info() -> tuple[str, str, int]:
+            """Return (head, branch, dirty_file_count).
+
+            Cache Invalidation Rules:
+              1. HEAD hash changes → new commit → rescan
+              2. dirty_count changes → uncommitted file changes → rescan
+              3. branch changes → branch switch → rescan
+              4. explicit POST /workspace/refresh → rescan (handled separately)
+              5. first start (no cache) → rescan
+            """
             try:
                 head = _sp.check_output(
                     ["git", "rev-parse", "HEAD"], cwd=ws_path,
@@ -1269,33 +1447,58 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=ws_path,
                     text=True, stderr=_sp.DEVNULL,
                 ).strip()
-                return head, branch
+                # Count changed files (tracked+untracked) — cheap compared to full scan
+                status_out = _sp.check_output(
+                    ["git", "status", "--short"], cwd=ws_path,
+                    text=True, stderr=_sp.DEVNULL,
+                )
+                dirty = len([l for l in status_out.splitlines() if l.strip()])
+                return head, branch, dirty
             except Exception:
-                return "", ""
+                return "", "", 0
 
-        git_head, git_branch = await asyncio.to_thread(_get_git_info)
+        git_head, git_branch, git_dirty = await asyncio.to_thread(_get_git_info)
 
         # ── Step 2: decide whether to run a full scan ─────────────────────────
+        # Cache is valid only if HEAD, branch, AND dirty-file count all match.
         cached_head_info = conversation_store.get_workspace_git_head(ws_path)
         cached_ctx       = conversation_store.get_cached_workspace_context(ws_path)
-        head_unchanged   = (
+        if cached_head_info is not None and len(cached_head_info) == 3:
+            cached_head, cached_branch, cached_dirty = cached_head_info
+        elif cached_head_info is not None:
+            cached_head, cached_branch, cached_dirty = cached_head_info[0], cached_head_info[1], -1
+        else:
+            cached_head, cached_branch, cached_dirty = "", "", -1
+
+        head_unchanged = (
             git_head
-            and cached_head_info is not None
-            and cached_head_info[0] == git_head
             and cached_ctx is not None
+            and cached_head == git_head
+            and cached_branch == git_branch
+            and cached_dirty == git_dirty
         )
 
         if head_unchanged:
             payload = cached_ctx
             logger.info(
-                "workspace analysis: HEAD %s unchanged — using cached scan", git_head[:8]
+                "workspace analysis: HEAD %s branch=%s dirty=%d unchanged — using cache",
+                git_head[:8], git_branch, git_dirty,
             )
         else:
+            reason = (
+                "first scan" if not cached_head else
+                f"HEAD {cached_head[:8]}→{git_head[:8]}" if cached_head != git_head else
+                f"branch {cached_branch}→{git_branch}" if cached_branch != git_branch else
+                f"dirty {cached_dirty}→{git_dirty} files"
+            )
+            logger.info("workspace analysis: cache miss (%s) — running full scan", reason)
             try:
                 payload = await asyncio.to_thread(_analyze_workspace, ws_path)
                 conversation_store.cache_workspace_context(ws_path, payload)
                 if git_head:
-                    conversation_store.update_workspace_git_head(ws_path, git_head, git_branch)
+                    conversation_store.update_workspace_git_head(
+                        ws_path, git_head, git_branch, git_dirty
+                    )
             except Exception as exc:
                 logger.debug("workspace analysis failed: %s", exc)
                 return

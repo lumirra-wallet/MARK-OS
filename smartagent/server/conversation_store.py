@@ -89,14 +89,32 @@ def get_cached_workspace_context(workspace: str) -> dict[str, Any] | None:
 _git_head_cache: dict[str, tuple[str, str]] = {}  # workspace → (git_head, git_branch)
 
 
-def update_workspace_git_head(workspace: str, git_head: str, git_branch: str) -> None:
-    """Record the git HEAD + branch seen during the most recent workspace scan."""
-    _git_head_cache[workspace] = (git_head, git_branch)
+def update_workspace_git_head(
+    workspace: str, git_head: str, git_branch: str, dirty_count: int = 0
+) -> None:
+    """Record the git HEAD + branch + dirty-file count from the most recent scan."""
+    _git_head_cache[workspace] = (git_head, git_branch, dirty_count)
 
 
-def get_workspace_git_head(workspace: str) -> tuple[str, str] | None:
-    """Return (git_head, git_branch) from the last scan, or None if not cached."""
-    return _git_head_cache.get(workspace)
+def get_workspace_git_head(workspace: str) -> "tuple[str, str, int] | None":
+    """Return (git_head, git_branch, dirty_count) from the last scan, or None."""
+    entry = _git_head_cache.get(workspace)
+    if entry is None:
+        return None
+    # Back-compat: old entries stored only (head, branch)
+    if len(entry) == 2:
+        return entry[0], entry[1], 0  # type: ignore[return-value]
+    return entry  # type: ignore[return-value]
+
+
+def invalidate_workspace_cache(workspace: str) -> None:
+    """Force a fresh scan on the next connection (Cache Invalidation Rule #4).
+
+    Clears both the analysis payload cache and the git-HEAD record so that
+    _send_workspace_analysis() finds no valid cache and runs a full scan.
+    """
+    _workspace_cache.pop(workspace, None)
+    _git_head_cache.pop(workspace, None)
 
 
 # ---------------------------------------------------------------------------
@@ -159,3 +177,70 @@ def record_greeting(workspace: str) -> None:
     """Record that MARK just delivered an opening greeting for this workspace."""
     store = get_storage()
     store.set(_GREETING_NS, workspace_id(workspace), time.time())
+
+
+# ---------------------------------------------------------------------------
+# Memory Hierarchy — four distinct tiers with separate TTLs and purposes.
+# These should never be mixed or substituted for one another.
+#
+#  Tier 1 – SHORT-TERM CONVERSATION MEMORY
+#    What it is: the last N conversational turns in this session.
+#    Scope:      per workspace, volatile.
+#    TTL:        lives for the life of the conversation; capped at _MAX_TURNS.
+#    Used for:   injecting recent context into every chat reply so MARK
+#                doesn't repeat itself or forget what was just said.
+#    Access:     recent_turns(workspace, limit=8)
+#
+#  Tier 2 – PROJECT MEMORY
+#    What it is: the workspace analysis snapshot (files, frameworks, TODOs,
+#                git branch, tech stack, etc.).
+#    Scope:      per workspace, in-memory only.
+#    TTL:        300 s or until git HEAD / branch / dirty-count changes.
+#    Used for:   injecting project context into chat replies and opening
+#                messages without re-running the full filesystem scan.
+#    Access:     get_cached_workspace_context(workspace)
+#
+#  Tier 3 – LONG-TERM EXECUTIVE MEMORY
+#    What it is: the full persisted conversation history up to _MAX_TURNS.
+#    Scope:      per workspace, durable (survives server restarts).
+#    TTL:        permanent until explicitly cleared.
+#    Used for:   understanding the user's patterns, past decisions, and
+#                evolving project goals across sessions.
+#    Access:     get_history(workspace)
+#
+#  Tier 4 – REPOSITORY AWARENESS CACHE
+#    What it is: the git HEAD commit + branch + dirty-file count from the
+#                most recent workspace scan.
+#    Scope:      per workspace, in-memory only.
+#    TTL:        invalidated on git commit, branch change, or dirty-count
+#                change.  Resets on server restart (fresh scan on startup).
+#    Used for:   deciding whether to skip the expensive _analyze_workspace()
+#                call on every tab reconnect.
+#    Access:     get_workspace_git_head(workspace) /
+#                update_workspace_git_head(workspace, head, branch, dirty)
+# ---------------------------------------------------------------------------
+
+MEMORY_TIERS = {
+    "short_term":   "Last 8 turns — recent conversation context",
+    "project":      "Workspace analysis snapshot — 300 s TTL, git-HEAD invalidated",
+    "long_term":    "Full conversation history — persistent, up to 200 turns",
+    "repo_cache":   "Git HEAD + branch + dirty count — in-memory, commit-invalidated",
+}
+
+
+def memory_hierarchy_status(workspace: str) -> dict:
+    """Return a snapshot of what each memory tier currently holds for *workspace*."""
+    turns = get_history(workspace)
+    ctx   = get_cached_workspace_context(workspace)
+    head  = get_workspace_git_head(workspace)
+    store = get_storage()
+    last_greeting_ts = store.get_or_default(_GREETING_NS, workspace_id(workspace), 0.0)
+    age = (time.time() - float(last_greeting_ts)) if last_greeting_ts else None
+    return {
+        "short_term_turns":   min(len(turns), 8),
+        "long_term_turns":    len(turns),
+        "project_cache_hit":  ctx is not None,
+        "repo_cache_head":    head[0][:8] if head else None,
+        "repo_cache_branch":  head[1] if head else None,
+        "last_greeting_age":  round(age, 1) if age is not None else None,
+    }

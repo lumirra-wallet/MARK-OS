@@ -1,0 +1,66 @@
+First, add a section called Implementation Principles:
+
+Don't rewrite the existing architecture unless necessary.
+Reuse existing planners, agents, and memory systems.
+Add routing logic instead of duplicating functionality.
+All new components should be modular and independently testable.
+Preserve backward compatibility with existing engineering workflows.
+
+Second, add Latency Budgets. Right now you say "under 500 ms," but I'd make it measurable:
+
+Voice endpoint detection: under 150 ms after the user stops speaking.
+Intent classification: under 50 ms.
+Memory lookup: under 50 ms.
+First streamed token: under 500 ms.
+Begin speech immediately after first token.
+Engineering planning may continue asynchronously.
+
+Third, add an Agent Activation Matrix. For example:
+
+Greeting → Conversation Engine only.
+Small talk → Conversation Engine only.
+Repository question → Conversation Engine + Project Cache.
+Build feature → Planner + Engineer.
+Debug failing tests → Planner + Engineer + QA.
+Architecture review → Planner + Reviewer.
+Deployment → Planner + Engineer + Deployment agent.
+
+That removes ambiguity about when specialists should run.
+
+Fourth, define a Conversation State Machine. Every request should transition through states like:
+
+Listening
+Understanding
+Responding
+Background Processing
+Idle
+
+The conversation state should never wait for background processing to finish.
+
+Fifth, define Cache Invalidation Rules. The project cache should refresh only when:
+
+A Git commit changes.
+Files are added, modified, or removed.
+The active branch changes.
+The user explicitly requests a refresh.
+MARK starts for the first time.
+
+Otherwise, reuse cached knowledge.
+
+Sixth, add Memory Hierarchy. Separate:
+
+Short-term conversation memory.
+Project memory.
+Long-term executive memory.
+Repository awareness cache.
+
+Each serves a different purpose and should not be mixed together.
+
+Finally—and I think this is the most important addition—add an Executive Decision Layer. Before doing any work, MARK should ask itself four questions:
+
+Can I answer immediately from conversation and memory?
+Do I need project knowledge?
+Do I need engineering specialists?
+Can this task continue in the background?
+
+Only if the answer to question three is "yes" should the engineering organization be activated.

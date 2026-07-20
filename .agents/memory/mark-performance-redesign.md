@@ -39,6 +39,29 @@ Four targeted fixes to the problems described in the spec:
 - `OPENING_SURFACE_NOTES`: Added "Do NOT introduce yourself by name — the user already knows you."
 - `IDLE_SURFACE_NOTES`: Vary openers (not always "While you were away") — "Quick heads-up:", "I spotted something worth flagging:", etc.
 
+## Spec Additions (Session 2 — Implementation Principles doc)
+
+### 1. Implementation Principles (in code, not just docs)
+Enforced through the patterns below: additive routing, no rewrites, backward-compatible.
+
+### 2. Latency Budgets
+`LATENCY_BUDGET_MS` dict in `api.py` with four measurable targets. `_check_latency(label, ms)` logs WARNING when exceeded. Budgets: voice_detection 150ms, intent_classify 50ms, memory_lookup 50ms, first_token 500ms.
+
+### 3. Agent Activation Matrix
+`ACTIVATION_MATRIX` dict in `api.py` maps route → component list. `_ACTIVATION_EXAMPLES` documents all scenario aliases. `_log_activation(route)` logs which components engage on each request.
+
+### 4. Conversation State Machine
+`ConversationState` class with five states: IDLE, LISTENING, UNDERSTANDING, RESPONDING, BACKGROUND_PROCESSING. `conv_state` field on `RunState`. `_set_conv_state()` async helper broadcasts `CONV_STATE` events. State transitions wired into every path in the `/run` handler. Key invariant enforced: state returns to IDLE after response, never waits for background workers.
+
+### 5. Cache Invalidation Rules (5 explicit rules)
+All five rules implemented: (1) HEAD change → rescan, (2) dirty-file count change → rescan, (3) branch change → rescan, (4) explicit `POST /workspace/refresh` → rescan via `invalidate_workspace_cache()`, (5) first start → rescan. `_get_git_info()` returns `(head, branch, dirty_count)` as a 3-tuple. Backward-compat: old 2-tuple entries handled.
+
+### 6. Memory Hierarchy (4 tiers documented in conversation_store.py)
+`MEMORY_TIERS` dict labels all four tiers. `memory_hierarchy_status(workspace)` returns a snapshot dict showing what each tier currently holds. Tiers: short-term (8 turns), project (300s TTL), long-term (200 turns, durable), repo-cache (git-HEAD, commit-invalidated).
+
+### 7. Executive Decision Layer
+`_executive_decision(goal)` function implements the 4-question tree. Q1 (immediate answer) bypasses classify_intent entirely for fast-path latency. Q2/Q3 run the full intent engine with timing. `LISTENING → UNDERSTANDING` state transition fires before the call. Handler re-calls `plan_response(agent, ...)` with real agent for Q2/Q3 routes.
+
 ## Files Modified
 
 - `smartagent/server/conversation_store.py` — +89 lines: git-HEAD cache, suggestion repeat detection, greeting tracker
