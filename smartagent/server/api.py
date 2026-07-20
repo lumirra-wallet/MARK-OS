@@ -124,10 +124,11 @@ class ConversationState:
 # ---------------------------------------------------------------------------
 
 LATENCY_BUDGET_MS = {
-    "voice_detection":  150,   # ms from user stops speaking to intent classified
-    "intent_classify":   50,   # ms for classify_intent() call
-    "memory_lookup":     50,   # ms for recent_turns() / context fetch
-    "first_token":      500,   # ms from request received to first streamed token
+    "voice_detection":   150,  # ms from user stops speaking to intent classified
+    "intent_classify":    50,  # ms for classify_intent() call
+    "memory_lookup":      50,  # ms for recent_turns() / context fetch
+    "project_cache":      75,  # ms for cached workspace context lookup
+    "first_token":       500,  # ms from request received to first streamed token
 }
 
 
