@@ -338,6 +338,13 @@ export const useMarkStore = create<MarkState>((set, get) => {
 
   /** Start a new MARK message and return its ID. */
   const _startMarkMsg = (timestamp: string): string => {
+    // Always close any currently-open bubble before creating a new one.
+    // Without this, a WS reconnect delivering MarkOpening while a run is
+    // still streaming overwrites currentMarkMsgId, causing that run's
+    // remaining tokens to land inside the greeting bubble — producing
+    // concatenated garbage like "Hey!I'm not following — could you rephrase?"
+    // _finaliseMsg is a no-op when currentMarkMsgId is already null.
+    _finaliseMsg();
     const id = _id();
     set(state => ({
       currentMarkMsgId: id,

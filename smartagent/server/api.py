@@ -280,6 +280,10 @@ _state = RunState()
 # Tracks the running chat inference asyncio.Task so voice_websocket can cancel
 # it the moment the user starts speaking — stops generation, not just playback.
 _current_inference_task: "asyncio.Task[Any] | None" = None
+# Mutable 2-element list [last_text, last_timestamp] used by the voice dedup
+# guard inside _voice_chat_response.  A list (not a tuple) so the function can
+# mutate it without a `global` declaration.
+_voice_last_text: list = ["", 0.0]
 
 
 async def _set_conv_state(new_state: str) -> None:
@@ -1699,13 +1703,50 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
         "i am mark",
         "i plan engineering work",
         "what would you like to build",
+        # ── Media / broadcast audio contamination ──────────────────────────────
+        # YouTube, podcast, and TV outros commonly picked up by open microphones.
+        # These never originate from a live user speaking to MARK; drop them to
+        # avoid spurious LLM calls and the appearance of MARK "talking to himself".
+        "thanks for watching",
+        "thank you for watching",
+        "see you next time",
+        "see you in the next video",
+        "i'll see you in the next",
+        "hope you'll see you in the next",
+        "don't forget to subscribe",
+        "hit that like button",
+        "subscribe to the channel",
+        "like and subscribe",
+        "smash that subscribe button",
+        "leave a comment below",
+        "click the bell",
+        "turn on notifications",
+        "support the channel",
+        "check out my other videos",
+        "link in the description",
+        "notes in the description",
+        "in the description below",
     )
     _text_lower = text.lower().strip()
     if any(_text_lower.startswith(p) or p in _text_lower for p in _LOOP_PHRASES):
         logger.warning(
-            "voice_chat: dropping suspected self-echo/feedback text: %r", text[:60]
+            "voice_chat: dropping suspected self-echo/media-audio text: %r", text[:60]
         )
         return
+
+    # ── Deduplication guard ───────────────────────────────────────────────────
+    # VAD can fire two `final` events for the same utterance (endpoint
+    # detected, then re-detected after a brief pause).  Identical text within
+    # 5 seconds is almost certainly a double-trigger — drop the second copy.
+    _now_mono = time.monotonic()
+    if (
+        _voice_last_text[0] == _text_lower
+        and _now_mono - _voice_last_text[1] < 5.0
+    ):
+        logger.debug("voice_chat: duplicate transcript within 5 s — dropping: %r", text[:60])
+        return
+    _voice_last_text[0] = _text_lower
+    _voice_last_text[1] = _now_mono
 
     # Wait for any interrupted run to fully clean up before we start
     for _ in range(30):

@@ -47,37 +47,64 @@ def _under_restart_limit(name: str) -> bool:
     return True
 
 
+def _wait_port_free(port: int, timeout: float = 6.0) -> None:
+    """Poll until the port is actually bindable (up to *timeout* seconds).
+
+    `fuser -k` / `os.kill(SIGKILL)` guarantee the signal is *sent*, but the
+    kernel TIME_WAIT state can keep the port busy for another second or two
+    after the process exits.  Polling with a real bind() attempt is the only
+    reliable way to know when it is safe to start uvicorn.
+    """
+    import socket
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(("", port))
+                return  # port is free
+        except OSError:
+            time.sleep(0.4)
+    logger.warning("supervisor: port %d still busy after %.0f s — proceeding anyway", port, timeout)
+
+
 def _kill_port(port: int) -> None:
     """Kill any process occupying *port* before we try to bind it."""
+    killed = False
     try:
         result = subprocess.run(
             ["fuser", "-k", f"{port}/tcp"],
             capture_output=True, timeout=5,
         )
         if result.returncode == 0:
-            logger.info("supervisor: cleared stale process on port %d", port)
-            time.sleep(0.5)
-            return
+            logger.info("supervisor: cleared stale process on port %d (fuser)", port)
+            killed = True
     except FileNotFoundError:
         pass  # fuser not available — try lsof
     except Exception:
         pass
-    try:
-        r = subprocess.run(
-            ["lsof", "-ti", f":{port}"],
-            capture_output=True, text=True, timeout=3,
-        )
-        pids = [p.strip() for p in r.stdout.split() if p.strip()]
-        for pid_str in pids:
-            try:
-                os.kill(int(pid_str), signal.SIGKILL)
-                logger.info("supervisor: killed PID %s (was holding port %d)", pid_str, port)
-            except Exception:
-                pass
-        if pids:
-            time.sleep(0.5)
-    except Exception:
-        pass
+
+    if not killed:
+        try:
+            r = subprocess.run(
+                ["lsof", "-ti", f":{port}"],
+                capture_output=True, text=True, timeout=3,
+            )
+            pids = [p.strip() for p in r.stdout.split() if p.strip()]
+            for pid_str in pids:
+                try:
+                    os.kill(int(pid_str), signal.SIGKILL)
+                    logger.info("supervisor: killed PID %s (was holding port %d)", pid_str, port)
+                    killed = True
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    if killed:
+        # Poll until the port is actually free — a 0.5 s sleep was never
+        # enough; kernel TIME_WAIT can hold it for 1-2 s after SIGKILL.
+        _wait_port_free(port)
 
 
 def _uvicorn_cmd() -> list[str]:
