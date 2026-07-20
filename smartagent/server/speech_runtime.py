@@ -131,19 +131,8 @@ class SpeechRuntime:
         self._queue: "queue.SimpleQueue[str | object]" = queue.SimpleQueue()
         self._worker_lock = threading.Lock()
         self._worker_started = False
-        # LiveKit audio output — set by attach_livekit() from app.py lifespan.
-        # When set, every synthesised PCM chunk is also forwarded to the LiveKit
-        # agent's thread-safe queue so it can be published as a WebRTC track.
-        self._livekit_agent: Any = None
-
-    def attach_livekit(self, agent: Any) -> None:
-        """Called from app.py lifespan after the LiveKit agent is ready.
-
-        *agent* must expose ``enqueue_audio(pcm_bytes: bytes)`` — a thread-safe
-        method that the TTS worker can call without blocking.
-        """
-        self._livekit_agent = agent
-        logger.info("speech_runtime: LiveKit audio output attached")
+        # (LiveKit audio transport removed — audio goes via /ws binary frames.)
+        # Kept as a no-op stub so old call-sites don't raise AttributeError.
 
     def attach(self, manager: "ConnectionManager", loop: asyncio.AbstractEventLoop) -> None:
         """Called once per run (loop is the same running loop each time,
@@ -234,9 +223,7 @@ class SpeechRuntime:
             self._spoke_anything = True
             self._broadcast_event(ServerEvents.SPEECH_START, {})
         self._broadcast_bytes(pcm)
-        # LiveKit path: enqueue PCM for the WebRTC audio track (thread-safe).
-        if self._livekit_agent is not None:
-            self._livekit_agent.enqueue_audio(pcm)
+        # (audio delivered via connection_manager binary broadcast above)
 
     def _broadcast_event(self, name: str, payload: dict[str, Any]) -> None:
         if self._manager is None or self._loop is None or self._loop.is_closed():

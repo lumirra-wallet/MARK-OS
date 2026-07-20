@@ -102,10 +102,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # No-op if LIVEKIT_API_KEY / LIVEKIT_API_SECRET are not configured, or if
     # the 'livekit' package is not installed.  Safe to remove entirely if you
     # never want LiveKit.
+    # LiveKit presence agent — joins 'mark-presence' for real-time session
+    # coordination.  Audio transport is via /ws binary frames (not LiveKit).
+    # No-op when LIVEKIT_API_KEY/SECRET are absent or 'livekit' not installed.
     try:
         from smartagent.server.livekit_agent import livekit_agent as _lk_agent
-        from smartagent.server.speech_runtime import speech_runtime as _sr
-        _sr.attach_livekit(_lk_agent)
         await _lk_agent.start()
     except Exception as _lk_exc:
         logger.warning("LiveKit agent init failed (non-fatal): %s", _lk_exc)

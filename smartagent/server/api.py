@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse  # noqa: F401  (available for future use)
 
 # Top-level imports make these patchable in tests.
@@ -1365,6 +1365,229 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 await connection_manager.send_to(ws, {"type": "ping"})
     except (WebSocketDisconnect, Exception):
         connection_manager.disconnect(ws)
+
+
+# ---------------------------------------------------------------------------
+# Voice pipeline — WebSocket mic streaming + fast chat response
+# ---------------------------------------------------------------------------
+
+async def _voice_chat_response(text: str, workspace: str) -> None:
+    """Lightweight voice-chat LLM response — forces the conversational fast
+    path (direct LLM → TTS, no SmartAgent planning or worker dispatch).
+
+    Called either from POST /voice/message (browser-triggered) or directly
+    from voice_websocket on final transcript.  Always runs in a background
+    asyncio task so it never blocks the caller.
+
+    If an engineering run is currently active (e.g. the user spoke before a
+    previous task completed), we wait up to 3 s for it to clear — the
+    speech_start event will have already cancelled the inference task by the
+    time the final transcript arrives, so the wait is usually <100 ms.
+
+    Voice-mode response style is optimised for TTS: no markdown, no bullets,
+    spoken-sentence cadence.  Context (workspace, conversation history) is
+    still injected so MARK sounds coherent across turns.
+    """
+    global _state, _current_inference_task   # noqa: PLW0603
+
+    # Wait for any interrupted run to fully clean up before we start
+    for _ in range(30):
+        if not _state.running:
+            break
+        await asyncio.sleep(0.1)
+    if _state.running:
+        logger.debug("voice_chat: run still active after 3 s — skipping response")
+        return
+
+    ws = workspace or _state.workspace or ""
+    loop = asyncio.get_event_loop()
+    _state.running     = True
+    _state.goal        = text
+    _state.workspace   = ws
+    _state.start_time  = time.monotonic()
+    _state.cancel_requested = False
+
+    try:
+        event_bus = EventBus()
+        broadcaster.install(event_bus, connection_manager, loop)
+        speech_runtime.attach(connection_manager, loop)
+        speech_runtime.reset()
+        event_bus.subscribe(ServerEvents.STREAMING_TOKEN, speech_runtime.on_token)
+
+        await connection_manager.broadcast({
+            "type":      "event",
+            "name":      ServerEvents.RUN_STARTED,
+            "payload":   {"goal": text, "workspace": ws},
+            "timestamp": _now_iso(),
+        })
+
+        agent = await _get_mark_agent(ws or None)
+        agent.events = event_bus
+
+        def _do_voice_chat() -> str:
+            _voice_prefix = (
+                "You are having a live voice conversation. "
+                "Your reply will be spoken aloud by a text-to-speech voice, "
+                "so write the way you would SPEAK — natural sentences, no "
+                "markdown, no bullet points, no code fences unless the user "
+                "explicitly asks for code. Be warm, direct, and concise. "
+                "Skip openers like 'Certainly!' or 'Of course!'."
+            )
+            system_prompt = f"{_voice_prefix}\n\n{_MARK_CHAT_SYSTEM}"
+            ctx = conversation_store.get_cached_workspace_context(ws)
+            if ctx:
+                system_prompt += f"\n\nCurrent project: {_workspace_preamble(ctx)}"
+            history = conversation_store.recent_turns(ws)
+            return _stream_llm_response(
+                text, system_prompt, agent.model_manager, event_bus,
+                history=history,
+            )
+
+        if _brain is not None:
+            await _brain.thinking_started(text)
+        _current_inference_task = asyncio.ensure_future(
+            asyncio.to_thread(_do_voice_chat)
+        )
+        try:
+            reply_text = await _current_inference_task
+        except asyncio.CancelledError:
+            reply_text = ""
+        finally:
+            _current_inference_task = None
+
+        if _brain is not None:
+            await _brain.thinking_finished(
+                int((time.monotonic() - _state.start_time) * 1000)
+            )
+        speech_runtime.flush()
+        conversation_store.append_turn(ws, "user", text)
+        conversation_store.append_turn(ws, "assistant", reply_text)
+
+        await connection_manager.broadcast({
+            "type":      "event",
+            "name":      ServerEvents.RUN_COMPLETED,
+            "payload":   {
+                "goal":           text,
+                "success":        True,
+                "elapsed":        time.monotonic() - _state.start_time,
+                "files_created":  [],
+                "files_modified": [],
+                "summary":        "",
+            },
+            "timestamp": _now_iso(),
+        })
+    except Exception as exc:
+        logger.warning("voice_chat_response: %s", exc)
+        try:
+            await connection_manager.broadcast({
+                "type":      "event",
+                "name":      ServerEvents.RUN_FAILED,
+                "payload":   {"goal": text, "success": False, "error": str(exc)},
+                "timestamp": _now_iso(),
+            })
+        except Exception:
+            pass
+    finally:
+        _state.running = False
+
+
+@router.websocket("/ws/voice")
+async def voice_websocket(ws: WebSocket) -> None:
+    """
+    Real-time voice input: the browser streams raw PCM16 microphone audio
+    as binary frames; this runs it through VoiceSession's real local
+    VAD + Whisper pipeline and sends transcript/interruption events back
+    on the same connection — {"type": "speech_start"}, {"type": "partial",
+    "text": ...}, {"type": "final", "text": ...}.
+
+    Deliberately separate from /ws: this is one owner's live microphone
+    audio, not something every connected dashboard client should receive.
+    speech_start is the interruption signal — the frontend uses it to stop
+    TTS playback the moment the owner starts talking, before any
+    transcription has even happened.
+    """
+    from smartagent.server.voice_pipeline import VoiceSession
+
+    await ws.accept()
+    workspace: str = ws.query_params.get("workspace", "") or _state.workspace or ""
+    logger.info("MARK STATE voice-ws  connected  workspace=%r", workspace)
+    try:
+        session = await asyncio.to_thread(VoiceSession)
+    except Exception as exc:
+        logger.warning("voice_websocket: failed to start VoiceSession: %s", exc)
+        await ws.close(code=1011, reason="voice pipeline unavailable")
+        return
+
+    try:
+        while True:
+            # Use receive() instead of receive_bytes() so we can handle both
+            # binary audio frames and text control frames on the same socket.
+            raw = await ws.receive()
+
+            if raw.get("bytes"):
+                # ── Binary frame: mic audio PCM16 ───────────────────────────
+                events = await asyncio.to_thread(session.feed, raw["bytes"])
+                for event in events:
+                    if event.get("type") == "speech_start":
+                        # User started talking — stop generation immediately.
+                        speech_runtime.interrupt()
+                        if _current_inference_task is not None and not _current_inference_task.done():
+                            _current_inference_task.cancel()
+                        if _brain is not None:
+                            await _brain.voice_interrupted()
+                    await ws.send_json(event)
+
+            elif raw.get("text"):
+                # ── Text frame: control messages from browser ────────────────
+                try:
+                    msg = json.loads(raw["text"])
+                    ctrl = msg.get("type", "")
+                    if ctrl == "tts_start":
+                        session.mute()
+                    elif ctrl == "tts_end":
+                        # 350ms holdoff mirrors the frontend; absorbs AEC
+                        # settling time and room reverb before unmuting.
+                        await asyncio.sleep(0.35)
+                        session.unmute()
+                    elif ctrl == "workspace":
+                        # Browser can update which project is active
+                        workspace = msg.get("path", workspace)
+                except Exception:
+                    pass   # ignore malformed control frames
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.warning("voice_websocket: %s", exc)
+    finally:
+        logger.info("MARK STATE voice-ws  disconnected")
+
+
+@router.post("/voice/message", status_code=202)
+async def voice_message_endpoint(request: Request) -> dict:
+    """Accept a voice transcript and trigger a fast voice-chat LLM response.
+
+    The browser calls this after receiving a 'final' transcript from
+    /ws/voice — passing the recognised text and current workspace.
+    Returns 202 immediately (non-blocking); the actual response streams
+    back via the main /ws event bus (RunStarted → StreamingToken →
+    RunCompleted).
+
+    This replaces the old path of calling POST /execute from voice, which
+    ran the heavy SmartAgent planning+worker pipeline and could block for
+    several minutes on a complex request.  Voice is always conversational:
+    direct LLM → sentence-streaming TTS → first audio frame in 1–3 s.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    text      = str(body.get("text", "")).strip()
+    workspace = str(body.get("workspace", "")).strip()
+    if not text:
+        raise HTTPException(400, "text is required")
+    asyncio.create_task(_voice_chat_response(text, workspace))
+    return {"status": "accepted", "text": text}
 
 
 # ---------------------------------------------------------------------------
