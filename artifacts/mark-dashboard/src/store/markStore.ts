@@ -239,6 +239,14 @@ const DEFAULT_WORKERS: WorkerState[] = [
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+// Consecutive failed-connect count, reset to 0 the moment a connection
+// actually opens — drives the backoff below. MARK should feel "always
+// connected": a fresh drop recovers almost instantly, and only a
+// genuinely dead server backs off toward a slower retry.
+let reconnectAttempts = 0;
+const RECONNECT_BASE_MS = 250;
+const RECONNECT_MAX_MS = 4000;
+let liveRecoveryListenersInstalled = false;
 // MARK's real voice player — receives binary PCM16 frames on the same /ws
 // connection (see connectWebSocket's onmessage). Lazily constructed at
 // 24000Hz (Kokoro's native rate — see smartagent/server/tts_engine.py).
@@ -475,9 +483,24 @@ export const useMarkStore = create<MarkState>((set, get) => {
 
     connectWebSocket: () => {
       if (ws) { ws.close(); ws = null; }
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       const { serverUrl } = get();
       const wsUrl = serverUrl.replace(/^http/, 'ws') + '/ws';
       set({ connectionStatus: 'connecting' });
+
+      // Recover the instant the tab regains focus or the network comes
+      // back — installed once, not per-connect, so it doesn't stack.
+      // Without this, a laptop sleep/tab-switch during a genuinely dead
+      // stretch waits out the full backoff before even trying again.
+      if (!liveRecoveryListenersInstalled) {
+        liveRecoveryListenersInstalled = true;
+        window.addEventListener('online', () => get().connectWebSocket());
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible' && get().connectionStatus !== 'connected') {
+            get().connectWebSocket();
+          }
+        });
+      }
 
       try {
         ws = new WebSocket(wsUrl);
@@ -487,6 +510,7 @@ export const useMarkStore = create<MarkState>((set, get) => {
 
         ws.onopen = () => {
           set({ connectionStatus: 'connected' });
+          reconnectAttempts = 0;
           if (reconnectTimer) clearTimeout(reconnectTimer);
           // No hardcoded greeting here — the real opening message arrives
           // via the MarkOpening event below, generated server-side from an
@@ -501,7 +525,13 @@ export const useMarkStore = create<MarkState>((set, get) => {
 
         ws.onclose = () => {
           set({ connectionStatus: 'disconnected' });
-          reconnectTimer = setTimeout(() => get().connectWebSocket(), 3000);
+          // Fast exponential backoff (250ms → 4s ceiling): a transient
+          // blip (server restart, brief network hiccup) recovers almost
+          // instantly; a genuinely dead server backs off instead of being
+          // hammered, but never waits longer than 4s between tries.
+          const delay = Math.min(RECONNECT_BASE_MS * 2 ** reconnectAttempts, RECONNECT_MAX_MS);
+          reconnectAttempts += 1;
+          reconnectTimer = setTimeout(() => get().connectWebSocket(), delay);
         };
 
         ws.onerror = () => { /* handled by close */ };

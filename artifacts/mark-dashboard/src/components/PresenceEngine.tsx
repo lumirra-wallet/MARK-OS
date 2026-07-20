@@ -17,7 +17,11 @@ import { useSelfState } from '@/hooks/use-self-state';
  * rotating, so no amount of shading fixes that on its own. The surface is
  * then lit with real THREE.js lights (not baked/decorative — genuine
  * per-pixel Lambertian + specular shading, so turning the shape reveals real
- * depth) plus an additive Fresnel rim shell for the "holographic" glow.
+ * depth) plus an additive Fresnel rim shell for the "holographic" glow, and
+ * a dense static point-cloud (26k dots, same brain shape, baked once) for
+ * the fine stippled "hologram scan" texture — the hull underneath is kept
+ * deliberately subtle so the dots and wireframe read as the dominant
+ * surface language, not a solid mesh.
  *
  * Every real-time value driving it is genuine:
  *
@@ -73,7 +77,7 @@ function shapeBrainPoint(nx: number, ny: number, nz: number, radius: number, out
   // Longitudinal fissure — a groove along the x=0 midline, strongest on
   // the dorsal (top) surface, fading out toward the base.
   const topWeight = Math.max(0, Math.min(1, ny + 0.35));
-  const fissure = Math.exp(-(nx * nx) / 0.02) * topWeight * 0.32;
+  const fissure = Math.exp(-(nx * nx) / 0.012) * topWeight * 0.13;
 
   // Temporal lobes — bulges low on each side.
   const temporal = Math.exp(-((Math.abs(nx) - 0.72) ** 2) / 0.032) *
@@ -99,6 +103,27 @@ function shapeBrainPoint(nx: number, ny: number, nz: number, radius: number, out
   }
 
   return out.set(x, y, z);
+}
+
+/**
+ * A small soft round glow sprite, generated once at runtime (no external
+ * asset) — used for every point-cloud layer so dots render as glowing
+ * circles instead of Three.js's default hard-edged squares.
+ */
+function createDotTexture(): THREE.Texture {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.4, 'rgba(255,255,255,0.7)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
 }
 
 /** Bakes shapeBrainPoint into every vertex of `geo` (a unit icosahedron). */
@@ -158,8 +183,8 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-    camera.position.set(0, 0.35, 6.8);
-    camera.lookAt(0, -0.05, 0);
+    camera.position.set(0, -0.1, 6.6);
+    camera.lookAt(0, -0.3, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -201,24 +226,63 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     const hullMat = new THREE.MeshPhysicalMaterial({
       color: initialColor,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.22,
       roughness: 0.35,
       metalness: 0.05,
       clearcoat: 0.4,
       clearcoatRoughness: 0.3,
       emissive: initialColor,
-      emissiveIntensity: 0.35,
+      emissiveIntensity: 0.3,
       side: THREE.FrontSide,
     });
     const hull = new THREE.Mesh(coreGeo, hullMat);
     brainGroup.add(hull);
 
-    // ── Circuit overlay: the same surface, as glowing fold-lines ────────
+    // ── Surface dots: a dense stippled point-cloud over the same brain ──
+    // shape — the fine "hologram scan" texture, sitting just above the
+    // hull. Positions are static (baked once, like the hull's rest shape)
+    // so this costs nothing extra per frame beyond a rotation update, even
+    // at tens of thousands of points — only the ripple-driven hull/wire
+    // layers need per-frame CPU vertex work.
+    const dotTexture = createDotTexture();
+    const SURFACE_DOT_COUNT = 26000;
+    const dotGeo = new THREE.BufferGeometry();
+    const dotPos = new Float32Array(SURFACE_DOT_COUNT * 3);
+    {
+      const dir = new THREE.Vector3();
+      const shaped = new THREE.Vector3();
+      for (let i = 0; i < SURFACE_DOT_COUNT; i++) {
+        const y = 1 - (i / (SURFACE_DOT_COUNT - 1)) * 2;
+        const r = Math.sqrt(Math.max(0, 1 - y * y));
+        const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+        dir.set(Math.cos(theta) * r, y, Math.sin(theta) * r);
+        shapeBrainPoint(dir.x, dir.y, dir.z, BRAIN_RADIUS * 1.012, shaped);
+        dotPos[i * 3] = shaped.x; dotPos[i * 3 + 1] = shaped.y; dotPos[i * 3 + 2] = shaped.z;
+      }
+    }
+    dotGeo.setAttribute('position', new THREE.BufferAttribute(dotPos, 3));
+    const dotMat = new THREE.PointsMaterial({
+      color: initialColor,
+      size: 0.026,
+      map: dotTexture,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true,
+    });
+    const surfaceDots = new THREE.Points(dotGeo, dotMat);
+    brainGroup.add(surfaceDots);
+
+    // ── Circuit overlay: the same (animated, low-poly) surface, kept ────
+    // faint — its job is the energy-driven ripple catching the light, not
+    // carrying the visible mesh texture (that's fineWire below, which is
+    // static and much higher-detail so it doesn't cost a per-frame CPU pass).
     const wireMat = new THREE.MeshBasicMaterial({
       color: initialColor,
       wireframe: true,
       transparent: true,
-      opacity: 0.32,
+      opacity: 0.12,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -226,8 +290,26 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     wireMesh.scale.setScalar(1.008);
     brainGroup.add(wireMesh);
 
+    // ── Fine static wireframe: the visible "circuit mesh" texture — much ──
+    // higher subdivision than the animated hull, baked once (never
+    // re-rippled per frame) so the fine grid stays cheap regardless of
+    // detail level. This is what makes the surface read as a dense
+    // hologram scan rather than a handful of big flat triangles.
+    const fineWireGeo = new THREE.IcosahedronGeometry(1, 6);
+    bakeBrainGeometry(fineWireGeo, BRAIN_RADIUS * 1.006);
+    const fineWireMat = new THREE.MeshBasicMaterial({
+      color: initialColor,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.22,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const fineWire = new THREE.Mesh(fineWireGeo, fineWireMat);
+    brainGroup.add(fineWire);
+
     // ── Fresnel glow shell: additive rim-light for the holographic edge ──
-    const glowGeo = new THREE.IcosahedronGeometry(1, 4);
+    const glowGeo = new THREE.IcosahedronGeometry(1, 6);
     bakeBrainGeometry(glowGeo, BRAIN_RADIUS * 1.18);
     const glowMat = new THREE.ShaderMaterial({
       uniforms: {
@@ -294,23 +376,28 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     scene.add(synapseLines);
 
     // ── Particle field — an ellipsoid halo echoing the brain's own ──────
-    // proportions, orbit speed tied to real energy.
-    const PARTICLE_COUNT = 260;
+    // proportions, orbit speed tied to real energy. Individual particles
+    // burst outward on a real timeline event (never a fake timer) for a
+    // visible "something just happened" pulse, then relax back.
+    const PARTICLE_COUNT = 480;
     const particleGeo = new THREE.BufferGeometry();
     const particlePos = new Float32Array(PARTICLE_COUNT * 3);
-    const particleAngles: { theta: number; phi: number; r: number; speed: number }[] = [];
+    const particleAngles: { theta: number; phi: number; baseR: number; speed: number; boost: number }[] = [];
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
-      const r = 2.6 + Math.random() * 1.4;
-      particleAngles.push({ theta, phi, r, speed: 0.05 + Math.random() * 0.15 });
+      const baseR = 2.5 + Math.random() * 1.5;
+      particleAngles.push({ theta, phi, baseR, speed: (Math.random() < 0.5 ? -1 : 1) * (0.05 + Math.random() * 0.2), boost: 0 });
     }
     particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
     const particleMat = new THREE.PointsMaterial({
       color: new THREE.Color().setHSL(BASE_HUE, 1, 0.75),
-      size: 0.035,
+      size: 0.045,
+      map: dotTexture,
       transparent: true,
-      opacity: 0.75,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
       sizeAttenuation: true,
     });
     const particles = new THREE.Points(particleGeo, particleMat);
@@ -365,20 +452,31 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       hullMat.color.copy(color);
       hullMat.emissive.copy(color);
       hullMat.emissiveIntensity = 0.25 + energy * 0.35;
-      hullMat.opacity = 0.4 + energy * 0.3;
+      hullMat.opacity = 0.06 + energy * 0.08;
       wireMat.color.copy(color);
-      wireMat.opacity = 0.2 + energy * 0.3;
+      wireMat.opacity = 0.03 + energy * 0.04;
+      fineWireMat.color.copy(color);
+      fineWireMat.opacity = 0.05 + energy * 0.05;
+      dotMat.color.copy(color);
+      dotMat.opacity = 0.7 + energy * 0.25;
       glowMat.uniforms.uColor.value.copy(color);
-      glowMat.uniforms.uOpacity.value = 0.35 + energy * 0.4;
+      glowMat.uniforms.uOpacity.value = 0.05 + energy * 0.1;
       rimLight.color.copy(color);
       rimLight.intensity = 0.9 + energy * 1.1;
       particleMat.color.copy(color);
 
-      brainGroup.rotation.y += (reduceMotion ? 0.0008 : 0.0018) + energy * 0.001;
-      brainGroup.rotation.x = Math.sin(t * 0.08) * 0.05;
+      // Continuous rotation + a slow bob — deliberately fast enough to be
+      // clearly perceptible at rest, not just a near-static drift; this is
+      // machinery (always-on), not a real-signal target, same as the rest
+      // of the render loop's "time picks the phase, state picks the size".
+      brainGroup.rotation.y += (reduceMotion ? 0.0012 : 0.004) + energy * 0.002;
+      brainGroup.rotation.x = Math.sin(t * 0.15) * 0.06;
+      brainGroup.position.y = Math.sin(t * 0.35) * 0.06;
+      surfaceDots.rotation.y += reduceMotion ? 0 : 0.0006; // slight independent drift for parallax
       synapseLines.rotation.y = brainGroup.rotation.y;
       synapseLines.rotation.x = brainGroup.rotation.x;
-      particles.rotation.y += spin * 0.002;
+      particles.rotation.y += spin * 0.0028;
+      particles.rotation.x = Math.sin(t * 0.1) * 0.1;
 
       // ── Synapse firing — driven by real timeline events, not a clock ──
       const currentTimeline = timelineRef.current;
@@ -390,6 +488,12 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
           for (let k = 0; k < 4; k++) {
             const idx = Math.floor(Math.random() * synapses.length);
             synapses[idx].fire = 1;
+          }
+          // Send a burst of ambient particles outward — a visible "something
+          // just happened" pulse, triggered only by this real event.
+          for (let k = 0; k < 24; k++) {
+            const idx = Math.floor(Math.random() * PARTICLE_COUNT);
+            particleAngles[idx].boost = 1;
           }
         }
       }
@@ -408,13 +512,15 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
 
       // Particles: orbit speed from energy; ellipsoid shape echoes the
       // brain's own proportions; when listening, drift inward toward the
-      // core in proportion to real mic amplitude.
+      // core in proportion to real mic amplitude; boost (event-triggered
+      // above) pushes a particle outward then relaxes it back.
       const posArr = particleGeo.attributes.position.array as Float32Array;
       for (let i = 0; i < PARTICLE_COUNT; i++) {
         const p = particleAngles[i];
         if (!reduceMotion) p.theta += p.speed * 0.012 * (0.3 + energy * 1.3);
+        if (p.boost > 0) p.boost = Math.max(0, p.boost - 0.015);
         const inward = isListening ? micLevel * 0.9 : 0;
-        const r = p.r * (1 - inward * 0.35);
+        const r = p.baseR * (1 - inward * 0.35) + p.boost * 1.6;
         const ix = i * 3;
         posArr[ix]     = Math.sin(p.phi) * Math.cos(p.theta) * r * 1.05;
         posArr[ix + 1] = Math.cos(p.phi) * r * 0.9;
@@ -434,9 +540,14 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       coreGeo.dispose();
       hullMat.dispose();
       wireMat.dispose();
+      fineWireGeo.dispose();
+      fineWireMat.dispose();
       glowGeo.dispose();
       glowMat.dispose();
       stemGeo.dispose();
+      dotGeo.dispose();
+      dotMat.dispose();
+      dotTexture.dispose();
       synapseGeo.dispose();
       synapseMat.dispose();
       particleGeo.dispose();

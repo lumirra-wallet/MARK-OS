@@ -833,6 +833,15 @@ class OllamaProvider(BaseModel):
             options["top_k"] = int(kwargs["top_k"])
         if "max_tokens" in kwargs:
             options["num_predict"] = int(kwargs["max_tokens"])
+        # Without an explicit num_ctx, Ollama loads the model at its own
+        # max advertised context (131072 for llama3.2, confirmed via
+        # `ollama ps`) — that meant a ~17GB KV-cache allocation and 100%
+        # CPU for well over a minute before a single token came back, for
+        # an ordinary chat turn. 8192 comfortably covers MARK's system
+        # prompt + conversation history + a real reply on CPU-only
+        # hardware; override via num_ctx in kwargs if a call genuinely
+        # needs more.
+        options["num_ctx"] = int(kwargs.get("num_ctx", 8192))
         return options
 
 

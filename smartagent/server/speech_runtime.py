@@ -202,7 +202,7 @@ class SpeechRuntime:
         self._broadcast_bytes(pcm)
 
     def _broadcast_event(self, name: str, payload: dict[str, Any]) -> None:
-        if self._manager is None or self._loop is None:
+        if self._manager is None or self._loop is None or self._loop.is_closed():
             return
         msg = {
             "type": "event", "name": name, "payload": payload,
@@ -214,7 +214,7 @@ class SpeechRuntime:
             pass
 
     def _broadcast_bytes(self, data: bytes) -> None:
-        if self._manager is None or self._loop is None:
+        if self._manager is None or self._loop is None or self._loop.is_closed():
             return
         try:
             asyncio.run_coroutine_threadsafe(self._manager.broadcast_bytes(data), self._loop)

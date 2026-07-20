@@ -196,7 +196,9 @@ export function useVoice() {
     socket.onclose = () => {
       teardownAudio();
       if (enabledRef.current) {
-        reconnectTimerRef.current = setTimeout(connectVoiceSocket, 2000);
+        // Fast recovery, matching the main /ws connection — a stale mic
+        // socket shouldn't need seconds to notice and come back.
+        reconnectTimerRef.current = setTimeout(connectVoiceSocket, 500);
       }
     };
     socket.onerror = () => { /* handled by close */ };
