@@ -65,7 +65,9 @@ _SENTENCE_END_RE = re.compile(r'([.!?]+["\')\]]*(?:\s+|$))')
 
 # A long unpunctuated stretch shouldn't block MARK from starting to speak —
 # past this many buffered characters, force a flush at the last space.
-_SOFT_FLUSH_LEN = 220
+# 160 chars (≈ 25 words) keeps TTS chunks short enough to start playing
+# quickly and stay intelligible even without a natural sentence boundary.
+_SOFT_FLUSH_LEN = 160
 
 # Sentinel enqueued by flush() to mark "no more sentences for this reply".
 _END_OF_REPLY = object()
@@ -73,16 +75,35 @@ _END_OF_REPLY = object()
 
 def _split_complete_sentences(buffer: str) -> tuple[list[str], str]:
     """Split *buffer* into complete sentences plus a remainder that isn't
-    terminated yet."""
+    terminated yet.
+
+    Key fix: require at least 8 accumulated characters before treating a
+    period as a sentence boundary. This filters abbreviations ("Mr.", "Dr.",
+    "vs.", "U.S.") that have very short bodies before the period — they are
+    folded back into the accumulator so the TTS never receives a garbled
+    fragment like "Mr" as a standalone utterance.
+    """
     parts = _SENTENCE_END_RE.split(buffer)
     sentences: list[str] = []
+    accumulated = ""   # text built up across short/abbreviation boundaries
     i = 0
     while i + 1 < len(parts):
-        sentence = (parts[i] + parts[i + 1]).strip()
-        if sentence:
-            sentences.append(sentence)
+        body  = parts[i]
+        punct = parts[i + 1]
+        accumulated += body
+        # Commit a sentence boundary only when there is enough substance.
+        # "Mr. Smith" → body="Mr" (2 chars) → abbreviation, keep going.
+        # "Hello there. " → body="Hello there" (11 chars) → real boundary.
+        if len(accumulated.strip()) >= 8:
+            candidate = (accumulated + punct).strip()
+            if candidate:
+                sentences.append(candidate)
+            accumulated = ""
+        else:
+            # Abbreviation — fold punctuation back and keep accumulating.
+            accumulated += punct
         i += 2
-    remainder = parts[i] if i < len(parts) else ""
+    remainder = accumulated + (parts[i] if i < len(parts) else "")
 
     if len(remainder) > _SOFT_FLUSH_LEN:
         cut = remainder.rfind(" ", 0, _SOFT_FLUSH_LEN)

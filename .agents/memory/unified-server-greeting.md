@@ -33,5 +33,14 @@ description: Architecture decisions made when merging servers and adding streami
 ### /healthz alias
 Added `GET /healthz` to FastAPI (`smartagent/server/api.py`) returning `{"status": "ok"}` — absorbs the only endpoint the retired Node.js `api-server` had. The api-server workflow can be stopped; nothing in the dashboard uses it.
 
-### HMR artifact with new useRef in use-voice.ts
-Adding a new `useRef` to `useVoice` triggers a React hooks-order HMR error when the module hot-swaps. This is an HMR-only artifact — a hard refresh clears it. Normal after any hook count change in that file.
+### HMR artifact in use-voice.ts (consistent pattern)
+Adding any new hook (`useRef`, `useMarkStore`, `useEffect`) to `useVoice` triggers a React hooks-order HMR error when the module hot-swaps. This is an **HMR-only artifact** — a hard refresh clears it. Seen every time hook count changes in that file. Do not treat as a real bug.
+
+### Voice pipeline reliability fixes
+- Rate limiter: raised from 10 to 30 requests/60s (`smartagent/server/rate_limiter.py`)
+- `/run` 409 race condition: if `_current_inference_task` is done/cancelled, reset `_state.running = False` and proceed instead of raising 409 (`api.py` execute endpoint)
+- Sentence splitter: require 8+ accumulated chars before committing a sentence boundary — filters "Mr.", "Dr." abbreviations that produce garbled TTS fragments (`speech_runtime.py` `_split_complete_sentences`)
+- `_SOFT_FLUSH_LEN` lowered 220 → 160 for shorter, faster TTS chunks
+- Voice message queue: `pendingVoiceMessageRef` in `use-voice.ts` holds messages that arrived while MARK was mid-run; flushed via `useEffect` watching `isRunning`
+- `sendUserMessage` catch: 409 silently discarded; other errors log `.message` not the raw object
+- `speechPlayer.ts`: reset `nextStartTime = 0` when AudioContext is suspended so audio starts immediately after resume

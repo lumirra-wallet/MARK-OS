@@ -17,7 +17,7 @@ from collections import defaultdict, deque
 
 
 class RateLimiter:
-    def __init__(self, max_requests: int = 10, window_seconds: float = 60.0) -> None:
+    def __init__(self, max_requests: int = 30, window_seconds: float = 60.0) -> None:
         self._max = max_requests
         self._window = window_seconds
         self._lock = threading.Lock()

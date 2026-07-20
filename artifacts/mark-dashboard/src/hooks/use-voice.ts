@@ -99,6 +99,14 @@ export function useVoice() {
   const enabledRef = useRef(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const voiceReconnectAttemptsRef = useRef(0);
+  // Voice message queued while MARK was mid-run (interrupt scenario).
+  // Flushed automatically once the run completes.
+  const pendingVoiceMessageRef = useRef<string | null>(null);
+  // Ref-copy of isRunning so the onmessage closure (captured once) can
+  // read the live value without stale-closure issues.
+  const isRunningRef = useRef(false);
+  const isRunning = useMarkStore(s => s.running);
+  useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
 
   // Keep a ref in sync with isMarkSpeaking so onaudioprocess (which captures
   // the ref at processor-creation time, not on every render) can read the
@@ -228,7 +236,17 @@ export function useVoice() {
           setInterimTranscript(msg.text || '');
         } else if (msg.type === 'final') {
           setInterimTranscript('');
-          if (msg.text) sendUserMessage(msg.text, workspace);
+          if (msg.text) {
+            if (isRunningRef.current) {
+              // MARK is still processing (inference was just cancelled by the
+              // speech_start interrupt but _state.running hasn't cleared yet).
+              // Queue the message — the useEffect below sends it the moment
+              // the run completes, so the user's word is never dropped.
+              pendingVoiceMessageRef.current = msg.text;
+            } else {
+              sendUserMessage(msg.text, workspace);
+            }
+          }
         }
       } catch {
         /* ignore malformed frame */
@@ -249,6 +267,19 @@ export function useVoice() {
     };
     socket.onerror = () => { /* handled by close */ };
   }, [serverUrl, pollLevel, sendUserMessage, stopMarkSpeech, teardownAudio, workspace]);
+
+  // When a run completes and there's a voice message that was queued during
+  // the interrupt window, send it now. This is the "never lose a spoken
+  // message" guarantee: speech_start cancels MARK's inference, but the
+  // final transcript arrives before _state.running has fully cleared —
+  // we queue it here and flush the moment the run is done.
+  useEffect(() => {
+    if (!isRunning && pendingVoiceMessageRef.current && enabledRef.current) {
+      const queued = pendingVoiceMessageRef.current;
+      pendingVoiceMessageRef.current = null;
+      sendUserMessage(queued, workspace);
+    }
+  }, [isRunning, sendUserMessage, workspace]);
 
   const toggleVoice = useCallback(() => {
     setVoiceEnabled(v => {

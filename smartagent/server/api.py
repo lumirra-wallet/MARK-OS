@@ -479,7 +479,18 @@ async def execute(req: ExecuteRequest) -> dict:
     already in progress.
     """
     if _state.running:
-        raise HTTPException(409, "A build is already running.  Call /cancel first.")
+        # Allow the new run through if the current inference task was
+        # already cancelled by a voice interrupt — there is a narrow race
+        # where speech_start fires, _current_inference_task.cancel() runs,
+        # but the finally block in _run() hasn't cleared _state.running yet
+        # by the time the voice transcript arrives and calls /run again.
+        # Resetting here lets the new turn start immediately instead of
+        # dropping the user's spoken message with a 409.
+        _task = _current_inference_task
+        if _task is not None and (_task.done() or _task.cancelled()):
+            _state.running = False   # stale flag — clear and fall through
+        else:
+            raise HTTPException(409, "A build is already running.  Call /cancel first.")
 
     _state.running          = True
     _state.goal             = req.goal

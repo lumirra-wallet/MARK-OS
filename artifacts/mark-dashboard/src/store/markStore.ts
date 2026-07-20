@@ -1155,11 +1155,19 @@ export const useMarkStore = create<MarkState>((set, get) => {
       try {
         await markApi.startRun(get().serverUrl, text, workspace);
       } catch (err) {
-        console.error(err);
+        // 409 = run already active (race between voice interrupt + new turn).
+        // The voice hook queues the message and retries — no error UI needed.
+        const status = (err as { status?: number })?.status
+          ?? ((err as { message?: string })?.message?.includes('409') ? 409 : 0);
+        if (status === 409) return;
+        const msg = err instanceof Error ? err.message
+          : typeof err === 'object' && err !== null ? JSON.stringify(err)
+          : String(err);
+        console.error('sendUserMessage failed:', msg);
         set(state => ({
           messages: [...state.messages, {
             id: _id(), role: 'mark' as const, timestamp: new Date().toISOString(),
-            blocks: [{ type: 'error', text: 'Could not connect to the MARK server. Make sure it is running on the configured URL.' }],
+            blocks: [{ type: 'error', text: 'Could not reach the MARK server. Make sure it is running.' }],
             isActive: false,
           }],
           lastError: 'Failed to start run',

@@ -39,9 +39,15 @@ export class SpeechPlayer {
   /** Enqueue one raw PCM16 mono chunk for gapless playback. */
   enqueue(pcm16: ArrayBuffer): void {
     if (pcm16.byteLength === 0) return;
-    console.debug('[MARK speech] audio chunk received:', pcm16.byteLength, 'bytes');
     const ctx = this.ensureContext();
-    if (ctx.state === 'suspended') void ctx.resume();
+
+    // If the context was suspended (autoplay policy, tab backgrounded, etc.)
+    // re-anchor nextStartTime so audio begins immediately after resume rather
+    // than after a long silence gap accumulated while suspended.
+    if (ctx.state === 'suspended') {
+      this.nextStartTime = 0;   // reset; startAt will use ctx.currentTime
+      void ctx.resume();
+    }
 
     const int16 = new Int16Array(pcm16);
     const float32 = new Float32Array(int16.length);
@@ -54,6 +60,10 @@ export class SpeechPlayer {
     source.buffer = buffer;
     source.connect(ctx.destination);
 
+    // Math.max handles two cases:
+    //  1. nextStartTime > ctx.currentTime → schedule back-to-back (gapless)
+    //  2. nextStartTime <= ctx.currentTime → context was idle/suspended;
+    //     start immediately (no silence gap).
     const startAt = Math.max(ctx.currentTime, this.nextStartTime);
     source.start(startAt);
     this.nextStartTime = startAt + buffer.duration;
