@@ -1,0 +1,483 @@
+# MARK AI Operating System — Troubleshooting Guide
+
+**Version:** 1.0  
+**Date:** 2025
+
+---
+
+## Quick Diagnostic Checklist
+
+When something goes wrong, run these first:
+
+```bash
+# 1. Check system health
+python -m smartagent --version
+mark> validate
+
+# 2. Check Python environment
+python -c "import smartagent; print('OK')"
+
+# 3. Check Node environment
+pnpm --version && cd artifacts/mark-dashboard && pnpm run build
+
+# 4. Check Ollama
+curl http://localhost:11434/api/tags
+
+# 5. Check Git
+git status
+```
+
+---
+
+## Installation Issues
+
+### Python Package Installation Fails
+
+**Symptoms:** `pip install -r requirements.txt` errors, import errors
+
+**Solutions:**
+```bash
+# Upgrade build tools
+pip install --upgrade pip setuptools wheel
+
+# Force reinstall
+pip install --force-reinstall -r requirements.txt
+
+# Check Python version (must be 3.10+)
+python --version
+
+# On Linux: install system dependencies
+sudo apt-get install python3-dev build-essential libffi-dev
+```
+
+### Node.js / pnpm Installation Fails
+
+**Symptoms:** `pnpm install` errors, lockfile conflicts
+
+**Solutions:**
+```bash
+# Use correct pnpm version
+corepack enable pnpm
+corepack prepare pnpm@latest --activate
+
+# Clear cache and retry
+pnpm store prune
+rm pnpm-lock.yaml
+pnpm install
+
+# If workspace issues
+pnpm install --frozen-lockfile=false
+```
+
+### Ollama Not Found / Connection Refused
+
+**Symptoms:** `Connection refused` to localhost:11434, model errors
+
+**Solutions:**
+```bash
+# Check if running
+curl http://localhost:11434/api/tags
+
+# Start Ollama service
+ollama serve
+
+# macOS with Homebrew
+brew services start ollama
+
+# Linux systemd
+sudo systemctl start ollama
+
+# Check firewall/port
+netstat -tlnp | grep 11434
+
+# Use different host/port
+export OLLAMA_HOST=http://localhost:11434
+```
+
+---
+
+## Runtime Issues
+
+### MARK Console Won't Start
+
+**Symptoms:** `python -m smartagent` fails, import errors
+
+**Diagnostics:**
+```bash
+# Check module path
+python -c "import sys; print('\n'.join(sys.path))"
+python -c "import smartagent; print(smartagent.__file__)"
+
+# Check for missing dependencies
+pip check
+```
+
+**Solutions:**
+```bash
+# Reinstall in development mode
+pip install -e .
+
+# Check PYTHONPATH
+export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+
+# Verify entry point
+cat setup.cfg  # or pyproject.toml
+```
+
+### "Model Not Found" / Model Loading Fails
+
+**Symptoms:** `Model llama3 not found`, timeout errors, OOM errors
+
+**Solutions:**
+```bash
+# List available models
+ollama list
+
+# Pull required model
+ollama pull llama3
+
+# For memory issues, use smaller model
+ollama pull llama3:8b  # instead of 70b
+
+# Check model in MARK
+mark> model list
+mark> model use llama3:8b
+
+# Increase swap if OOM
+sudo fallocate -l 8G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+```
+
+### Dashboard Won't Load / Blank Screen
+
+**Symptoms:** White screen, console errors, API connection failed
+
+**Diagnostics:**
+```bash
+# Check API server
+curl http://localhost:3000/health
+
+# Check dashboard build
+cd artifacts/mark-dashboard && pnpm run build
+
+# Check browser console for errors (F12)
+```
+
+**Solutions:**
+```bash
+# Restart both services
+cd artifacts/api-server && pnpm run dev
+cd artifacts/mark-dashboard && pnpm run dev
+
+# Check CORS/ports in vite.config.ts
+# API_BASE_URL should match API server port
+
+# Clear browser cache / try incognito
+```
+
+---
+
+## Command Execution Issues
+
+### Engineer Command Fails / Hangs
+
+**Symptoms:** Stuck at "Analyzing", "Planning", or "Coding" phase
+
+**Diagnostics:**
+```bash
+# Check logs
+tail -f logs/mark.log
+
+# Run with debug
+mark> debug engineer Build a todo app
+
+# Check model health
+mark> model health
+```
+
+**Solutions:**
+```bash
+# Use interactive mode for clarification
+mark> engineer --interactive Build a todo app
+
+# Increase timeout (if configurable)
+# Check model is responding
+ollama run llama3 "Hello"
+
+# Simplify the goal
+mark> engineer Create a hello world Python file
+```
+
+### Git Operations Fail
+
+**Symptoms:** `git commit` fails, push rejected, merge conflicts
+
+**Solutions:**
+```bash
+# Check status
+mark> git status
+
+# Configure git if not done
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+
+# For push rejected: pull first
+git pull --rebase origin main
+
+# For merge conflicts
+git status  # shows conflicted files
+# Edit files to resolve, then:
+git add .
+git commit
+```
+
+### Tests Fail
+
+**Symptoms:** `pytest` fails, specific test modules error
+
+**Diagnostics:**
+```bash
+# Run with verbose output
+pytest tests/test_engineer.py -v --tb=long
+
+# Run single test
+pytest tests/test_engineer.py::test_specific -v
+
+# Check test dependencies
+pip install pytest-asyncio pytest-cov
+```
+
+**Common Fixes:**
+```bash
+# Reinstall test dependencies
+pip install -r requirements-test.txt  # if exists
+
+# Clear pytest cache
+pytest --cache-clear
+
+# Run in isolated environment
+python -m pytest tests/test_engineer.py
+```
+
+---
+
+## Performance Issues
+
+### Slow Response Times
+
+**Symptoms:** Commands take >30 seconds, timeouts
+
+**Diagnostics:**
+```bash
+# Check system resources
+htop  # or top
+free -h
+df -h
+
+# Check model performance
+time ollama run llama3 "Hello"
+```
+
+**Solutions:**
+```bash
+# Use smaller/faster model
+mark> model use llama3:8b
+
+# Reduce context / limit tokens
+# (configure in model settings)
+
+# Enable model caching
+# Ensure sufficient RAM for model
+
+# For dashboard: enable production build
+cd artifacts/mark-dashboard && pnpm run build && pnpm run serve
+```
+
+### High Memory Usage
+
+**Solutions:**
+```bash
+# Check what's using memory
+ps aux --sort=-%mem | head -20
+
+# Limit Ollama memory
+OLLAMA_NUM_PARALLEL=1 ollama serve
+
+# Use quantized models
+ollama pull llama3:8b-q4_0
+
+# Clear memory caches
+sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
+```
+
+---
+
+## Error Reference
+
+### Python Errors
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `ModuleNotFoundError: smartagent` | Not installed / wrong env | `pip install -e .` |
+| `ImportError: cannot import name` | Version mismatch | `pip install --force-reinstall -r requirements.txt` |
+| `Asyncio` errors | Event loop issues | Update Python, check async code |
+| `pydantic` validation errors | Config/schema mismatch | Check `.env` and config files |
+
+### Node.js Errors
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `Cannot find module` | Dependencies not installed | `pnpm install` |
+| `Port 5173 already in use` | Another dev server running | `lsof -i :5173` then kill |
+| `TypeScript errors` | Type mismatches | `pnpm run typecheck` |
+| `Out of memory` | Large build | Increase Node memory: `NODE_OPTIONS=--max-old-space-size=4096` |
+
+### Ollama Errors
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `model not found` | Not pulled | `ollama pull <model>` |
+| `out of memory` | Model too large | Use smaller/quantized model |
+| `connection refused` | Service not running | `ollama serve` |
+| `timeout` | Slow generation | Increase timeout, use faster model |
+
+---
+
+## Logs and Debugging
+
+### Log Locations
+
+| Component | Log Location |
+|-----------|--------------|
+| MARK Console | `logs/mark.log` |
+| API Server | Console output / `pino` logs |
+| Dashboard | Browser DevTools Console |
+| Ollama | `~/.ollama/logs/` or `journalctl -u ollama` |
+| Tests | `pytest --log-cli-level=DEBUG` |
+
+### Enable Debug Logging
+
+```bash
+# MARK console
+export LOG_LEVEL=DEBUG
+python -m smartagent
+
+# Or in .env
+LOG_LEVEL=DEBUG
+```
+
+### Useful Debug Commands
+
+```bash
+# MARK internal state
+mark> debug --help
+mark> memory list
+mark> project show
+
+# System state
+mark> validate
+mark> workspace scan .
+
+# Git state
+mark> git status
+mark> git diff
+```
+
+---
+
+## Recovery Procedures
+
+### Reset MARK State
+
+```bash
+# Clear memory/cache
+rm -rf logs/
+rm -rf .mark_memory/
+rm -rf .project_context/
+
+# Re-scan project
+mark> project scan
+```
+
+### Reset Dashboard
+
+```bash
+cd artifacts/mark-dashboard
+rm -rf node_modules dist .vite
+pnpm install
+pnpm run dev
+```
+
+### Reset API Server
+
+```bash
+cd artifacts/api-server
+rm -rf node_modules dist
+pnpm install
+pnpm run dev
+```
+
+### Full Clean Reinstall
+
+```bash
+# Python
+pip uninstall -y smartagent
+pip cache purge
+pip install -e .
+
+# Node
+pnpm store prune
+rm -rf node_modules artifacts/*/node_modules
+pnpm install
+```
+
+---
+
+## Getting Help
+
+### Before Reporting Issues
+
+1. Run `validate` and note results
+2. Check `logs/mark.log` for errors
+3. Try with minimal reproduction case
+4. Note: OS, Python version, Node version, Ollama version
+
+### Useful Information to Include
+
+```bash
+# System info
+python --version && node --version && pnpm --version && ollama --version
+
+# MARK version
+python -m smartagent --version
+
+# Test output
+pytest tests/test_engineer.py -v 2>&1 | head -50
+
+# Logs
+tail -100 logs/mark.log
+```
+
+### Documentation References
+
+- **User Guide:** `docs/user_guide.docx`
+- **Setup Instructions:** `docs/setup_instructions.docx`
+- **Architecture:** `ARCHITECTURE.md`
+- **Canonical Specs:** `docs/canonical/CLAUDE_ENGINEER_BOOTSTRAP.md`
+- **Changelog:** `CHANGELOG.md`
+- **Roadmap:** `ROADMAP.md`
+
+---
+
+## Known Issues (Current Version)
+
+| Issue | Workaround | Status |
+|-------|------------|--------|
+| Dashboard WebSocket disconnects | Refresh page, check API server | Investigating |
+| Long-running tasks timeout | Use `long-run` command | By design |
+| Large context window OOM | Use smaller model / quantized | Configure model |
+| Git push requires auth | Configure SSH keys / token | User setup |
+
+---
+
+*Last updated: 2025*  
+*For the latest troubleshooting info, check the project wiki or issue tracker.*

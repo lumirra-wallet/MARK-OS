@@ -1,0 +1,279 @@
+# MARK AI Operating System — Setup Instructions
+
+**Version:** 1.0  
+**Date:** 2025
+
+---
+
+## Prerequisites Checklist
+
+Before installing MARK, ensure you have:
+
+- [ ] **Python 3.10+** installed (`python --version`)
+- [ ] **Node.js 20+** and **pnpm** installed (`node --version && pnpm --version`)
+- [ ] **Git 2.30+** installed (`git --version`)
+- [ ] **Ollama** installed and running (optional but recommended)
+- [ ] **8 GB+ RAM** available (16 GB+ recommended for local models)
+- [ ] **5 GB+ disk space** for dependencies and models
+
+---
+
+## Step-by-Step Installation
+
+### 1. Clone the Repository
+
+```bash
+git clone <repository-url>
+cd mark-aios
+```
+
+### 2. Set Up Python Environment
+
+#### Option A: Virtual Environment (Recommended)
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate   # Windows
+```
+
+#### Option B: Conda
+```bash
+conda create -n mark python=3.11
+conda activate mark
+```
+
+### 3. Install Python Dependencies
+
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### 4. Install Node.js Dependencies
+
+```bash
+pnpm install
+```
+
+This installs dependencies for all workspaces:
+- `artifacts/api-server` — API server
+- `artifacts/mark-dashboard` — Web dashboard
+- `artifacts/mark-api` — API types
+- `artifacts/mockup-sandbox` — Development sandbox
+- `scripts` — Build scripts
+
+### 5. Install and Configure Ollama (Recommended)
+
+#### macOS
+```bash
+brew install ollama
+brew services start ollama
+```
+
+#### Linux
+```bash
+curl -fsSL https://ollama.ai/install.sh | sh
+ollama serve &
+```
+
+#### Windows
+Download from https://ollama.ai/download
+
+#### Pull Recommended Models
+```bash
+# Essential models
+ollama pull llama3
+ollama pull codellama
+
+# Optional: Larger models (require more RAM)
+# ollama pull llama3:70b
+# ollama pull codellama:34b
+```
+
+#### Verify Ollama
+```bash
+ollama list
+curl http://localhost:11434/api/tags
+```
+
+### 6. Configure Environment
+
+```bash
+cp .env.example .env  # if available, or create manually
+```
+
+Edit `.env` with your settings:
+```env
+# Ollama (required for local models)
+OLLAMA_HOST=http://localhost:11434
+DEFAULT_MODEL=llama3
+
+# Optional: Cloud API keys
+# ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+
+# Logging
+LOG_LEVEL=INFO
+```
+
+### 7. Configure Git (Required for Git Operations)
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+```
+
+### 8. Verify Installation
+
+```bash
+# Test Python module
+python -m smartagent --help
+
+# Test dashboard build
+cd artifacts/mark-dashboard && pnpm run build
+
+# Test API server
+cd artifacts/api-server && pnpm run build
+```
+
+---
+
+## Starting MARK
+
+### Option 1: Console Mode (Primary Interface)
+
+```bash
+python -m smartagent
+```
+
+You'll see the MARK prompt: `mark>`
+
+### Option 2: Dashboard Mode (Visual Interface)
+
+**Terminal 1 — API Server:**
+```bash
+cd artifacts/api-server
+pnpm run dev
+# Runs on http://localhost:3000
+```
+
+**Terminal 2 — Dashboard:**
+```bash
+cd artifacts/mark-dashboard
+pnpm run dev
+# Runs on http://localhost:5173
+```
+
+Open browser to **http://localhost:5173**
+
+---
+
+## First-Time Setup in MARK Console
+
+### 1. Set Your Project
+```
+mark> project set /path/to/your/project
+```
+
+### 2. Scan Project
+```
+mark> project scan
+```
+
+### 3. Select Model
+```
+mark> model list
+mark> model use llama3
+```
+
+### 4. Test with a Simple Task
+```
+mark> engineer Create a hello world Python script
+```
+
+---
+
+## Running Tests
+
+### Full Test Suite
+```bash
+pytest -v
+# 1900+ tests across all modules
+```
+
+### Key Test Suites by Milestone
+```bash
+# M25: Software Engineer
+pytest tests/test_engineer.py -v
+
+# M24: Dev Loop
+pytest tests/test_dev_loop.py -v
+
+# M23: Long Running
+pytest tests/test_long_running.py -v
+
+# M22: Project Memory
+pytest tests/test_project_memory.py -v
+
+# M21: Git Engine
+pytest tests/test_git.py -v
+
+# Validation Suite (5 scenarios)
+pytest tests/validation/ -v
+```
+
+### With Coverage
+```bash
+pytest --cov=smartagent --cov-report=html
+```
+
+---
+
+## Docker Deployment (Alternative)
+
+### Build Image
+```bash
+docker build -t mark-aios .
+```
+
+### Run Container
+```bash
+docker run -it \
+  -v $(pwd):/workspace \
+  -v ~/.ollama:/root/.ollama \
+  --network host \
+  mark-aios
+```
+
+### Docker Compose (Full Stack)
+```bash
+docker-compose up -d
+# Services: mark-api, mark-dashboard, ollama
+```
+
+---
+
+## Troubleshooting Installation
+
+| Issue | Solution |
+|-------|----------|
+| `pip install` fails | `pip install --upgrade pip setuptools wheel` |
+| `pnpm install` fails | `pnpm install --frozen-lockfile` or delete `pnpm-lock.yaml` and retry |
+| Python import errors | Ensure virtual env is active, reinstall with `--force-reinstall` |
+| Ollama not found | Add to PATH, or use full path in .env |
+| Permission errors | Check file permissions, avoid running as root |
+| Port conflicts | Change ports in vite.config.ts / API server config |
+
+---
+
+## Next Steps
+
+1. Read the **User Guide** (`docs/user_guide.docx`)
+2. Try the **Quick Start** workflow
+3. Explore the **Dashboard** at http://localhost:5173
+4. Review **Architecture** (`ARCHITECTURE.md`)
+5. Check **Milestone Docs** in `docs/canonical/`
+
+---
+
+*For issues, check `docs/troubleshooting_guide.docx` or file a bug report.*

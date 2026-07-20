@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>User Guide</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
+        h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        h2 { color: #34495e; margin-top: 30px; }
+        h3 { color: #7f8c8d; }
+        code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+        pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        .note { background: #e8f4fd; border-left: 4px solid #3498db; padding: 15px; margin: 15px 0; }
+        .warning { background: #fef0d5; border-left: 4px solid #f39c12; padding: 15px; margin: 15px 0; }
+        ul, ol { margin: 15px 0; padding-left: 25px; }
+        li { margin: 8px 0; }
+    </style>
+</head>
+<body>
+    <h1>User Guide</h1>
+    <p><strong>Application Name:</strong> MARK Operating System<br>
+    <strong>Version:</strong> 1.0.0<br>
+    <strong>Last Updated:</strong> 2025</p>
+
+    <h2>Table of Contents</h2>
+    <ol>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#getting-started">Getting Started</a></li>
+        <li><a href="#core-features">Core Features</a></li>
+        <li><a href="#usage-workflows">Usage Workflows</a></li>
+        <li><a href="#configuration">Configuration</a></li>
+        <li><a href="#best-practices">Best Practices</a></li>
+        <li><a href="#support">Support & Resources</a></li>
+    </ol>
+
+    <h2 id="overview">1. Overview</h2>
+    <p>MARK is an intelligent operating system designed to coordinate specialist AI workers for complex engineering tasks. It provides a structured framework for task decomposition, worker orchestration, and result aggregation.</p>
+
+    <h3>Key Concepts</h3>
+    <ul>
+        <li><strong>MARK (Master Agent for Recursive Knowledge):</strong> The central orchestration layer</li>
+        <li><strong>Workers:</strong> Specialized AI agents (Engineer, Planner, Researcher, QA, etc.)</li>
+        <li><strong>Milestones:</strong> Discrete units of work assigned to workers</li>
+        <li><strong>Tools:</strong> Capabilities available to workers (file ops, terminal, search, git)</li>
+    </ul>
+
+    <div class="note">
+        <strong>Note:</strong> This guide assumes you have completed the initial setup. See <a href="setup_instructions.docx">Setup Instructions</a> for installation details.
+    </div>
+
+    <h2 id="getting-started">2. Getting Started</h2>
+
+    <h3>2.1 Prerequisites</h3>
+    <ul>
+        <li>Python 3.10+</li>
+        <li>Git</li>
+        <li>Access to LLM API (OpenAI, Anthropic, or local)</li>
+    </ul>
+
+    <h3>2.2 First Run</h3>
+    <ol>
+        <li>Clone the repository</li>
+        <li>Install dependencies: <code>pip install -r requirements.txt</code></li>
+        <li>Configure environment variables (see Configuration section)</li>
+        <li>Run: <code>python -m mark</code></li>
+    </ol>
+
+    <h3>2.3 Basic Interaction</h3>
+    <p>MARK operates through a milestone-based system. You define a milestone, MARK plans the work, assigns workers, and delivers results.</p>
+
+    <pre><code># Example milestone submission
+mark submit --milestone "Build user authentication API"
+</code></pre>
+
+    <h2 id="core-features">3. Core Features</h2>
+
+    <h3>3.1 Worker Types</h3>
+    <table>
+        <thead>
+            <tr><th>Worker</th><th>Role</th><th>Tools</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Engineer</td><td>Write, edit, structure code</td><td>File ops, Terminal, Git, Search</td></tr>
+            <tr><td>Planner</td><td>Decompose tasks, create plans</td><td>File ops, Search</td></tr>
+            <tr><td>Researcher</td><td>Gather information, analyze</td><td>Search, Web fetch, File ops</td></tr>
+            <tr><td>QA</td><td>Test, validate, review</td><td>Terminal, File ops, Search</td></tr>
+            <tr><td>Documenter</td><td>Create docs, guides</td><td>File ops, Search</td></tr>
+        </tbody>
+    </table>
+
+    <h3>3.2 Tool System</h3>
+    <p>Workers have access to a defined toolset:</p>
+    <ul>
+        <li><code>read_file</code> - Read any file in workspace</li>
+        <li><code>write_file</code> - Create or overwrite files</li>
+        <li><code>list_directory</code> - Explore project structure</li>
+        <li><code>search_workspace</code> - Grep through files</li>
+        <li><code>run_terminal</code> - Execute shell commands</li>
+        <li><code>git_status</code> / <code>git_diff</code> / <code>git_commit</code> - Git operations</li>
+        <li><code>rename_file</code> / <code>delete_file</code> - File management</li>
+    </ul>
+
+    <h3>3.3 Milestone Lifecycle</h3>
+    <ol>
+        <li><strong>Submit:</strong> User submits milestone with requirements</li>
+        <li><strong>Plan:</strong> Planner breaks down into sub-tasks</li>
+        <li><strong>Assign:</strong> MARK assigns workers to sub-tasks</li>
+        <li><strong>Execute:</strong> Workers complete assigned work</li>
+        <li><strong>Review:</strong> QA validates results</li>
+        <li><strong>Deliver:</strong> Results presented to user</li>
+    </ol>
+
+    <h2 id="usage-workflows">4. Usage Workflows</h2>
+
+    <h3>4.1 Code Development Workflow</h3>
+    <ol>
+        <li>Submit milestone: "Implement user registration endpoint"</li>
+        <li>Planner creates specification</li>
+        <li>Engineer writes implementation</li>
+        <li>QA writes and runs tests</li>
+        <li>Documenter updates API docs</li>
+    </ol>
+
+    <h3>4.2 Debugging Workflow</h3>
+    <ol>
+        <li>Submit milestone: "Fix memory leak in data processor"</li>
+        <li>Researcher analyzes codebase for patterns</li>
+        <li>Engineer implements fix</li>
+        <li>QA runs regression tests</li>
+    </ol>
+
+    <h3>4.3 Refactoring Workflow</h3>
+    <ol>
+        <li>Submit milestone: "Refactor authentication module"</li>
+        <li>Planner identifies affected components</li>
+        <li>Engineer performs refactoring incrementally</li>
+        <li>QA validates behavior preservation</li>
+    </ol>
+
+    <h2 id="configuration">5. Configuration</h2>
+
+    <h3>5.1 Environment Variables</h3>
+    <pre><code># Required
+OPENAI_API_KEY=your_key_here
+# or
+ANTHROPIC_API_KEY=your_key_here
+
+# Optional
+MARK_LOG_LEVEL=INFO
+MARK_WORKSPACE_PATH=/path/to/workspace
+MARK_MAX_WORKERS=5
+MARK_TIMEOUT_SECONDS=300
+</code></pre>
+
+    <h3>5.2 Worker Configuration</h3>
+    <p>Worker behavior can be customized via <code>config/workers.yaml</code>:</p>
+    <pre><code>engineer:
+  model: gpt-4
+  temperature: 0.2
+  max_tokens: 4000
+
+planner:
+  model: gpt-4
+  temperature: 0.3
+</code></pre>
+
+    <h3>5.3 Tool Permissions</h3>
+    <p>Each worker has a defined tool permission scope. Modify in <code>config/permissions.yaml</code>.</p>
+
+    <h2 id="best-practices">6. Best Practices</h2>
+
+    <h3>6.1 Writing Effective Milestones</h3>
+    <ul>
+        <li>Be specific about desired outcomes</li>
+        <li>Include acceptance criteria</li>
+        <li>Reference existing code/files when relevant</li>
+        <li>Specify constraints (performance, compatibility, etc.)</li>
+    </ul>
+
+    <h3>6.2 Monitoring Progress</h3>
+    <ul>
+        <li>Check MARK logs for worker activity</li>
+        <li>Review git commits for incremental changes</li>
+        <li>Use <code>mark status</code> to see current milestone state</li>
+    </ul>
+
+    <h3>6.3 Iterative Development</h3>
+    <p>Break large features into smaller milestones for better control and review checkpoints.</p>
+
+    <div class="warning">
+        <strong>Warning:</strong> Avoid submitting milestones that modify the same files concurrently. This can cause conflicts.
+    </div>
+
+    <h2 id="support">7. Support & Resources</h2>
+
+    <h3>7.1 Documentation</h3>
+    <ul>
+        <li><a href="setup_instructions.docx">Setup Instructions</a></li>
+        <li><a href="troubleshooting_guide.docx">Troubleshooting Guide</a></li>
+        <li>Architecture docs in <code>docs/canonical/</code></li>
+    </ul>
+
+    <h3>7.2 Common Commands</h3>
+    <pre><code>mark submit "milestone description"    # Submit new milestone
+mark status                            # Check current status
+mark logs                              # View worker logs
+mark workers                           # List available workers
+mark config                            # Show current configuration
+</code></pre>
+
+    <h3>7.3 Getting Help</h3>
+    <ul>
+        <li>Check troubleshooting guide for common issues</li>
+        <li>Review worker logs for error details</li>
+        <li>Consult architecture documentation for system understanding</li>
+    </ul>
+
+    <hr>
+    <p><em>End of User Guide</em></p>
+</body>
+</html>
