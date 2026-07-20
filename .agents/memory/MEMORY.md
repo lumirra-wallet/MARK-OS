@@ -27,3 +27,4 @@
 - [MARK Brain Foundation](mark-brain-foundation.md) — memory layers (episodic/semantic/owner), EmotionalStateEngine, brain_events broadcaster, NeuralPresence SVG, CognitiveTimeline; Zustand object-selector infinite-loop pitfall.
 - [Unified server and real-time greeting](unified-server-greeting.md) — app.py already serves dashboard; MarkOpening streams TTS via EventBus+speech_runtime in to_thread; event loop must be captured before to_thread; reconnect never gives up; /healthz added.
 - [LiveKit Voice Transport M0-M6](livekit-voice-transport.md) — full WebRTC voice via self-hosted LiveKit; mark_supervisor replaces watchdog; SpeechPlayer removed; /livekit-rtc proxy; binary URL format changed at v1.8+.
+- [MARK Performance & Conversation Redesign](mark-performance-redesign.md) — git-HEAD analysis cache, reconnect detection, suggestion repeat-filtering, broader fast path, personality prompt fixes.

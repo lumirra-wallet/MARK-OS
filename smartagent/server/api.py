@@ -613,22 +613,45 @@ async def execute(req: ExecuteRequest) -> dict:
             await _broadcast_self_state(agent)
 
             # ── Conversational fast path ──────────────────────────────────
-            # Short messages with no engineering signals bypass classify_intent
-            # + plan_response entirely, cutting first-token latency from ~15s
-            # to ~3-5s. The full pipeline stays intact for anything that might
-            # be a task; the heuristic errs on the side of running the full
-            # pipeline (any keyword match falls through to the else branch).
+            # Messages that are clearly conversational bypass classify_intent
+            # + plan_response entirely, cutting first-token latency from ~15 s
+            # to ~1-3 s for greetings, questions, small talk, and follow-ups.
+            #
+            # Logic: a message is fast-chat when it contains NO engineering
+            # action keyword (the exclusion list) AND at least one of:
+            #   • it is short (< 80 chars), OR
+            #   • it starts with a strong conversational signal word.
+            #
+            # The heuristic errs on the side of running the full pipeline
+            # (any exclusion keyword match falls through to the else branch),
+            # so engineering requests always get the full router.
             _goal_lower = req.goal.lower().strip()
-            _is_fast_chat = (
-                len(req.goal) < 120
-                and not any(kw in _goal_lower for kw in (
-                    "create", "build", "write", "fix", "add ", "update",
-                    "delete", "install", "deploy", "run ", "implement",
-                    "generate", "make ", "refactor", "test ", "commit",
-                    "push", "pull ", "branch", "debug", "```",
-                    "def ", "class ", "import ", "function ", "select ",
-                    "from ", "insert ", "drop ",
-                ))
+            _engineering_kws = (
+                "create", "build", "write", "fix", "add ", "update",
+                "delete", "install", "deploy", "run ", "implement",
+                "generate", "make ", "refactor", "test ", "commit",
+                "push", "pull ", "branch", "debug", "```",
+                "def ", "class ", "import ", "function ", "select ",
+                "from ", "insert ", "drop ", "migrate", "scaffold",
+                "configure", "setup ", "set up", "review code",
+                "code review", "analyse", "analyze", "optimis", "optim",
+            )
+            _conv_starters = (
+                "hi", "hello", "hey", "thanks", "thank", "ok", "okay",
+                "sure", "got it", "sounds good", "nice", "cool", "great",
+                "what ", "who ", "why ", "how ", "when ", "where ",
+                "can you ", "do you ", "is it ", "are you ", "what's",
+                "tell me", "explain", "i think", "i feel", "i want",
+                "i'm ", "sounds ", "makes sense", "understood",
+                "no worries", "never mind", "forget it", "actually",
+                "interesting", "yes", "no", "not really", "maybe",
+                "hm", "hmm", "wait", "really", "seriously",
+                "lgtm", "ship it", "approved",
+            )
+            _has_engineering_kw = any(kw in _goal_lower for kw in _engineering_kws)
+            _is_fast_chat = not _has_engineering_kw and (
+                len(req.goal) < 80
+                or any(_goal_lower.startswith(sw) for sw in _conv_starters)
             )
             if _is_fast_chat:
                 from types import SimpleNamespace as _SN
@@ -1220,15 +1243,66 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         "timestamp": _now_iso(),
     })
 
-    # Workspace analysis — send to this client once after connect, then let
-    # MARK open the conversation with a short observation composed from it
-    # (a real first exchange, not just a silent Repository Summary update).
+    # Workspace analysis — runs on connect, with two optimisations:
+    #
+    #  1. Git-HEAD caching: if the current commit hasn't changed since the
+    #     last scan, skip the full filesystem walk and reuse the cached payload.
+    #     Full analysis still runs on first connect, git push, or branch switch.
+    #
+    #  2. Reconnect detection: if the user reconnects within 30 minutes (tab
+    #     refresh, HMR, brief disconnect) MARK skips the full LLM opening and
+    #     sends a brief one-line acknowledgement instead. This stops the repeated
+    #     "Good morning, I've looked over this repo…" self-introductions.
     async def _send_workspace_analysis() -> None:
-        try:
-            payload = await asyncio.to_thread(
-                _analyze_workspace, _state.workspace or "."
+        ws_path = os.path.abspath(_state.workspace or ".")
+
+        # ── Step 1: get current git HEAD (fast subprocess, won't block) ──────
+        import subprocess as _sp
+
+        def _get_git_info() -> tuple[str, str]:
+            try:
+                head = _sp.check_output(
+                    ["git", "rev-parse", "HEAD"], cwd=ws_path,
+                    text=True, stderr=_sp.DEVNULL,
+                ).strip()
+                branch = _sp.check_output(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=ws_path,
+                    text=True, stderr=_sp.DEVNULL,
+                ).strip()
+                return head, branch
+            except Exception:
+                return "", ""
+
+        git_head, git_branch = await asyncio.to_thread(_get_git_info)
+
+        # ── Step 2: decide whether to run a full scan ─────────────────────────
+        cached_head_info = conversation_store.get_workspace_git_head(ws_path)
+        cached_ctx       = conversation_store.get_cached_workspace_context(ws_path)
+        head_unchanged   = (
+            git_head
+            and cached_head_info is not None
+            and cached_head_info[0] == git_head
+            and cached_ctx is not None
+        )
+
+        if head_unchanged:
+            payload = cached_ctx
+            logger.info(
+                "workspace analysis: HEAD %s unchanged — using cached scan", git_head[:8]
             )
-            conversation_store.cache_workspace_context(_state.workspace, payload)
+        else:
+            try:
+                payload = await asyncio.to_thread(_analyze_workspace, ws_path)
+                conversation_store.cache_workspace_context(ws_path, payload)
+                if git_head:
+                    conversation_store.update_workspace_git_head(ws_path, git_head, git_branch)
+            except Exception as exc:
+                logger.debug("workspace analysis failed: %s", exc)
+                return
+
+        # Always send WORKSPACE_ANALYZED so the frontend panels stay up to date,
+        # even when we used a cached payload.
+        try:
             await connection_manager.send_to(ws, {
                 "type":      "event",
                 "name":      ServerEvents.WORKSPACE_ANALYZED,
@@ -1236,33 +1310,52 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 "timestamp": _now_iso(),
             })
         except Exception as exc:
-            logger.debug("workspace analysis failed: %s", exc)
+            logger.debug("WORKSPACE_ANALYZED send failed: %s", exc)
+
+        # ── Step 3: reconnect detection ───────────────────────────────────────
+        # If the user reconnected within the session window (30 min), skip the
+        # full LLM opening — just confirm MARK is present. This prevents the
+        # repeated "Good morning / I've looked over this repo…" cycle that
+        # fires on every tab refresh.
+        greeting_age = conversation_store.get_last_greeting_age(ws_path)
+        is_reconnect  = greeting_age < conversation_store.RECONNECT_WINDOW_SECS
+
+        if is_reconnect:
+            project_type = (payload or {}).get("project_type", "the project")
+            branch_name  = (payload or {}).get("git_branch", "")
+            if greeting_age < 120:
+                reconnect_text = "I'm still here."
+            elif branch_name:
+                reconnect_text = f"Back — still on {branch_name}. What do you need?"
+            else:
+                reconnect_text = f"I'm still here, focused on {project_type}. What do you need?"
+            try:
+                await connection_manager.send_to(ws, {
+                    "type":      "event",
+                    "name":      ServerEvents.MARK_OPENING,
+                    "payload":   {"text": reconnect_text},
+                    "timestamp": _now_iso(),
+                })
+            except Exception:
+                pass
+            logger.info("workspace opening: reconnect (age=%.0fs) — brief ack", greeting_age)
+            conversation_store.record_greeting(ws_path)
             return
 
+        # ── Step 4: full opening (first connect or returning after 30+ min) ───
         frameworks_text = ", ".join(payload.get("frameworks") or []) or "no detected framework"
         fallback_opening = (
-            f"I've looked over this {payload.get('project_type') or 'repository'} — "
-            f"on branch {payload.get('git_branch') or 'unknown'}, using {frameworks_text}, "
-            f"with {payload.get('todo_count', 0)} open TODOs. "
-            "Tell me what you'd like built or fixed and I'll get the team on it."
+            f"Looking at this {payload.get('project_type') or 'repository'} — "
+            f"branch {payload.get('git_branch') or 'unknown'}, {frameworks_text}, "
+            f"{payload.get('todo_count', 0)} open TODOs. What do you want to work on?"
         )
 
-        # "Remember and check if changes were made" — compares the current
-        # git HEAD against what MARK last saw running here (persisted via
-        # get_storage(), so it survives a restart/redeploy) and feeds any
-        # summary into the opening prompt as another fact for MARK's own
-        # LLM to weave in naturally, the same way _workspace_preamble()'s
-        # project facts are injected below.
-        #
-        # Resolved to an absolute path (matching os.path.abspath(req.workspace)
-        # in the /run handler) rather than using _state.workspace as-is: it
-        # defaults to the literal string "." until the first /run call, which
-        # would hash to a different workspace_id() than engineering_memory's
-        # key for the same project once a run does set an absolute path.
+        # "Remember and check if changes were made" — compares the current git
+        # HEAD against what MARK last saw so it can naturally mention new commits.
         try:
             change_summary = await asyncio.to_thread(
                 deploy_awareness.check_for_new_commits,
-                os.path.abspath(_state.workspace or "."),
+                ws_path,
             )
         except Exception:
             change_summary = None
@@ -1270,16 +1363,12 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         mark_agent = await _get_mark_agent(_state.workspace)
 
         # Capture the running event loop before entering to_thread so the
-        # closure below can hand it to speech_runtime.attach() — from inside
-        # a worker thread asyncio.get_event_loop() returns a different loop.
+        # closure can hand it to speech_runtime.attach().
         _compose_loop = asyncio.get_event_loop()
 
         def _compose_opening() -> str:
             mm = mark_agent.model_manager
 
-            # ── Time-of-day greeting context ─────────────────────────────────
-            # Inject "Good morning/afternoon/evening" before the workspace
-            # facts so the LLM naturally opens with a warm time-aware greeting.
             import datetime as _dt
             _hour = _dt.datetime.now().hour
             _tod = "morning" if _hour < 12 else "afternoon" if _hour < 17 else "evening"
@@ -1287,7 +1376,6 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             facts = _workspace_preamble(payload)
             if change_summary:
                 facts = f"{facts}\n\n{change_summary}"
-            # Prepend the time of day so the LLM greets before anything else.
             facts = f"Good {_tod}. {facts}"
 
             messages = [
@@ -1296,13 +1384,6 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             ]
             chunks: list[str] = []
 
-            # ── Streaming TTS for the greeting ────────────────────────────────
-            # Feed each LLM token through speech_runtime as it arrives so
-            # MARK's voice starts playing as soon as the first sentence
-            # completes — not after the full response is generated.  This is
-            # the same sentence-boundary pipeline as normal chat, applied to
-            # the opening message.  Skip if a run is already in progress (its
-            # own speech_runtime session takes priority).
             _opening_bus = None
             if not _state.running and EventBus is not None:
                 try:
@@ -1345,6 +1426,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             })
         except Exception as exc:
             logger.debug("MARK opening message send failed: %s", exc)
+
+        conversation_store.record_greeting(ws_path)
 
     asyncio.create_task(_send_workspace_analysis())
 
@@ -1770,28 +1853,45 @@ async def _speech_engine_check() -> None:
 
 
 async def _idle_inspector_loop() -> None:
-    """Emit proactive workspace suggestions when MARK has been idle for 45s."""
+    """Emit proactive workspace suggestions when MARK has been idle for 45 s.
+
+    Suggestions already reported to the user within the last 24 hours are
+    filtered out so the same item ("No tests for hi.py") is never repeated
+    until it is genuinely new or resolved.  If all current suggestions were
+    already reported, MARK stays quiet instead of repeating itself.
+    """
     import time as _t
     _last_notified: float = 0.0
     while True:
         await asyncio.sleep(15)
         try:
             idle_secs = _t.time() - _last_notified
-            # 45s threshold (was 120s) — short enough that MARK feels present
-            # and proactive, long enough to avoid interrupting a fast back-and-
-            # forth conversation.
             if not _state.running and idle_secs > 45 and connection_manager.active_connections:
                 ws_path = _state.workspace or "."
-                suggestions = await asyncio.to_thread(_idle_suggestions, ws_path)
-                if suggestions:
-                    for sug in suggestions[:4]:
+
+                # Raw suggestions from static analysis
+                all_suggestions = await asyncio.to_thread(_idle_suggestions, ws_path)
+
+                # Filter: keep only items the user has NOT already seen today
+                new_suggestions = conversation_store.filter_unreported_suggestions(
+                    ws_path, all_suggestions
+                )
+
+                if new_suggestions:
+                    for sug in new_suggestions[:4]:
                         await connection_manager.broadcast({
                             "type":      "event",
                             "name":      ServerEvents.IDLE_SUGGESTION,
                             "payload":   sug,
                             "timestamp": _now_iso(),
                         })
-                    await _broadcast_idle_chat_message(ws_path, suggestions)
+                    await _broadcast_idle_chat_message(ws_path, new_suggestions)
+                    # Record that these were reported — won't show again for 24 h
+                    conversation_store.mark_suggestions_reported(ws_path, new_suggestions)
+                    _last_notified = _t.time()
+                else:
+                    # Everything already reported — reset the idle timer so we
+                    # don't spin again immediately, but don't broadcast anything.
                     _last_notified = _t.time()
         except Exception as exc:
             logger.debug("idle inspector error: %s", exc)

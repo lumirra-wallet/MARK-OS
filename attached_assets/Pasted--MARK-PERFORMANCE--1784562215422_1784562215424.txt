@@ -1,0 +1,582 @@
+================================================================================
+MARK PERFORMANCE & CONVERSATION REDESIGN
+Master Engineering Specification
+Version: 1.0
+Priority: CRITICAL
+================================================================================
+
+OBJECTIVE
+
+MARK should no longer feel like a chatbot.
+
+MARK should feel like a persistent executive director that:
+
+• responds almost instantly
+• remembers ongoing conversations
+• remembers previous project discussions
+• never repeats itself unnecessarily
+• only performs expensive engineering work when required
+• continuously improves itself in the background
+
+The redesign must preserve every existing engineering capability while making
+conversation significantly faster and more natural.
+
+================================================================================
+PRIMARY GOALS
+================================================================================
+
+1. Reduce voice response latency.
+
+2. Make conversation feel human.
+
+3. Prevent unnecessary planning.
+
+4. Prevent unnecessary repository analysis.
+
+5. Separate conversation from engineering execution.
+
+6. Build continuous background intelligence.
+
+7. Stream responses immediately.
+
+================================================================================
+PROBLEM ANALYSIS
+================================================================================
+
+Current issues observed:
+
+• Every message appears to activate engineering planning.
+
+• Repository analysis repeats constantly.
+
+• MARK repeatedly says:
+
+    "While you were away..."
+
+    "No tests for hi.py..."
+
+even after already reporting them.
+
+• MARK repeatedly introduces itself.
+
+• Small talk triggers the same heavy pipeline used for engineering.
+
+• Voice waits for planning before speaking.
+
+• Conversation feels robotic.
+
+================================================================================
+ARCHITECTURE REDESIGN
+================================================================================
+
+Create separate execution systems.
+
+----------------------------------------
+SYSTEM 1
+Conversation Engine
+----------------------------------------
+
+Purpose
+
+Natural conversation.
+
+Handles
+
+Greetings
+
+Small talk
+
+Questions
+
+Voice testing
+
+Personal discussions
+
+Identity
+
+Opinions
+
+Conversation follow-ups
+
+Pipeline
+
+Voice
+
+↓
+
+Speech Recognition
+
+↓
+
+Intent Router
+
+↓
+
+Conversation Memory
+
+↓
+
+Immediate LLM Response
+
+↓
+
+Speech
+
+Requirements
+
+DO NOT
+
+Launch Engineer
+
+Launch QA
+
+Launch Reviewer
+
+Launch Planner
+
+Analyze repository
+
+Run tests
+
+Delegate work
+
+Conversation should begin immediately.
+
+Target
+
+First token under 500 ms.
+
+================================================================================
+
+SYSTEM 2
+
+Engineering Engine
+
+================================================================================
+
+Purpose
+
+Complex engineering work.
+
+Only activate when user requests
+
+Build
+
+Fix
+
+Implement
+
+Refactor
+
+Debug
+
+Deploy
+
+Research
+
+Architecture
+
+Review code
+
+Pipeline
+
+Planner
+
+↓
+
+Task Graph
+
+↓
+
+Specialists
+
+↓
+
+Merge
+
+↓
+
+Response
+
+Launch only required specialists.
+
+Examples
+
+Fix typo
+
+Engineer only
+
+Run tests
+
+QA only
+
+Review architecture
+
+Reviewer only
+
+Implement feature
+
+Engineer
+
+QA
+
+Reviewer
+
+Never launch every specialist automatically.
+
+================================================================================
+
+SYSTEM 3
+
+Background Brain
+
+================================================================================
+
+Purpose
+
+Never stop thinking.
+
+Runs independently.
+
+Responsibilities
+
+Repository monitoring
+
+Knowledge learning
+
+Memory consolidation
+
+Project indexing
+
+Risk detection
+
+Architecture understanding
+
+Documentation indexing
+
+Long-term planning
+
+Background learning
+
+Background work MUST NEVER block conversation.
+
+================================================================================
+INTENT ROUTER
+================================================================================
+
+Implement intelligent routing.
+
+Possible intents
+
+conversation
+
+engineering
+
+research
+
+memory
+
+system_control
+
+The router determines execution path.
+
+Example
+
+"Hi"
+
+↓
+
+Conversation
+
+------------------------
+
+"Thank you"
+
+↓
+
+Conversation
+
+------------------------
+
+"Who are you?"
+
+↓
+
+Conversation
+
+------------------------
+
+"Build authentication"
+
+↓
+
+Engineering
+
+------------------------
+
+"Review my code"
+
+↓
+
+Engineering
+
+------------------------
+
+"Research LangGraph"
+
+↓
+
+Research
+
+================================================================================
+PROJECT AWARENESS CACHE
+================================================================================
+
+Create persistent cache.
+
+Store
+
+Project summary
+
+Architecture summary
+
+TODO summary
+
+Open issues
+
+Missing tests
+
+Recent commits
+
+Recent changes
+
+Current milestone
+
+Risks
+
+Repository health
+
+Last repository scan
+
+Last engineering discussion
+
+================================================================================
+REPOSITORY ANALYSIS
+================================================================================
+
+DO NOT
+
+Analyze repository every message.
+
+Only analyze when
+
+Files changed
+
+Git commit changed
+
+Branch changed
+
+Startup
+
+Manual refresh
+
+User requests analysis
+
+Otherwise
+
+Reuse cached project awareness.
+
+================================================================================
+REPEAT DETECTION
+================================================================================
+
+MARK must remember what it has already told the user.
+
+Example
+
+Already reported
+
+"No tests for hi.py"
+
+Do not report again.
+
+Instead
+
+reported_to_user = true
+
+Only mention again if
+
+Issue resolved
+
+Issue changed
+
+User asks
+
+New evidence discovered
+
+================================================================================
+CONVERSATION MEMORY
+================================================================================
+
+Track
+
+Topics discussed
+
+Questions answered
+
+Recommendations made
+
+Pending actions
+
+Recent decisions
+
+Avoid repeating identical responses.
+
+================================================================================
+BACKGROUND REPOSITORY WATCHER
+================================================================================
+
+Repository scans happen asynchronously.
+
+Conversation never waits.
+
+If repository scan running
+
+Continue conversation.
+
+Update cache silently.
+
+================================================================================
+STREAMING RESPONSES
+================================================================================
+
+Never wait for complete response.
+
+Begin speaking immediately.
+
+Generate remaining response while speaking.
+
+Human conversations do not wait for perfect planning.
+
+================================================================================
+EXECUTIVE STATE
+================================================================================
+
+Maintain internal executive state.
+
+Examples
+
+Current objective
+
+Current milestone
+
+Highest priority
+
+Current blockers
+
+Current investigations
+
+Running background tasks
+
+Recently completed work
+
+If user asks
+
+"What were you doing?"
+
+MARK answers from executive state.
+
+================================================================================
+PERSONALITY
+================================================================================
+
+Avoid robotic phrases.
+
+Avoid introducing MARK repeatedly.
+
+Avoid
+
+"I'm MARK..."
+
+unless
+
+First startup
+
+Reconnect
+
+Identity requested
+
+Speak naturally.
+
+Have opinions.
+
+Acknowledge uncertainty honestly.
+
+Explain reasoning conversationally.
+
+================================================================================
+VOICE PERFORMANCE
+================================================================================
+
+Improve
+
+Speech endpoint detection
+
+Streaming speech
+
+Voice interruption handling
+
+Partial response streaming
+
+Reduce inference cancellations.
+
+Conversation should feel immediate.
+
+================================================================================
+SUCCESS CRITERIA
+================================================================================
+
+Conversation feels human.
+
+Conversation starts immediately.
+
+Engineering only activates when required.
+
+Repository analysis is cached.
+
+No repetitive observations.
+
+No repetitive introductions.
+
+Background thinking continues continuously.
+
+MARK remembers previous discussions.
+
+Voice latency greatly reduced.
+
+Engineering capability preserved.
+
+MARK behaves like a persistent executive rather than a chatbot.
+
+================================================================================
+NON-NEGOTIABLE REQUIREMENTS
+================================================================================
+
+Conversation must NEVER block on engineering.
+
+Repository analysis must NEVER block conversation.
+
+Background tasks must NEVER block speech.
+
+Engineering delegation must only occur when needed.
+
+All existing functionality must remain compatible.
+
+No regressions.
+
+Maintain existing architecture wherever possible while introducing the new
+execution model.
+
+================================================================================
+END OF SPECIFICATION
+================================================================================

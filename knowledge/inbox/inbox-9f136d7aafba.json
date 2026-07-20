@@ -1,0 +1,42 @@
+{
+  "id": "inbox-9f136d7aafba",
+  "concept": {
+    "id": "concept-20260720-153706-415f221c",
+    "title": "Successful Strategy: Why is that? And I think I would also like to make you move ",
+    "description": "A high-quality execution (score 100%) was completed for the goal: 'Why is that? And I think I would also like to make you move faster and to plan you in a faster way. Because it seems like you are taking so long. What do you think I can do to make you move faster?'. The execution achieved 100% task success rate with 100% average confidence.",
+    "summary": "",
+    "category": "Best Practices",
+    "tags": [
+      "successful-execution",
+      "best-practice",
+      "reflection"
+    ],
+    "aliases": [],
+    "examples": [],
+    "difficulty": "intermediate",
+    "status": "active",
+    "confidence": 0.5,
+    "importance": 0.5,
+    "created_at": "2026-07-20T15:37:06+00:00",
+    "updated_at": "2026-07-20T15:37:06+00:00",
+    "author": "MARK",
+    "owner": "Mr. Smart",
+    "source_ids": [],
+    "evidence_ids": [],
+    "relationship_ids": [],
+    "dependency_ids": [],
+    "contradiction_ids": [],
+    "verification_status": "pending",
+    "revision_history": []
+  },
+  "submitted_at": "2026-07-20T15:37:06+00:00",
+  "status": "pending",
+  "validation_errors": [],
+  "validation_warnings": [
+    "No summary provided; adding a 1-3 sentence summary improves quick recall.",
+    "Confidence is still at the default 0.5; consider scoring it once evidence is attached."
+  ],
+  "conflict_ids": [],
+  "initial_confidence": 0.35,
+  "notes": ""
+}
