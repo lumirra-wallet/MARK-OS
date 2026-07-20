@@ -1,0 +1,383 @@
+MARK Brain Foundation Directive (Implementation Required)
+Objective
+
+Stop optimizing MARK as an engineering assistant.
+
+Build MARK as a persistent AI Operating System with one unified brain.
+
+From this point onward, every architectural decision must answer one question:
+
+"Does this make MARK behave more like a persistent intelligent being?"
+
+If not, redesign before adding features.
+
+Core Principle
+
+MARK is the intelligence.
+
+External AI models are reasoning engines.
+
+Workers are internal tools.
+
+Engineering is one capability.
+
+Conversation is MARK's natural state.
+
+Phase 1 — Build MARK's Brain
+
+Create a single Brain Runtime responsible for:
+
+identity
+personality
+long-term memory
+short-term memory
+conversation
+reasoning
+decision making
+emotional state
+owner understanding
+executive control
+continuous presence
+
+No duplicated systems.
+
+No parallel brains.
+
+One owner.
+
+Phase 2 — Knowledge System
+
+MARK must continuously build his own knowledge.
+
+Create a Knowledge Engine.
+
+Knowledge is NOT chat history.
+
+Knowledge is NOT prompt context.
+
+Knowledge is NOT embeddings alone.
+
+Knowledge is structured understanding.
+
+When MARK learns something useful, convert it into structured knowledge.
+
+Example:
+
+Raw information
+
+↓
+
+Understanding
+
+↓
+
+Concept
+
+↓
+
+Relationship
+
+↓
+
+Store permanently
+
+Example:
+
+Python
+
+is_a
+
+Programming Language
+MongoDB
+
+stores
+
+Documents
+Owner
+
+prefers
+
+Brain-first architecture
+MARK
+
+must never pretend
+
+work is happening
+
+Knowledge should become a connected graph.
+
+Phase 3 — Memory
+
+Separate memory into layers.
+
+Working Memory
+
+Current conversation.
+
+Forget naturally.
+
+Episodic Memory
+
+Events.
+
+Examples:
+
+conversations
+decisions
+mistakes
+successes
+experiences
+Semantic Memory
+
+Permanent knowledge.
+
+Examples:
+
+programming
+architecture
+history
+relationships
+Owner Memory
+
+Everything MARK learns about me.
+
+Examples
+
+engineering philosophy
+communication style
+recurring projects
+preferences
+habits
+
+Consult this before major decisions.
+
+Phase 4 — AI Reasoning
+
+Use NVIDIA inference for reasoning.
+
+The AI model is NOT MARK.
+
+The AI model reasons.
+
+MARK decides.
+
+Every response should follow
+
+User
+
+↓
+
+Brain
+
+↓
+
+Memory Retrieval
+
+↓
+
+Knowledge Retrieval
+
+↓
+
+Reasoning (NVIDIA)
+
+↓
+
+Decision
+
+↓
+
+Store Learning
+
+↓
+
+Response
+
+Never call the AI directly from the UI.
+
+Always go through MARK's Brain.
+
+Phase 5 — Token Management
+
+Prevent unnecessary NVIDIA usage.
+
+Rules
+
+Default context
+
+num_ctx = 4096
+
+Never send entire conversation history.
+
+Retrieve only relevant memories.
+
+Maximum retrieved memories:
+
+5 episodic
+10 semantic
+owner profile
+
+Trim automatically.
+
+Cancel previous inference immediately when the user interrupts.
+
+Only one inference may run at a time.
+
+Keep the conversation concise internally.
+
+Never waste tokens.
+
+Log:
+
+prompt tokens
+completion tokens
+latency
+cost estimate
+Phase 6 — Continuous Learning
+
+Every completed interaction should produce learning.
+
+Pipeline
+
+Conversation
+
+↓
+
+Reflection
+
+↓
+
+Extract lessons
+
+↓
+
+Update knowledge
+
+↓
+
+Update owner model
+
+↓
+
+Update relationships
+
+↓
+
+Store permanently
+
+MARK should become smarter over time without manually retraining.
+
+Phase 7 — Voice
+
+Voice is MARK's natural interface.
+
+Requirements
+
+Continuous listening.
+
+Voice interruption.
+
+Half-duplex.
+
+If I speak while MARK is speaking
+
+Immediately stop TTS.
+
+Listen.
+
+Reason.
+
+Respond.
+
+Do not continue talking over me.
+
+Conversation should feel human.
+
+No browser robot voice.
+
+Continue using Kokoro.
+
+Improve natural pacing.
+
+Phase 8 — Presence
+
+MARK never "starts."
+
+MARK is already alive.
+
+When the dashboard opens:
+
+MARK should already be thinking.
+
+Already aware.
+
+Already listening.
+
+Already remembering.
+
+The dashboard connects to MARK.
+
+It does not create MARK.
+
+Phase 9 — Dashboard
+
+The dashboard represents MARK.
+
+Not engineering.
+
+Show
+
+MARK
+listening
+thinking
+speaking
+memory activity
+knowledge growth
+brain activity
+emotional state
+health
+confidence
+
+Engineering becomes a secondary workspace.
+
+Phase 10 — Architecture Rules
+
+Never create another brain.
+
+Never duplicate memory.
+
+Never duplicate planners.
+
+Never duplicate runtime.
+
+Never hardcode fake responses.
+
+Never fake progress.
+
+Never fabricate knowledge.
+
+Always explain uncertainty.
+
+Phase 11 — Success Criteria
+
+MARK should increasingly behave like a persistent intelligent companion.
+
+He should:
+
+remember naturally
+build knowledge over months
+understand relationships
+improve through reflection
+interrupt naturally
+converse like a person
+reason before acting
+decide before delegating
+stay continuously present
+
+The measure of success is not features.
+
+The measure of success is:
+
+"Does MARK feel more alive today than yesterday?"
+
+One suggestion I'd add to your plan: don't have five AI models answer every question and then vote. That will multiply your token usage and latency by about five, and you'll hit rate limits much sooner.
