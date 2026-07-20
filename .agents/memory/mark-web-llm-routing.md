@@ -1,81 +1,51 @@
 ---
 name: MARK Web LLM Routing & Provider Bugs
-description: Root causes and fixes for MARK dashboard LLM failures, chat routing, and file generation issues
+description: Fixes for GitHub provider auth failures, self-message feedback loop, voice WebSocket crash, and single-server consolidation.
 ---
 
-## Silent GitHub provider failure — ImportError in factory
+## GitHub provider auth failure → Ollama fallback
 
-`factory.py` `_load_github()` did:
-```python
-from smartagent.llm.github_provider import GitHubProvider, GITHUB_CODING_MODEL as _CM
-```
-`GITHUB_CODING_MODEL` is defined in `factory.py` itself, **not** in `github_provider.py`. This `ImportError` was caught by a bare `except Exception` and logged as a warning, silently leaving the model manager with no active model → instant `NoActiveModelError` on every LLM call.
+**Rule:** `_load_github()` in `factory.py` now registers Ollama as a silent fallback (via `model_manager.set_fallback(ollama_model, is_failure=is_llm_error_text)`). When GitHub returns Unauthorized, ModelManager automatically retries on Ollama — no user intervention needed.
 
-**Fix:** Remove `GITHUB_CODING_MODEL as _CM` from the import; use the module-level constant already in scope.
+**Why:** `ACTIVE_PROVIDER=github` was hardcoded in Replit Secrets. The token expired. The old `_load_github()` registered no fallback, so every chat call failed completely. Mirrored the same pattern that `_load_ollama()` uses for NVIDIA as a fallback.
 
-**Why:** The constant was accidentally placed in the wrong module during the GitHub provider milestone.
+**How to apply:** The fallback registers automatically on server startup whenever OLLAMA_HOST is set. To force a switch to GitHub-primary again, update the Replit Secret `ACTIVE_PROVIDER=github` AND ensure GITHUB_TOKEN is valid.
 
-## Stale state file sets invalid model name
+## Provider auto-detect priority order
 
-`.mark_provider_state.json` persists the active GitHub model. A previous test set `"github_model": "my-model"` which produced HTTP 404 from the GitHub Models API. The factory reads this file and silently uses it.
+Changed `_auto_default_provider()` to prefer Ollama when `OLLAMA_HOST` is set:
+1. ACTIVE_PROVIDER env var (explicit override — still respected)
+2. OLLAMA_HOST present → "ollama" (local-first, no auth to expire)
+3. NVIDIA_API_KEY → "nvidia"
+4. GITHUB_TOKEN → "github"
+5. Fallback → "ollama"
 
-**Fix:** Corrected state file to `"gpt-4.1-mini"`. Added `_KNOWN_GITHUB_MODELS` set in `_load_state()` to validate the saved model name and reset to default with a warning if unknown.
+**Why:** Cloud API tokens expire. Local Ollama never does.
 
-## api.py _run() chat vs code routing
+## Self-message feedback loop guard
 
-After fixing provider setup, three new paths were added to `_run()`:
-1. **`_is_conversational_goal(goal)`** — regex + word-count heuristic; short messages with no code verbs → chat path
-2. **Chat path** — calls `_stream_llm_response(goal, _MARK_CHAT_SYSTEM, model_manager, event_bus)` in a thread; streams tokens via `event_bus.publish(STREAMING_TOKEN)`
-3. **Code path** — calls `_stream_llm_response(goal, _MARK_PLAN_SYSTEM, ...)` as planning preview first, then runs `SoftwareEngineer.build()`
+**Rule:** `_voice_chat_response()` in `api.py` has a `_LOOP_PHRASES` check at the top. Any incoming voice text that starts with or contains known fallback/self-intro phrases is dropped with a WARNING log.
 
-`SmartAgent()` creation moved to `asyncio.to_thread(_init_agent)` because it does blocking network calls (Ollama discovery, GitHub wiring) that were previously blocking the event loop.
+**Why:** When LLM fails, `CHAT_FALLBACK_TEXT` ("I'm MARK — I plan engineering work...") was published via `STREAMING_TOKEN` → `speech_runtime` TTS'd it → mic picked it up → STT transcribed it → new voice message → infinite loop.
 
-## fast_path.py improvements
+## Fallback messages don't go through TTS
 
-- System prompt rewritten with explicit, numbered rules for fence+filename format
-- Secondary `_FENCE_NOFILE_RE` pattern added as fallback when LLM omits filename from fence line; derives filename from goal words + language extension
-- Diagnostic `print()` calls → `logger.info()` so they don't appear in chat bubbles
-- `success = bool(response)` instead of `bool(created)` — success when LLM responded, regardless of file output
+**Rule:** In `_stream_llm_response()`, when the LLM call fails, the fallback is published as `"CHAT_MESSAGE"` event (not `"STREAMING_TOKEN"`). `speech_runtime` only subscribes to `STREAMING_TOKEN`, so the fallback is displayed as a chat bubble but never spoken.
 
-## Execution Engine Audit (agency wiring)
+**How to apply:** Frontend `markStore.ts` handles `'ChatMessage'` in the same switch case as `'MarkOpening'` and `'MarkProactive'` — adds it as a mark message with no TTS side effect.
 
-Three components added to make MARK truly autonomous instead of chatbot-like:
+## Voice WebSocket "send after close" crash
 
-**`smartagent/engineer/agent_tools.py`** — 10 tools with OpenAI JSON-schema definitions + executor dispatcher:
-read_file, write_file, list_directory, search_workspace, run_terminal, git_status, git_diff, git_commit, rename_file, delete_file. `requires_approval()` gates delete_file and git_push. `_safe_path()` blocks traversal.
+In `voice_websocket()`, `ws.send_json(event)` inside the STT event loop is now wrapped in try/except. If the client disconnects mid-frame, the exception is swallowed and the loop exits cleanly on the next `receive()` call (which raises `WebSocketDisconnect`).
 
-**`smartagent/engineer/agent_loop.py`** — agentic tool-calling loop: calls `model_manager.chat_with_tools(messages, TOOL_DEFINITIONS)`, executes tool_calls, appends results, loops until no more tool_calls, then streams final text. MAX_TURNS=20 hard cap. Publishes `STREAMING_TOKEN` events with live tool activity ("⚙ write_file(...)").
+**Why:** `voice_websocket: Unexpected ASGI message 'websocket.send', after sending 'websocket.close'` spammed the logs whenever a voice client disconnected while audio events were being processed.
 
-**`smartagent/llm/github_provider.py`** — `chat_with_tools(messages, tools, max_tokens)` method added. Uses `client.chat.completions.create(tools=..., tool_choice="auto", stream=False)` and returns raw `choices[0].message` for caller to inspect `.tool_calls`.
+## Single server consolidation
 
-**`smartagent/models/manager/model_manager.py`** — `chat_with_tools(messages, tools, model_id, **overrides)` passthrough. Raises `AttributeError` if provider doesn't support tools.
+- Added `/api/healthz` compat route to the Python FastAPI server (`app.py`) — absorbs the only useful endpoint from the api-server skeleton (Node.js Express).
+- The `artifacts/api-server` workflow is stopped and not needed. All health-check traffic is handled by the Python server.
+- `app.py` already serves the built dashboard in combined-server mode (when `artifacts/mark-dashboard/dist/public` exists).
 
-**Intent detection rewrite** — `_PURE_GREETING_PATTERNS` replaces `_CHAT_PATTERNS`. "Can you X?", "Please help", "What is X?" no longer route to chat. `_ACTION_KEYWORDS` (50+ words) — any match forces agent path. File-extension regex also forces agent path. Only pure greetings/thanks/ack → chat.
+## Stale provider state file
 
-**Routing in api.py** — code path now calls `run_agent_loop()` instead of `SoftwareEngineer.build()`. The planning preview (`_MARK_PLAN_SYSTEM`) is gone — the agent's own tool-call narration replaces it.
-
-## DevPipeline (Planner→Executor→Tester→Reviewer→Fixer)
-
-`smartagent/engineer/dev_pipeline.py` — full pipeline class:
-- `DevPipeline.run(goal)` → `PipelineResult`; runs in a thread
-- `_plan()` — LLM chat_stream → parse numbered/dash milestone list (2-5 milestones)
-- `_run_milestone()` — calls `run_agent_loop()` → `_run_tests()` → `_review()` → Fixer if FAIL
-- `_detect_test_cmd()` — auto-detects pytest/npm/cargo/go from workspace
-- `_reviewer()` — LLM produces "PASS: reason" or "FAIL: issue"
-- `_build_fix_goal()` — static, combines milestone + review feedback + test output into fix goal
-- Fixer calls `run_agent_loop(fix_goal, system_prompt=_FIXER_SYSTEM)`
-- Final checkpoint `git_commit` after all milestones
-- `is_complex_goal(goal)` — pattern-only (no word count gate); matches "project", "from scratch", "with tests", "full-stack", "microservice", "build a todo", etc.
-
-**Routing in api.py:**
-- `is_complex_goal(req.goal)` → True → `DevPipeline.run()`
-- `is_complex_goal(req.goal)` → False → `run_agent_loop()` directly
-
-**State file protection:** `update_llm_settings()` now validates `github_model` against `_KNOWN_GITHUB_MODELS` before saving; rejects unknown models silently.
-
-## General api.py fixes (earlier in session)
-
-- `ev_name = RUN_FAILED` when `result.success = False` was conflating "build finished with failures" with "exception during build". Now always `RUN_COMPLETED` for normal returns; `RUN_FAILED` reserved for exceptions.
-- `CancelledError` no longer re-raised before post-run hooks (complete_job + WS broadcast)
-- `ev_name`/`ev_payload`/`ticker_task`/`event_bus` initialized before `try` to guard `finally`
-- Post-run hooks switched from `ev_name == RUN_COMPLETED` → `ev_payload["success"]` for success detection
+Delete `.mark_provider_state.json` at the repo root if MARK is stuck on a wrong provider after a token update. The file persists the last-used provider across restarts and can override env vars on the second load cycle.

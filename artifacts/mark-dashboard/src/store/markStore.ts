@@ -985,7 +985,12 @@ export const useMarkStore = create<MarkState>((set, get) => {
               // streaming block, no currentMarkMsgId involvement — neither
               // is a run).
               case 'MarkOpening':
-              case 'MarkProactive': {
+              case 'MarkProactive':
+              // ChatMessage is the fallback path when the LLM is unavailable.
+              // It is intentionally NOT routed through StreamingToken so the
+              // TTS engine never speaks it — prevents the mic-pickup feedback
+              // loop where MARK's error message gets transcribed and re-sent.
+              case 'ChatMessage': {
                 if (payload.text) {
                   set(state => ({
                     messages: [...state.messages, {

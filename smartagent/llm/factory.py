@@ -95,23 +95,24 @@ def _auto_default_provider() -> str:
     """Detect the best default provider without requiring explicit configuration.
 
     Selection order:
-      1. ACTIVE_PROVIDER env var (explicit override — this repo's .env sets
-         this explicitly to "ollama", so auto-detect below is only reached
-         when that var is absent/invalid)
-      2. NVIDIA_API_KEY present → "nvidia"
-      3. GITHUB_TOKEN present  → "github"
-      4. OPENAI_API_KEY present → "openai"
-      5. ANTHROPIC_API_KEY present → "anthropic"
-      6. Fallback               → "nvidia" (the product default)
+      1. ACTIVE_PROVIDER env var (explicit override)
+      2. OLLAMA_HOST present → "ollama"  (local-first: fastest, free, no auth)
+      3. NVIDIA_API_KEY present → "nvidia"
+      4. GITHUB_TOKEN present  → "github"
+      5. OPENAI_API_KEY present → "openai"
+      6. ANTHROPIC_API_KEY present → "anthropic"
+      7. Fallback               → "ollama" (works without any cloud keys)
 
-    Deliberately does not probe Ollama's reachability here — auto-detect is
-    a fast, side-effect-free decision function; unreachability is handled at
-    call time by ModelManager's configured fallback (see wire_agent()),
-    not by second-guessing the selection up front.
+    Ollama is prioritised over cloud providers when OLLAMA_HOST is configured
+    because it has no auth to expire, no rate limits, and no per-token cost.
+    Cloud providers are still used when Ollama is absent.
     """
     explicit = os.environ.get("ACTIVE_PROVIDER", "").strip().lower()
     if explicit in _VALID_PROVIDERS:
         return explicit
+    # Prefer local Ollama when configured — no auth failures, no billing
+    if os.environ.get("OLLAMA_HOST"):
+        return "ollama"
     if os.environ.get("NVIDIA_API_KEY"):
         return "nvidia"
     if os.environ.get("GITHUB_TOKEN"):
@@ -120,7 +121,7 @@ def _auto_default_provider() -> str:
         return "openai"
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "anthropic"
-    return "nvidia"
+    return "ollama"
 
 
 # Derive the allowed sets directly from each catalogue so adding a model
@@ -352,10 +353,18 @@ def _wire_provider(provider: str, model: str, model_manager: Any) -> None:
 
 
 def _load_github(model: str, model_manager: Any) -> None:
-    """Register GitHubProvider instances in model_manager."""
+    """Register GitHubProvider instances in model_manager.
+
+    Also registers an Ollama fallback (when OLLAMA_HOST is configured) so
+    that a GitHub auth failure (Unauthorized / expired token) silently
+    retries on the local model instead of leaving MARK unable to respond.
+    This mirrors how _load_ollama() uses NVIDIA as its silent fallback.
+    """
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         logger.warning("ProviderFactory: GITHUB_TOKEN not set — GitHub provider unavailable")
+        # Still try to wire Ollama so the system works without GitHub
+        _load_ollama(OLLAMA_DEFAULT_MODEL, model_manager)
         return
     try:
         from smartagent.llm.github_provider import GitHubProvider
@@ -371,6 +380,27 @@ def _load_github(model: str, model_manager: Any) -> None:
         logger.info("ProviderFactory: active GitHub model → %s", model)
     except Exception as exc:
         logger.warning("ProviderFactory: failed to load GitHub provider: %s", exc)
+
+    # ── Ollama fallback for GitHub auth failures ──────────────────────────
+    # Register a local Ollama model as a silent fallback.  When ModelManager
+    # detects is_llm_error_text() in a GitHub response (e.g. Unauthorized),
+    # it automatically retries on Ollama without any user intervention.
+    ollama_host = os.environ.get("OLLAMA_HOST", "")
+    if not ollama_host:
+        logger.info("ProviderFactory: OLLAMA_HOST not set — no Ollama fallback for GitHub")
+        return
+    try:
+        from smartagent.models.providers.ollama_provider import OllamaProvider
+        ollama_model = OLLAMA_DEFAULT_MODEL
+        if model_manager.registry.find(ollama_model) is None:
+            p = OllamaProvider(model_name=ollama_model, base_url=ollama_host)
+            model_manager.registry.register(p)
+            logger.info("ProviderFactory: registered Ollama model %s as GitHub fallback", ollama_model)
+        if hasattr(model_manager, "set_fallback"):
+            model_manager.set_fallback(ollama_model, is_failure=is_llm_error_text)
+            logger.info("ProviderFactory: Ollama fallback active for GitHub (model=%s)", ollama_model)
+    except Exception as exc:
+        logger.warning("ProviderFactory: failed to register Ollama fallback for GitHub: %s", exc)
 
 
 def _load_nvidia(model: str, model_manager: Any) -> None:

@@ -457,7 +457,14 @@ def _stream_llm_response(
         logger.warning(
             "MARK _stream_llm_response: LLM unavailable (%s) — using fallback", exc
         )
-        event_bus.publish(ServerEvents.STREAMING_TOKEN, text=CHAT_FALLBACK_TEXT, source="mark")
+        # Publish fallback via a dedicated NO-TTS event so speech_runtime
+        # does NOT speak it aloud.  Speaking the fallback through TTS is what
+        # causes the self-message feedback loop: mic picks up the speaker
+        # output, STT transcribes it, and it arrives as a new "user" message.
+        # The frontend still displays it as a chat bubble; it just won't be
+        # spoken.  STREAMING_TOKEN is reserved for real LLM tokens that the
+        # user specifically asked for — not for error/fallback messages.
+        event_bus.publish("CHAT_MESSAGE", text=CHAT_FALLBACK_TEXT, source="mark", tts=False)
         return CHAT_FALLBACK_TEXT
 
 
@@ -1676,6 +1683,29 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
     """
     global _state, _current_inference_task   # noqa: PLW0603
 
+    # ── Self-message / feedback-loop guard ───────────────────────────────────
+    # When the LLM is unavailable, _stream_llm_response falls back to
+    # CHAT_FALLBACK_TEXT and plays it through TTS.  The microphone can then
+    # pick up that speaker audio, STT transcribes it, and the same text
+    # arrives here as a new "user" utterance — creating an infinite loop.
+    #
+    # Guard: reject any incoming text that exactly matches, closely resembles,
+    # or starts with known fallback/self-introduction phrases.  This is a
+    # belt-and-suspenders safety net; the real fix is a working LLM provider.
+    _LOOP_PHRASES = (
+        CHAT_FALLBACK_TEXT[:30].lower(),   # starts-with match on the first phrase
+        "i'm mark",
+        "i am mark",
+        "i plan engineering work",
+        "what would you like to build",
+    )
+    _text_lower = text.lower().strip()
+    if any(_text_lower.startswith(p) or p in _text_lower for p in _LOOP_PHRASES):
+        logger.warning(
+            "voice_chat: dropping suspected self-echo/feedback text: %r", text[:60]
+        )
+        return
+
     # Wait for any interrupted run to fully clean up before we start
     for _ in range(30):
         if not _state.running:
@@ -1821,7 +1851,13 @@ async def voice_websocket(ws: WebSocket) -> None:
                             _current_inference_task.cancel()
                         if _brain is not None:
                             await _brain.voice_interrupted()
-                    await ws.send_json(event)
+                    try:
+                        await ws.send_json(event)
+                    except Exception:
+                        # WebSocket already closed (client disconnected mid-frame);
+                        # stop processing this batch — the outer receive() will
+                        # raise WebSocketDisconnect on the next iteration.
+                        break
 
             elif raw.get("text"):
                 # ── Text frame: control messages from browser ────────────────

@@ -140,8 +140,24 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
+# Compatibility shim — absorbs the api-server (Node.js/Express) skeleton so
+# the dashboard and any external health checks that hit /api/healthz keep
+# working after the api-server workflow is removed.  Having this in the Python
+# server means one process handles everything; no separate Node process to
+# crash independently.
+# ---------------------------------------------------------------------------
+from fastapi import APIRouter as _APIRouter
+from fastapi.responses import JSONResponse as _JSONResponse
+_compat_router = _APIRouter(prefix="/api", tags=["compat"])
+
+@_compat_router.get("/healthz", include_in_schema=False)
+async def _api_healthz() -> _JSONResponse:
+    return _JSONResponse({"status": "ok"})
+
+# ---------------------------------------------------------------------------
 # Routers
 # ---------------------------------------------------------------------------
+app.include_router(_compat_router)
 app.include_router(router)
 app.include_router(system_router)
 app.include_router(tools_router)
