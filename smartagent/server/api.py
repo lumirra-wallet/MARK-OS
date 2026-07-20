@@ -366,6 +366,13 @@ async def health() -> HealthResponse:
     return HealthResponse()
 
 
+@router.get("/healthz")
+async def healthz() -> dict:
+    """Kubernetes-style liveness alias — also used by the retired Node.js
+    api-server to confirm the combined server absorbed its only endpoint."""
+    return {"status": "ok"}
+
+
 # ---------------------------------------------------------------------------
 # Status
 # ---------------------------------------------------------------------------
@@ -1250,21 +1257,65 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
         mark_agent = await _get_mark_agent(_state.workspace)
 
+        # Capture the running event loop before entering to_thread so the
+        # closure below can hand it to speech_runtime.attach() — from inside
+        # a worker thread asyncio.get_event_loop() returns a different loop.
+        _compose_loop = asyncio.get_event_loop()
+
         def _compose_opening() -> str:
             mm = mark_agent.model_manager
+
+            # ── Time-of-day greeting context ─────────────────────────────────
+            # Inject "Good morning/afternoon/evening" before the workspace
+            # facts so the LLM naturally opens with a warm time-aware greeting.
+            import datetime as _dt
+            _hour = _dt.datetime.now().hour
+            _tod = "morning" if _hour < 12 else "afternoon" if _hour < 17 else "evening"
+
             facts = _workspace_preamble(payload)
             if change_summary:
                 facts = f"{facts}\n\n{change_summary}"
+            # Prepend the time of day so the LLM greets before anything else.
+            facts = f"Good {_tod}. {facts}"
+
             messages = [
                 {"role": "system", "content": _MARK_OPENING_SYSTEM},
                 {"role": "user",   "content": facts},
             ]
             chunks: list[str] = []
-            for chunk in mm.chat_stream(messages, max_tokens=200):
-                if chunk and is_llm_error_text(chunk):
-                    raise RuntimeError(chunk)
-                if chunk:
-                    chunks.append(chunk)
+
+            # ── Streaming TTS for the greeting ────────────────────────────────
+            # Feed each LLM token through speech_runtime as it arrives so
+            # MARK's voice starts playing as soon as the first sentence
+            # completes — not after the full response is generated.  This is
+            # the same sentence-boundary pipeline as normal chat, applied to
+            # the opening message.  Skip if a run is already in progress (its
+            # own speech_runtime session takes priority).
+            _opening_bus = None
+            if not _state.running and EventBus is not None:
+                try:
+                    speech_runtime.attach(connection_manager, _compose_loop)
+                    speech_runtime.reset()
+                    _opening_bus = EventBus()
+                    _opening_bus.subscribe(ServerEvents.STREAMING_TOKEN, speech_runtime.on_token)
+                except Exception as _be:
+                    logger.debug("opening TTS setup failed: %s", _be)
+                    _opening_bus = None
+
+            try:
+                for chunk in mm.chat_stream(messages, max_tokens=200):
+                    if chunk and is_llm_error_text(chunk):
+                        raise RuntimeError(chunk)
+                    if chunk:
+                        chunks.append(chunk)
+                        if _opening_bus is not None:
+                            _opening_bus.publish(
+                                ServerEvents.STREAMING_TOKEN, text=chunk, source="mark"
+                            )
+            finally:
+                if _opening_bus is not None:
+                    speech_runtime.flush()
+
             return "".join(chunks).strip()
 
         try:

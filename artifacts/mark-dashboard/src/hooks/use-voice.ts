@@ -98,6 +98,7 @@ export function useVoice() {
   const rafRef = useRef(0);
   const enabledRef = useRef(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceReconnectAttemptsRef = useRef(0);
 
   // Keep a ref in sync with isMarkSpeaking so onaudioprocess (which captures
   // the ref at processor-creation time, not on every render) can read the
@@ -149,6 +150,7 @@ export function useVoice() {
     voiceWsRef.current = socket;
 
     socket.onopen = async () => {
+      voiceReconnectAttemptsRef.current = 0;   // reset backoff on successful connect
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
@@ -236,9 +238,13 @@ export function useVoice() {
     socket.onclose = () => {
       teardownAudio();
       if (enabledRef.current) {
-        // Fast recovery, matching the main /ws connection — a stale mic
-        // socket shouldn't need seconds to notice and come back.
-        reconnectTimerRef.current = setTimeout(connectVoiceSocket, 500);
+        // Exponential backoff: 500ms → 8s ceiling. Fast enough for a brief
+        // network blip; backs off for a genuinely dead endpoint without
+        // hammering it. Voice never gives up — reconnects until the user
+        // explicitly turns the mic off.
+        const delay = Math.min(500 * 2 ** voiceReconnectAttemptsRef.current, 8_000);
+        voiceReconnectAttemptsRef.current += 1;
+        reconnectTimerRef.current = setTimeout(connectVoiceSocket, delay);
       }
     };
     socket.onerror = () => { /* handled by close */ };

@@ -316,9 +316,8 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 // connected": a fresh drop recovers almost instantly, and only a
 // genuinely dead server backs off toward a slower retry.
 let reconnectAttempts = 0;
-const RECONNECT_BASE_MS    = 250;
-const RECONNECT_MAX_MS     = 15_000;  // back off to 15 s max (was 4 s)
-const RECONNECT_MAX_ATTEMPTS = 30;    // give up after 30 tries — user can manually reconnect
+const RECONNECT_BASE_MS = 250;
+const RECONNECT_MAX_MS  = 30_000;  // back off to 30 s max — never gives up
 let liveRecoveryListenersInstalled = false;
 // MARK's real voice player — receives binary PCM16 frames on the same /ws
 // connection (see connectWebSocket's onmessage). Lazily constructed at
@@ -612,13 +611,10 @@ export const useMarkStore = create<MarkState>((set, get) => {
 
         ws.onclose = () => {
           set({ connectionStatus: 'disconnected' });
-          // Stop retrying after RECONNECT_MAX_ATTEMPTS — a genuinely dead
-          // server should not be hammered forever. The user can see the
-          // "Disconnected" badge and click it or refresh to force a reconnect.
-          if (reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) return;
-          // Exponential backoff: 250ms → 15s ceiling.
-          // Recovers almost instantly on a brief blip; backs off for
-          // a genuinely unavailable server without hammering it.
+          // Never give up — reconnect forever with exponential backoff capped
+          // at RECONNECT_MAX_MS. The connection stays alive until the user
+          // deliberately closes the browser. Stats and panels never reset on
+          // their own; the server watchdog keeps the backend alive on its side.
           const delay = Math.min(RECONNECT_BASE_MS * 2 ** reconnectAttempts, RECONNECT_MAX_MS);
           reconnectAttempts += 1;
           reconnectTimer = setTimeout(() => get().connectWebSocket(), delay);
