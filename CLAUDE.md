@@ -22,3 +22,12 @@ feature, ask what *ability* it gives MARK, not what button it adds.
 `docs/mark-operating-system.md` tracks current implementation status against
 the canonical vision — what's real today, what's stale, what's not started.
 Treat it as a status report, not a competing spec.
+
+**[`docs/SESSION_HANDOFF.md`](docs/SESSION_HANDOFF.md)** is the current,
+frequently-updated record of what's actually been built and verified —
+read it before starting work, it changes more often than this file.
+**[`docs/BRAIN_RECONSTRUCTION_AUDIT.md`](docs/BRAIN_RECONSTRUCTION_AUDIT.md)**
+is the latest full comparison of MARK's intended architecture against the
+live implementation. If Replit Agent is also working on this project, see
+[`docs/canonical/REPLIT_BOOTSTRAP.md`](docs/canonical/REPLIT_BOOTSTRAP.md)
+for the division of labor between the two.

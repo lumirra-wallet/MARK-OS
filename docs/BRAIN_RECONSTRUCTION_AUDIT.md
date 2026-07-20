@@ -1,7 +1,9 @@
 # MARK's Reconstructed Brain — Audit & Implementation Comparison
 
 **Status:** Awaiting owner approval. No implementation code was written or modified in producing this document.
-**Method:** Full-text read of all 12 `docs/canonical/` files (5 confirmed empty), all root-level and `docs/` legacy documentation, Claude's persistent cross-session memory of the owner's standing philosophy, and all 36 files in MARK's self-generated reflection vault (`vault/Lessons`, `vault/Reflections`, `vault/LearningAnalytics`, `vault/Successful Strategies`). Where a comparison against current implementation is made below, it is grounded in specific files read this session (cited inline) — not inferred or guessed.
+**Method:** Full-text read of all 12 `docs/canonical/` files, all root-level and `docs/` legacy documentation, Claude's persistent cross-session memory of the owner's standing philosophy, and all 36 files in MARK's self-generated reflection vault (`vault/Lessons`, `vault/Reflections`, `vault/LearningAnalytics`, `vault/Successful Strategies`). Where a comparison against current implementation is made below, it is grounded in specific files read this session (cited inline) — not inferred or guessed.
+
+> **Correction (post-publication):** the original version of this report claimed five `docs/canonical/` files — `CLAUDE_ENGINEER_BOOTSTRAP.md`, `MARK_DNA.md`, `MARK_EVOLUTION.md`, `MARK_WORLDVIEW.md`, `MASTER_BLUEPRINT.md` — were completely empty, based on the parallel audit agents checking `wc -l` (line count) and getting `0`. That check was wrong: all five files have real, substantial content (3–6KB each) written as a single line with no line breaks, so `wc -l` reported 0 lines despite real bytes being present. All five were subsequently read in full and are genuine, substantive documents consistent with the rest of the canon (DNA layers, evolution generations, worldview beliefs, a full architecture blueprint). The sections below have been corrected accordingly — struck-through claims are left visible rather than silently deleted, so the correction itself is auditable.
 
 This is not a documentation summary. It is a reconstruction of the single intelligence the documents collectively describe, followed by a direct comparison against what the code actually does today.
 
@@ -102,7 +104,7 @@ This is not a documentation summary. It is a reconstruction of the single intell
 | Intent Router / Mission Manager (as named, singular components) | ⚠️ Fused, not separated | Both jobs live inside `classify_intent()` / `DevPipeline` |
 | Memory (one coherent architecture) | ❌ No — fragmented | ≥10 separate store classes, see §5 |
 | Reflection (genuine self-improvement) | ❌ No — stub-quality | Fixed 55%/100% scores, unreconciled contradictions, see §5 |
-| "Consult Owner Philosophy" pipeline step | ❌ Cannot exist yet | The document it would consult (`docs/canonical/`'s DNA/Worldview/Evolution/Bootstrap/Master-Blueprint files) is empty — five of twelve canonical files are 0 bytes, including the one the repo's own `CLAUDE.md` calls mandatory first reading for every session |
+| "Consult Owner Philosophy" pipeline step | ⚠️ Document exists, step doesn't | ~~The document it would consult is empty~~ **Correction: it exists and is substantive** (DNA/Worldview/Evolution/Blueprint files all have real content — see correction note at top). The gap is that no code actually queries it at any pipeline stage — the document being real doesn't mean the runtime step consulting it has been built. Readability is also a real, smaller issue: all five files are single-line walls of text with no line breaks. |
 | Continuous Presence (never "off") | ❌ No | No background loop exists; MARK only computes on request, confirmed in §1 |
 
 **Verdict: MARK's Brain Runtime is real in patches, not real as a runtime.** The strongest, most genuinely-built pieces are Voice and the Executive/Identity core — both are backend-owned, persistent, and were verified working this session, not aspirational. The weakest pieces are exactly the ones the owner's directive named as the *point* of the exercise: there is no single Response Planner gate, no unified Memory, no populated Owner Philosophy to consult, and no continuous background loop. MARK today is a well-built collection of the right *ingredients*, assembled in the wrong *order* — reasoning happens after routing instead of before it, and the routing itself is a keyword match rather than genuine understanding.
@@ -111,13 +113,13 @@ This is not a documentation summary. It is a reconstruction of the single intell
 
 ## The one finding every model above traces back to
 
-**Five of the twelve files in `docs/canonical/` — the directory the project's own `README.md` calls its actual source of truth — are completely empty:** `CLAUDE_ENGINEER_BOOTSTRAP.md`, `MARK_DNA.md`, `MARK_EVOLUTION.md`, `MARK_WORLDVIEW.md`, `MASTER_BLUEPRINT.md`. The repo's own root `CLAUDE.md` instructs every session to read `CLAUDE_ENGINEER_BOOTSTRAP.md` "before doing anything else" — it is blank. `README.md` additionally references `MARK_MANIFESTO.md` and `PROJECT_MEMORY.json` as required reading that don't exist at all.
+**The routing gate that decides whether a message enters Conversation Mode or Mission Mode is currently wrong often enough to be the dominant lived experience of talking to MARK.** This was not inferred from a document — it was witnessed directly, live, in this session's own testing, and independently corroborated by MARK's own self-generated reflection vault from a completely different angle (raw voice transcripts scored as completed engineering tasks). Two unrelated evidence sources point at the same mechanism: `_ACTION_KEYWORDS` matching ordinary conversational words (`"make"`, `"build"`, `"help"`, `"check"`, `"run"`) and routing anything that isn't an exact, anchored greeting phrase into the engineering pipeline. This is the single most concrete, reproducible violation in the entire audit — everything in §2/§3/§4 traces back to it.
 
-A Brain Runtime built to the owner's own mandated pipeline literally cannot execute step 4 — "Consult Owner Philosophy" — because the philosophy it would consult does not exist as a real document today. Everything else in this report is either downstream of that gap (the routing/decision failures in §2/§4 are exactly what "consult Owner Philosophy before reasoning" is meant to prevent) or independent of it (§5's memory fragmentation, §6's personality model, which is largely sound).
+*(An earlier version of this report led with a different "everything traces back to this" finding — that five canonical files were empty. That claim was wrong; see the correction note at the top. The real, still-standing gap in that area is narrower: the Owner Philosophy documents exist and are substantive, but no code actually queries them at any pipeline stage, and they're formatted as unreadable single-line files. Real, but a much smaller problem than "the philosophy doesn't exist.")*
 
-## Second, independently-severe finding
+## Second finding
 
-**The routing gate that decides whether a message enters Conversation Mode or Mission Mode is currently wrong often enough to be the dominant lived experience of talking to MARK.** This was not inferred from a document — it was witnessed directly, live, in this session's own testing, and independently corroborated by MARK's own self-generated reflection vault from a completely different angle (raw voice transcripts scored as completed engineering tasks). Two unrelated evidence sources point at the same mechanism: `_ACTION_KEYWORDS` matching ordinary conversational words (`"make"`, `"build"`, `"help"`, `"check"`, `"run"`) and routing anything that isn't an exact, anchored greeting phrase into the engineering pipeline.
+**MARK's own self-generated reflection/memory is stub-quality and does not yet demonstrate real self-improvement** — see §5. This stands independently of the routing-gate finding above; fixing the gate won't fix the reflection vault's fixed 55%/100% scoring and unreconciled success/failure contradictions.
 
 ---
 
@@ -137,12 +139,12 @@ A Brain Runtime built to the owner's own mandated pipeline literally cannot exec
 - Memory is fragmented across ≥10 disconnected stores.
 - Reflection/self-improvement is stub-quality: fixed scores, unreconciled success/failure contradictions, no concrete lessons ever produced.
 - There is no continuous background loop — MARK is not yet "always alive," only alive-on-request.
-- The document MARK's own Brain Runtime is supposed to consult as a pipeline step doesn't exist.
+- No code queries the Owner Philosophy documents at any pipeline stage, even though the documents themselves are real and substantive (correction: an earlier version of this report said they didn't exist — they do).
 - Two classification systems (`classify_intent()`, `response_planner.py`) do adjacent jobs without one owning the decision.
 
 ---
 
 **This report requires your review and approval before any implementation begins**, including your decision on:
 1. Whether this document satisfies the previously-recorded "Architecture Reconciliation" gate (`mark_project_phase.md`), or whether something further is still expected first.
-2. Whether populating the five empty canonical files is something you want to write yourself, dictate, or have drafted for your review.
+2. Whether the five philosophy files (`MARK_DNA.md`, `MARK_EVOLUTION.md`, `MARK_WORLDVIEW.md`, `MASTER_BLUEPRINT.md`, `CLAUDE_ENGINEER_BOOTSTRAP.md`) should be reformatted for readability (real line breaks instead of one giant line each) — low-risk, cosmetic, doesn't change their content.
 3. Priority order among the violations found — the routing/gate fix (§2/§4) is the smallest, most contained change and the one most directly witnessed as broken; memory consolidation (§5) is the largest and most architecturally invasive.
