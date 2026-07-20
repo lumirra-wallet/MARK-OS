@@ -24,3 +24,4 @@
 - [MARK Web LLM Routing & Provider Bugs](mark-web-llm-routing.md) — ImportError in factory silently killed GitHub provider; stale state file set invalid model; chat/code routing; fast-path fence fallback.
 - [Live Engineer Panel](live-engineer-panel.md) — workspace analysis on WS connect, activity feed, reasoning stages, browser TTS auto-start, idle inspector; `completedMilestones` not `milestones` field name.
 - [MARK Web Voice + Persistent Server](mark-web-voice-pipeline.md) — watchdog.py supervisor, faster-whisper STT, kokoro-onnx TTS, silero VAD; Windows scriptShell removed; requirements.minimal.txt auto-installs on startup.
+- [MARK Brain Foundation](mark-brain-foundation.md) — memory layers (episodic/semantic/owner), EmotionalStateEngine, brain_events broadcaster, NeuralPresence SVG, CognitiveTimeline; Zustand object-selector infinite-loop pitfall.

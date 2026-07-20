@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useMarkStore } from '@/store/markStore';
 import { useSelfState } from '@/hooks/use-self-state';
+import { NeuralPresence } from './NeuralPresence';
 
 /**
  * PresenceEngine — MARK's living core: a glass sphere half-filled with
@@ -127,6 +128,7 @@ const FRESNEL_FRAGMENT = `
 
 export function PresenceEngine({ className = '', micLevel = 0, isListening = false, isVoiceSpeaking = false }: PresenceEngineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [webGLAvailable, setWebGLAvailable] = useState(true);
   const { selfState, isSpeaking: isTextSpeaking } = useSelfState();
   const tokenTimestamps = useMarkStore(s => s.tokenTimestamps);
   const timeline = useMarkStore(s => s.timeline);
@@ -155,8 +157,9 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     } catch {
-      // WebGL not available in this environment (e.g. server-side preview).
-      // Render nothing rather than crashing the whole dashboard.
+      // WebGL not available (e.g. Replit's preview iframe has no GPU).
+      // Flip to the SVG NeuralPresence fallback rather than showing nothing.
+      setWebGLAvailable(false);
       return;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -431,6 +434,20 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       }
     };
   }, []);
+
+  // WebGL failed — render the SVG NeuralPresence instead.
+  // This is not a degraded experience: NeuralPresence is driven by the same
+  // real brain events and is the primary renderer in GPU-limited environments.
+  if (!webGLAvailable) {
+    return (
+      <NeuralPresence
+        className={className}
+        micLevel={micLevel}
+        isListening={isListening}
+        isVoiceSpeaking={isVoiceSpeaking}
+      />
+    );
+  }
 
   return (
     <div

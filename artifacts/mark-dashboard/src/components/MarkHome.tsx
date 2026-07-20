@@ -1,34 +1,94 @@
 import { useState } from 'react';
-import { ArrowRight, MessageCircle, ChevronDown, Mic, MicOff, Volume2 } from 'lucide-react';
+import { ArrowRight, MessageCircle, ChevronDown, ChevronUp, Mic, MicOff, Volume2 } from 'lucide-react';
 import { useMarkStore } from '@/store/markStore';
 import { useSelfState } from '@/hooks/use-self-state';
 import { useVoice } from '@/hooks/use-voice';
 import { PresenceEngine } from './PresenceEngine';
 import { ChatView } from './ChatView';
 import { ApprovalsSidebar } from './ApprovalsSidebar';
+import { CognitiveTimeline } from './CognitiveTimeline';
 
 /**
- * MARK's Home — the default view. Not "the dashboard, improved": Mission
- * Control (the Engineering Workspace) is now something opened from inside
- * MARK, the way Task Manager opens inside Windows, not the boot screen
- * itself. The owner should feel like they're watching MARK think, listen,
- * and speak — not looking at software update. See PresenceEngine.tsx for
- * how that's driven entirely by real runtime state, not decoration, and
- * use-voice.ts for the real microphone/speech pipeline behind it.
+ * MARK's Home — the brain in view.
  *
- * Chat is deliberately not the dominant element here: it's a tap-to-reveal
- * panel, present but nearly invisible until asked for. Voice is the
- * intended primary interface — the mic button below is the prominent
- * control, not tucked away — but it's opt-in, never auto-started: browsers
- * require an explicit user gesture before granting microphone access, and
- * starting to listen without being asked would be a real consent problem
- * even if it weren't also technically blocked.
+ * The presence animation and cognitive timeline are driven entirely by real
+ * backend events. The text below MARK's name changes to reflect what he is
+ * actually doing right now — never a canned phrase, never a simulated state.
+ *
+ * Cognitive Timeline is shown by default because it's the core value of
+ * Task #6: making MARK's thinking visible and verifiable.
  */
+
+// ── Living presence text ─────────────────────────────────────────────────────
+// Maps real system state → quiet, alive text. No status toasts.
+function getPresenceText(params: {
+  running: boolean;
+  isListening: boolean;
+  isMarkSpeaking: boolean;
+  isVoiceSpeaking: boolean;
+  emotionalState: string;
+  modeLabel: string;
+  lastStep?: string;
+}): string {
+  const { running, isListening, isMarkSpeaking, isVoiceSpeaking, emotionalState, modeLabel, lastStep } = params;
+
+  if (isListening && !isMarkSpeaking) return 'Listening.';
+  if (isMarkSpeaking || isVoiceSpeaking) return 'Speaking.';
+  if (running) {
+    if (lastStep === 'reasoning')         return 'Thinking.';
+    if (lastStep === 'memory_retrieved')  return 'Reviewing recent memories.';
+    if (lastStep === 'knowledge_matched') return 'Matching knowledge.';
+    if (lastStep === 'decision_made')     return 'Deciding.';
+    return 'Working.';
+  }
+  if (emotionalState === 'curious')    return 'Something caught my attention.';
+  if (emotionalState === 'satisfied')  return 'That went well.';
+  if (emotionalState === 'focused')    return 'Focused.';
+  if (emotionalState === 'uncertain')  return 'Not sure — ask me to clarify.';
+  if (emotionalState === 'frustrated') return 'Having some trouble.';
+  return modeLabel || 'Idle.';
+}
+
+// Emotion badge colors
+const EMOTION_BADGE: Record<string, { bg: string; text: string; dot: string }> = {
+  neutral:    { bg: 'bg-transparent',         text: 'text-transparent',          dot: 'bg-transparent' },
+  curious:    { bg: 'bg-blue-500/10',         text: 'text-blue-400',             dot: 'bg-blue-400' },
+  focused:    { bg: 'bg-emerald-500/10',      text: 'text-emerald-400',          dot: 'bg-emerald-400' },
+  satisfied:  { bg: 'bg-green-500/10',        text: 'text-green-400',            dot: 'bg-green-400' },
+  uncertain:  { bg: 'bg-amber-500/10',        text: 'text-amber-400',            dot: 'bg-amber-400' },
+  frustrated: { bg: 'bg-red-500/10',          text: 'text-red-400',              dot: 'bg-red-400' },
+};
+
 export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
-  const { pendingPermissions } = useMarkStore();
+  // Individual selectors — Zustand object selectors create a new object every
+  // render, which trips the equality check and causes an infinite loop.
+  const pendingPermissions = useMarkStore(s => s.pendingPermissions);
+  const emotionalState     = useMarkStore(s => s.emotionalState ?? 'neutral');
+  const emotionalReason    = useMarkStore(s => s.emotionalReason ?? '');
+  const cognitiveEvents    = useMarkStore(s => s.cognitiveEvents ?? []);
+  const running            = useMarkStore(s => s.running);
+  const isMarkSpeaking     = useMarkStore(s => s.isMarkSpeaking);
+  const knowledgeGrowth    = useMarkStore(s => s.knowledgeGrowth ?? 0);
+  const memoryActivity     = useMarkStore(s => s.memoryActivity ?? []);
   const { selfState, modeLabel, activity } = useSelfState();
   const voice = useVoice();
   const [chatOpen, setChatOpen] = useState(false);
+  const [timelineOpen, setTimelineOpen] = useState(true);
+
+  const latestStep = cognitiveEvents[0]?.step;
+
+  const presenceText = getPresenceText({
+    running,
+    isListening:     voice.isListening,
+    isMarkSpeaking,
+    isVoiceSpeaking: voice.isSpeaking,
+    emotionalState:  emotionalState || 'neutral',
+    modeLabel:       modeLabel || 'Idle',
+    lastStep:        latestStep,
+  });
+
+  const badge = EMOTION_BADGE[emotionalState || 'neutral'] || EMOTION_BADGE.neutral;
+  const showBadge = emotionalState && emotionalState !== 'neutral';
 
   return (
     <div className="relative h-full min-h-0 overflow-hidden bg-background">
@@ -39,35 +99,78 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
         isVoiceSpeaking={voice.isSpeaking}
       />
 
-      {/* Safety-critical — never part of the "almost invisible" treatment */}
+      {/* Safety-critical — always visible */}
       {pendingPermissions.length > 0 && (
         <div className="absolute top-0 inset-x-0 z-30 border-b border-destructive/30 bg-destructive/10 backdrop-blur-sm">
           <ApprovalsSidebar />
         </div>
       )}
 
-      {/* MARK's own label, over the core — not a header pill, a presence */}
-      <div className="absolute top-8 inset-x-0 z-10 flex flex-col items-center gap-1 pointer-events-none">
+      {/* MARK's name + living presence text */}
+      <div className="absolute top-8 inset-x-0 z-10 flex flex-col items-center gap-1.5 pointer-events-none">
         <h1 className="text-lg font-bold tracking-[0.2em] uppercase text-foreground/90">MARK</h1>
-        <p className="text-sm text-muted-foreground">{modeLabel}</p>
-        {activity && (
-          <p className="text-xs text-muted-foreground/70 max-w-md text-center px-4 truncate">
+
+        {/* Living presence text — changes with real state, never static */}
+        <p className="text-sm text-muted-foreground transition-all duration-700">
+          {presenceText}
+        </p>
+
+        {/* Emotional state badge — only shown for non-neutral states */}
+        {showBadge && (
+          <div className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono ${badge.bg} ${badge.text}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+            {emotionalState}
+            {emotionalReason && (
+              <span className="opacity-60 truncate max-w-[120px]">· {emotionalReason}</span>
+            )}
+          </div>
+        )}
+
+        {activity && !running && (
+          <p className="text-xs text-muted-foreground/50 max-w-md text-center px-4 truncate mt-0.5">
             {activity}
           </p>
         )}
       </div>
 
-      {/* Engineering Workspace — one explicit step away, not the default */}
+      {/* Engineering Workspace link */}
       <button
         onClick={onOpenWorkspace}
         className="absolute top-4 right-4 z-10 flex items-center gap-1.5 text-[11px] font-mono bg-card/40 hover:bg-card/70 text-muted-foreground hover:text-foreground px-2.5 py-1.5 rounded border border-border/30 backdrop-blur-sm transition-colors"
-        title="Open the Engineering Workspace — workers, timeline, git, terminal"
+        title="Open the Engineering Workspace"
       >
         Engineering Workspace
         <ArrowRight className="w-3 h-3" />
       </button>
 
-      {/* ── Voice — the primary interface, front and center ────────────────── */}
+      {/* ── Cognitive Timeline ─────────────────────────────────────────────── */}
+      {/* Positioned on the right edge — doesn't obscure the brain */}
+      <div className="absolute top-16 right-4 z-10 w-56">
+        <button
+          onClick={() => setTimelineOpen(v => !v)}
+          className="w-full flex items-center justify-between px-2 py-1 text-[10px] font-mono text-muted-foreground/50 hover:text-muted-foreground bg-card/30 hover:bg-card/50 rounded-t border border-border/20 backdrop-blur-sm transition-colors"
+        >
+          <span className="tracking-wider uppercase">Cognitive Timeline</span>
+          {timelineOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        </button>
+        {timelineOpen && (
+          <div className="bg-card/30 border border-t-0 border-border/20 backdrop-blur-sm rounded-b overflow-hidden">
+            <CognitiveTimeline
+              events={cognitiveEvents}
+              maxVisible={6}
+              className="p-1"
+            />
+            {/* Brain stats — real counts only, never estimated */}
+            <div className="flex items-center justify-between px-2 py-1.5 border-t border-border/10 text-[9px] font-mono text-muted-foreground/40">
+              <span>learned {knowledgeGrowth} concepts</span>
+              <span>·</span>
+              <span>{memoryActivity.length} writes</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Voice ─────────────────────────────────────────────────────────── */}
       <div className="absolute bottom-24 inset-x-0 z-10 flex flex-col items-center gap-2 pointer-events-none">
         {voice.voiceEnabled && (
           <p className="text-xs text-muted-foreground min-h-[1em] max-w-md text-center px-4 truncate">
@@ -86,8 +189,8 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
             !voice.supported
               ? "This browser doesn't support live speech recognition"
               : voice.voiceEnabled
-                ? 'Turn off voice — stop listening and speaking'
-                : 'Talk to MARK — no need to open chat first'
+                ? 'Turn off voice'
+                : 'Talk to MARK'
           }
         >
           {voice.voiceEnabled
@@ -96,7 +199,7 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
         </button>
       </div>
 
-      {/* MARK's vitals — quiet, bottom-left, real numbers or nothing */}
+      {/* MARK vitals — real numbers or nothing */}
       {selfState && (
         <div className="absolute bottom-4 left-4 z-10 flex items-center gap-2.5 text-[10px] font-mono text-muted-foreground/60">
           <span>confidence {Math.round(selfState.confidence * 100)}%</span>
@@ -107,7 +210,7 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
         </div>
       )}
 
-      {/* ── Chat — present, almost invisible, one tap away ────────────────── */}
+      {/* ── Chat ──────────────────────────────────────────────────────────── */}
       {chatOpen ? (
         <div
           className="absolute inset-x-0 bottom-0 z-20 bg-background/95 backdrop-blur border-t border-border/50 shadow-2xl"

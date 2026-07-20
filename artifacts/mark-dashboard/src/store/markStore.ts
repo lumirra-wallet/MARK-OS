@@ -125,6 +125,24 @@ export interface EngineeringMemoryState {
   sessionElapsed: number;
 }
 
+// ── Brain Foundation types ────────────────────────────────────────────────────
+
+/** A single real observable step in MARK's cognitive pipeline. */
+export interface CognitiveEvent {
+  id: string;
+  timestamp: string;
+  step: string;
+  detail?: string;
+}
+
+/** A real memory write from the backend. */
+export interface MemoryActivityEntry {
+  id: string;
+  timestamp: string;
+  layer: 'episodic' | 'semantic' | 'owner';
+  summary: string;
+}
+
 // ── Store interface ───────────────────────────────────────────────────────────
 
 interface MarkState {
@@ -194,6 +212,15 @@ interface MarkState {
   isMarkSpeaking: boolean;
   speechEngineUnavailable: boolean;
   stopMarkSpeech: () => void;
+
+  // ── Brain Foundation — every field originates from a real backend event ──
+  // No counters are incremented here speculatively; every increment is
+  // triggered by a real BrainEvent pushed over the WebSocket.
+  cognitiveEvents:  CognitiveEvent[];       // last 20 pipeline steps (newest first)
+  emotionalState:   string;                 // 'neutral' | 'curious' | 'focused' | 'satisfied' | 'uncertain' | 'frustrated'
+  emotionalReason:  string;                 // reason for the current state
+  memoryActivity:   MemoryActivityEntry[];  // last 10 real memory writes
+  knowledgeGrowth:  number;                 // concepts committed this session
 
   // Preview actions
   setActivePreviewId: (id: string | null) => void;
@@ -419,6 +446,13 @@ export const useMarkStore = create<MarkState>((set, get) => {
     // MARK's real voice
     isMarkSpeaking: false,
     speechEngineUnavailable: false,
+
+    // Brain Foundation — all zero/empty until real events arrive
+    cognitiveEvents:  [],
+    emotionalState:   'neutral',
+    emotionalReason:  '',
+    memoryActivity:   [],
+    knowledgeGrowth:  0,
     stopMarkSpeech: () => {
       speechPlayer?.stop();
       set({ isMarkSpeaking: false });
@@ -824,6 +858,66 @@ export const useMarkStore = create<MarkState>((set, get) => {
               case 'EvaluationComplete':
                 addTimeline(`Evaluation complete · run ${payload.run_id}`);
                 break;
+
+              // ── Brain Foundation — every field here originates from a real ──
+              // backend brain event. The UI never increments counters on its
+              // own; it only records what the brain reports.
+              case 'BrainEvent': {
+                const brainEvt: string = payload.event ?? '';
+                const addCognitiveEvent = (step: string, detail?: string) => {
+                  const ev: CognitiveEvent = {
+                    id: _id(), timestamp,
+                    step, detail,
+                  };
+                  set(state => ({
+                    cognitiveEvents: [ev, ...state.cognitiveEvents].slice(0, 20),
+                  }));
+                };
+                switch (brainEvt) {
+                  case 'thinking_started':
+                    addCognitiveEvent('reasoning', payload.goal?.slice(0, 60));
+                    break;
+                  case 'thinking_finished':
+                    addCognitiveEvent('decision_made', payload.latency_ms ? `${payload.latency_ms}ms` : undefined);
+                    break;
+                  case 'memory_written': {
+                    const memEntry: MemoryActivityEntry = {
+                      id: _id(), timestamp,
+                      layer: (payload.layer ?? 'episodic') as MemoryActivityEntry['layer'],
+                      summary: payload.summary ?? '',
+                    };
+                    set(state => ({
+                      memoryActivity: [memEntry, ...state.memoryActivity].slice(0, 10),
+                    }));
+                    addCognitiveEvent('memory_retrieved', payload.summary?.slice(0, 60));
+                    break;
+                  }
+                  case 'knowledge_created':
+                    set(state => ({ knowledgeGrowth: state.knowledgeGrowth + 1 }));
+                    addCognitiveEvent('knowledge_matched', payload.concept?.slice(0, 60));
+                    break;
+                  case 'emotion_changed':
+                    set({ emotionalState: payload.state ?? 'neutral', emotionalReason: payload.reason ?? '' });
+                    break;
+                  case 'voice_started':
+                    addCognitiveEvent('listening');
+                    break;
+                  case 'voice_interrupted':
+                    get().stopMarkSpeech();
+                    addCognitiveEvent('voice_interrupted', 'inference cancelled');
+                    break;
+                  case 'voice_finished':
+                    addCognitiveEvent('decision_made', payload.transcript?.slice(0, 60));
+                    break;
+                  case 'cognitive_event':
+                    addCognitiveEvent(payload.step ?? 'unknown', payload.detail?.slice(0, 60));
+                    break;
+                  case 'reflection_complete':
+                    addCognitiveEvent('reflection_complete', payload.lesson?.slice(0, 60));
+                    break;
+                }
+                break;
+              }
 
               // MARK speaking outside of a run — the proactive opening
               // message composed from the workspace analysis on connect

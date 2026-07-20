@@ -1,0 +1,198 @@
+1. The brain owns state, the UI only displays it
+
+Right now you're polling /self-state, which is fine for compatibility, but the source of truth should be MARK's Brain Runtime.
+
+The Brain should publish events like:
+
+thinking_started
+thinking_finished
+memory_written
+knowledge_created
+emotion_changed
+voice_started
+voice_interrupted
+voice_finished
+
+The dashboard simply subscribes and renders them. That keeps the interface honest.
+
+2. Knowledge growth should be real
+
+I like "Knowledge Growth," but don't fake a counter.
+
+Only increment it when MARK actually creates a new concept, for example:
+
+Conversation
+      ↓
+Reflection
+      ↓
+Extract concept
+      ↓
+Store concept
+      ↓
+knowledge_growth += 1
+
+That way the dashboard shows genuine learning.
+
+3. Emotional state should come from reasoning
+
+Don't randomly switch between "curious" and "focused."
+
+The Brain should decide its emotional state based on context.
+
+For example:
+
+Learning something new → Curious
+Solving a difficult task → Focused
+Successfully helping → Satisfied
+Missing important information → Uncertain
+Repeated failures → Frustrated
+
+Then expose that through /self-state.
+
+4. Voice interruption should happen before reasoning
+
+This is one of the most important changes.
+
+The flow should be:
+
+User starts speaking
+        ↓
+Immediately stop TTS
+        ↓
+Stop current inference
+        ↓
+Capture speech
+        ↓
+Reason
+        ↓
+Reply
+
+Not:
+
+User speaks
+↓
+
+Continue talking...
+
+↓
+
+Eventually stop
+
+Humans interrupt each other naturally. MARK should too.
+
+5. Presence should feel alive
+
+Instead of:
+
+MARK is online
+
+I'd have MARK quietly exist.
+
+For example:
+
+"Listening."
+"Thinking about yesterday's work."
+"Reviewing recent memories."
+"Idle."
+
+Nothing flashy. Just presence.
+
+6. Memory activity should show real work
+
+Instead of generic animations:
+
+Memory
+
+Writing Episodic Memory...
+
+Owner Memory Updated
+
+Knowledge Added
+
+Reflection Complete
+
+Those events should come from actual memory writes.
+
+7. Brain visualization
+
+I actually agree with moving away from heavy Three.js unless you truly need it.
+
+A simple SVG or Canvas-based neural animation that's driven by:
+
+inference activity
+memory writes
+speech
+knowledge creation
+
+will usually feel more responsive and consume fewer resources than a complex 3D scene.
+
+One thing I would add that isn't in your document
+
+I would introduce a Cognitive Timeline.
+
+Instead of only showing the final answer, show MARK's internal cognitive events:
+
+11:21:14
+Listening...
+
+↓
+
+Memory Retrieved
+
+↓
+
+Knowledge Matched
+
+↓
+
+Reasoning...
+
+↓
+
+Decision Made
+
+↓
+
+Speaking...
+
+Not chain-of-thought or hidden reasoning—just observable system events. That makes MARK feel alive without exposing internal reasoning.
+
+One more addition: "Self-Reflection"
+
+Every few hours, if MARK is idle, he could perform a background reflection:
+
+Recent conversations
+
+↓
+
+What did I learn?
+
+↓
+
+Update Knowledge
+
+↓
+
+Update Owner Model
+
+↓
+
+Return to idle
+
+No user prompt required. That's much closer to a persistent companion than a chatbot that only "exists" when spoken to.
+
+Overall
+
+I think your long-term architecture is becoming very coherent:
+
+Brain — identity, reasoning, decisions.
+Memory — working, episodic, semantic, owner.
+Knowledge — structured concepts and relationships.
+Voice — natural conversation with interruption.
+Presence — always alive.
+Dashboard — a window into MARK's mind, not an engineering console.
+Engineering — just one capability MARK can invoke.
+
+The only thing I'd keep emphasizing to your agent is this:
+
+The dashboard must never simulate intelligence. Every animation, counter, emotional state, memory event, and knowledge update must originate from the Brain Runtime. The UI is an observer, never an author, of MARK's state.

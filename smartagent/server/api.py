@@ -81,6 +81,14 @@ from smartagent.server import tts_engine
 from smartagent.server.websocket import connection_manager
 from smartagent.storage.factory import get_storage
 
+# ── Brain Foundation (lazy-import — server starts cleanly if unavailable) ────
+try:
+    from smartagent.server import brain_events as _brain
+    from smartagent.mind.emotion.emotional_state import emotional_state_engine as _emotion
+except ImportError:  # pragma: no cover
+    _brain = None   # type: ignore[assignment]
+    _emotion = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -110,6 +118,10 @@ class RunState:
 
 
 _state = RunState()
+
+# Tracks the running chat inference asyncio.Task so voice_websocket can cancel
+# it the moment the user starts speaking — stops generation, not just playback.
+_current_inference_task: "asyncio.Task[Any] | None" = None
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +526,8 @@ async def execute(req: ExecuteRequest) -> dict:
         ticker_task      = None   # assigned inside try
         agent: Any       = None   # assigned inside try — may stay None if init fails
         intent: Any      = None   # assigned inside try — may stay None if init fails
+        reply_text: str  = ""     # set in the conversational/clarification paths
+        global _current_inference_task
 
         logger.info(
             "MARK STATE queued    goal=%r  workspace=%r",
@@ -626,7 +640,22 @@ async def execute(req: ExecuteRequest) -> dict:
                         history=history,
                     )
 
-                reply_text = await asyncio.to_thread(_do_chat)
+                # ── Brain Foundation: emit cognitive events; track the task so
+                # voice_websocket can cancel inference when the user speaks ──
+                if _brain is not None:
+                    await _brain.thinking_started(req.goal)
+                try:
+                    _current_inference_task = asyncio.ensure_future(
+                        asyncio.to_thread(_do_chat)
+                    )
+                    reply_text = await _current_inference_task
+                except asyncio.CancelledError:
+                    reply_text = ""   # user interrupted — no reply to send
+                finally:
+                    _current_inference_task = None
+                _chat_ms = int((time.monotonic() - _state.start_time) * 1000)
+                if _brain is not None:
+                    await _brain.thinking_finished(_chat_ms)
                 conversation_store.append_turn(_state.workspace, "user", req.goal)
                 conversation_store.append_turn(_state.workspace, "assistant", reply_text)
                 ev_name    = ServerEvents.RUN_COMPLETED
@@ -806,6 +835,25 @@ async def execute(req: ExecuteRequest) -> dict:
                     succeeded=bool(ev_payload.get("success")),
                     what_happened=_outcome_summary(ev_payload, ev_name),
                 )
+                # Brain Foundation: update emotional state from real outcome
+                if _emotion is not None:
+                    if ev_name == ServerEvents.RUN_COMPLETED and ev_payload.get("success"):
+                        _emotion.on_success(req.goal)
+                    elif ev_name == ServerEvents.RUN_FAILED:
+                        _emotion.on_failure(ev_payload.get("error", ""))
+                    elif intent is not None and getattr(intent, "route", "") == "needs_clarification":
+                        _emotion.on_needs_clarification()
+                if _brain is not None:
+                    try:
+                        asyncio.create_task(
+                            _brain.emotion_changed(
+                                _emotion.state if _emotion else "neutral",
+                                _emotion.reason if _emotion else "",
+                            ),
+                            name="mark-emotion",
+                        )
+                    except Exception:
+                        pass
                 # event_bus is already uninstalled above — broadcast directly
                 # via connection_manager, same as the post-run hooks below.
                 await _broadcast_self_state(agent)
@@ -907,6 +955,35 @@ async def execute(req: ExecuteRequest) -> dict:
                 })
         except Exception:
             pass
+
+        # Brain Foundation: post-conversation learning pipeline
+        # Extracts facts, updates owner memory, stores episodic memory, and
+        # proposes concepts to the knowledge graph — background task so the
+        # user's response is never delayed by learning overhead.
+        if _brain is not None and agent is not None:
+            try:
+                async def _post_learning() -> None:
+                    try:
+                        from smartagent.server import learning_pipeline
+                        result = await asyncio.to_thread(
+                            learning_pipeline.run,
+                            req.goal, reply_text,
+                            _job_success,
+                            _emotion.state if _emotion is not None else "neutral",
+                            getattr(agent, "knowledge_manager", None),
+                        )
+                        if _brain is not None:
+                            await _brain.memory_written("episodic", req.goal[:80])
+                        for concept in (result.get("concepts_proposed") or [])[:2]:
+                            if _brain is not None:
+                                await _brain.knowledge_created(concept)
+                            if _emotion is not None:
+                                _emotion.on_knowledge_created(concept)
+                    except Exception as _le:
+                        logger.debug("post-learning failed: %s", _le)
+                asyncio.create_task(_post_learning(), name="mark-learning")
+            except Exception:
+                pass
 
         # Feature: auto-push after a successful engineering run — Level 4
         # (engineering execution) per the four-level autonomy model: gated
@@ -1229,6 +1306,13 @@ async def voice_websocket(ws: WebSocket) -> None:
                     # it sees this same event below; this call is what
                     # stops the backend from generating any more of it.
                     speech_runtime.interrupt()
+                    # Cancel the running inference too — no more tokens needed.
+                    # Complementary to stopMarkSpeech() on the frontend which
+                    # stops audio; this stops the text being generated behind it.
+                    if _current_inference_task is not None and not _current_inference_task.done():
+                        _current_inference_task.cancel()
+                    if _brain is not None:
+                        await _brain.voice_interrupted()
                 await ws.send_json(event)
     except WebSocketDisconnect:
         pass

@@ -1,5 +1,12 @@
 [
   {
+    "name": "AI Execution",
+    "parent_path": "",
+    "path": "AI Execution",
+    "description": "",
+    "aliases": []
+  },
+  {
     "name": "Best Practices",
     "parent_path": "",
     "path": "Best Practices",
