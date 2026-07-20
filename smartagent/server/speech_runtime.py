@@ -1,41 +1,24 @@
 """
-MARK's Brain Runtime owns his voice — not the browser, not a bolted-on
-demo. This module is the live bridge between "MARK is generating a reply"
-(StreamingToken events on the run's EventBus, published from
-_stream_llm_response and the chat/identity/clarification fast paths in
-api.py) and "the owner hears MARK's real voice" (binary PCM16 audio frames
-broadcast on the same /ws connection everything else already flows over).
+MARK's Brain Runtime owns his voice.  This module bridges "MARK is generating
+a reply" (StreamingToken events on the EventBus) with "the owner hears MARK's
+real voice" (binary PCM16 audio frames on /ws).
 
-Design
-------
-- Subscribes to StreamingToken, source="mark" only — worker/terminal
-  output streamed for the dashboard's own benefit (source="print") is
-  never spoken aloud.
-- Buffers text until a complete sentence forms, then hands THAT SENTENCE
-  ALONE to a dedicated background worker thread for synthesis+broadcast.
-  Handing off to a queue (not synthesizing inline) matters: measured on
-  this machine, Kokoro's real-time-factor on CPU is >1 (synthesis takes
-  *longer* than the audio's own duration, not faster — see MARK-VOICE
-  status notes) — if synthesis ran inline on the same thread that's
-  pulling tokens from the LLM, every completed sentence would stall
-  MARK's TEXT from streaming for as long as its audio took to render.
-  With the queue, text keeps flowing at the LLM's own pace and MARK's
-  VOICE may lag a little behind on slower hardware — audibly imperfect
-  sometimes, but never at the cost of stalling the reply itself.
-- Real interruption: /ws/voice's VoiceSession already detects the owner
-  starting to speak (Silero VAD, speech_start) well before transcription
-  completes; voice_websocket() calls interrupt() the instant that fires.
-  The worker checks the interrupt flag before AND after synthesizing each
-  sentence, so nothing further gets spoken or sent once set. The frontend
-  independently stops audio PLAYBACK the moment it sees the same
-  speech_start event on its own /ws/voice connection — that's the part
-  that actually feels instant, since it doesn't wait on this module at
-  all. A sentence already mid-synthesis when interrupted finishes
-  rendering (Kokoro has no native cancel-mid-inference) but is discarded,
-  never sent.
-
-No setInterval-equivalent, no fake activity: every audio frame sent here
-is real Kokoro output for real text MARK actually said.
+Key design decisions
+--------------------
+- Subscribes to StreamingToken, source="mark" only.
+- Buffers text until a complete sentence forms, then hands THAT SENTENCE to a
+  dedicated background worker thread for synthesis+broadcast.  Decoupling from
+  the LLM token loop means slow Kokoro synthesis never stalls MARK's text stream.
+- Proactive mic mute: the moment the worker is about to send the FIRST audio
+  byte of a new reply, it calls voice_pipeline.mute_active_session().  This
+  happens BEFORE any audio reaches the browser, so MARK's speaker output is
+  never captured by the mic.  No round-trip through the browser is needed.
+- Post-speech holdoff: after the last audio byte, unmute_active_session() is
+  called.  VoiceSession's own holdoff (900ms, sample-accurate) absorbs room
+  reverb + AEC settling before transcription re-opens.
+- Real interruption: voice_websocket() calls interrupt() the instant VAD fires
+  speech_start; the worker discards any further synthesis and signals the
+  voice pipeline to return to LISTENING immediately.
 """
 
 from __future__ import annotations
@@ -57,50 +40,31 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# A "sentence" ends at ., !, or ? (optionally followed by a closing
-# quote/paren) followed by whitespace or end-of-buffer. Not a
-# linguistically perfect tokenizer (e.g. "Mr. Smith" can split early) —
-# an acceptable tradeoff for how much sooner MARK starts speaking.
 _SENTENCE_END_RE = re.compile(r'([.!?]+["\')\]]*(?:\s+|$))')
 
-# A long unpunctuated stretch shouldn't block MARK from starting to speak —
-# past this many buffered characters, force a flush at the last space.
-# 160 chars (≈ 25 words) keeps TTS chunks short enough to start playing
-# quickly and stay intelligible even without a natural sentence boundary.
+# Force a flush when no sentence boundary has been seen for this many chars.
+# ~25 words — keeps TTS chunks short and TTFA low on long run-on sentences.
 _SOFT_FLUSH_LEN = 160
 
-# Sentinel enqueued by flush() to mark "no more sentences for this reply".
-_END_OF_REPLY = object()
+_END_OF_REPLY = object()   # sentinel in the worker queue
 
 
 def _split_complete_sentences(buffer: str) -> tuple[list[str], str]:
-    """Split *buffer* into complete sentences plus a remainder that isn't
-    terminated yet.
-
-    Key fix: require at least 8 accumulated characters before treating a
-    period as a sentence boundary. This filters abbreviations ("Mr.", "Dr.",
-    "vs.", "U.S.") that have very short bodies before the period — they are
-    folded back into the accumulator so the TTS never receives a garbled
-    fragment like "Mr" as a standalone utterance.
-    """
+    """Split *buffer* into complete sentences + an unterminated remainder."""
     parts = _SENTENCE_END_RE.split(buffer)
     sentences: list[str] = []
-    accumulated = ""   # text built up across short/abbreviation boundaries
+    accumulated = ""
     i = 0
     while i + 1 < len(parts):
         body  = parts[i]
         punct = parts[i + 1]
         accumulated += body
-        # Commit a sentence boundary only when there is enough substance.
-        # "Mr. Smith" → body="Mr" (2 chars) → abbreviation, keep going.
-        # "Hello there. " → body="Hello there" (11 chars) → real boundary.
         if len(accumulated.strip()) >= 8:
             candidate = (accumulated + punct).strip()
             if candidate:
                 sentences.append(candidate)
             accumulated = ""
         else:
-            # Abbreviation — fold punctuation back and keep accumulating.
             accumulated += punct
         i += 2
     remainder = accumulated + (parts[i] if i < len(parts) else "")
@@ -115,12 +79,9 @@ def _split_complete_sentences(buffer: str) -> tuple[list[str], str]:
 
 
 class SpeechRuntime:
-    """One instance for the whole server process — see `speech_runtime`
-    singleton at module bottom, matching connection_manager's own
-    module-level-singleton pattern. Owns one persistent background worker
-    thread (started lazily, lives for the process) that synthesizes
-    queued sentences one at a time, in order — kept off the LLM-generation
-    thread so slow synthesis never stalls MARK's text."""
+    """One process-wide singleton.  Thread-safe: all mutable state (buffer,
+    queue, flags) is only written by the caller thread (attach/reset/on_token/
+    flush) or the single worker thread — never concurrently."""
 
     def __init__(self) -> None:
         self._manager: "ConnectionManager | None" = None
@@ -131,25 +92,14 @@ class SpeechRuntime:
         self._queue: "queue.SimpleQueue[str | object]" = queue.SimpleQueue()
         self._worker_lock = threading.Lock()
         self._worker_started = False
-        # (LiveKit audio transport removed — audio goes via /ws binary frames.)
-        # Kept as a no-op stub so old call-sites don't raise AttributeError.
 
     def attach(self, manager: "ConnectionManager", loop: asyncio.AbstractEventLoop) -> None:
-        """Called once per run (loop is the same running loop each time,
-        but re-attaching is cheap and avoids assuming call order)."""
         self._manager = manager
         self._loop = loop
 
     def reset(self) -> None:
-        """Call at the start of every new MARK reply. Drains any sentences
-        still queued from a reply that ended without a real VAD
-        interrupt (e.g. the owner typed a new message instead of talking
-        over MARK) — a new reply shouldn't have to play out behind stale
-        audio. (There's a narrow window where a sentence already
-        mid-synthesis on the worker thread at this exact moment could
-        still slip through afterward — accepted as a rare, cosmetic
-        edge case, not a functional one: real audio, real interruption,
-        and real ordering all still hold.)"""
+        """Call at the start of every new MARK reply.  Drains stale queued
+        sentences from any previous reply that completed without a VAD interrupt."""
         try:
             while True:
                 self._queue.get_nowait()
@@ -165,7 +115,9 @@ class SpeechRuntime:
             if self._worker_started:
                 return
             self._worker_started = True
-            threading.Thread(target=self._worker_loop, daemon=True, name="mark-speech-worker").start()
+            threading.Thread(
+                target=self._worker_loop, daemon=True, name="mark-speech-worker"
+            ).start()
 
     def interrupt(self) -> None:
         """Call the instant the owner starts speaking (VAD speech_start)."""
@@ -174,9 +126,8 @@ class SpeechRuntime:
             self._broadcast_event(ServerEvents.SPEECH_INTERRUPTED, {})
 
     def on_token(self, event: "Event") -> None:
-        """EventBus subscriber for StreamingToken (see events.py). Only
-        enqueues — never synthesizes here — so this returns immediately
-        and the LLM's own token loop is never blocked on audio rendering."""
+        """EventBus subscriber for StreamingToken.  Enqueues only — never
+        synthesizes here — so the LLM token loop is never stalled."""
         if self._interrupted.is_set():
             return
         if event.payload.get("source") != "mark":
@@ -190,21 +141,25 @@ class SpeechRuntime:
             self._queue.put(sentence)
 
     def flush(self) -> None:
-        """Call once the run/chat response is fully done — enqueues
-        whatever text never reached a sentence boundary (e.g. a short
-        reply with no terminal punctuation), then marks the reply's end
-        so the worker emits SpeechEnd once it's actually spoken."""
+        """Call once the run/chat response is fully done."""
         remainder, self._buffer = self._buffer.strip(), ""
         if remainder:
             self._queue.put(remainder)
         self._queue.put(_END_OF_REPLY)
 
+    # ── Worker thread ─────────────────────────────────────────────────────────
+
     def _worker_loop(self) -> None:
         while True:
             item = self._queue.get()
             if item is _END_OF_REPLY:
-                if self._spoke_anything and not self._interrupted.is_set():
-                    self._broadcast_event(ServerEvents.SPEECH_END, {})
+                if self._spoke_anything:
+                    if not self._interrupted.is_set():
+                        self._broadcast_event(ServerEvents.SPEECH_END, {})
+                    # Unmute the active voice session.  VoiceSession's own
+                    # POST_SPEECH holdoff (900ms, sample-accurate) handles
+                    # the echo cool-down — we don't need to sleep here.
+                    self._unmute_mic()
                 self._spoke_anything = False
                 continue
             self._speak_sentence(item)  # type: ignore[arg-type]
@@ -215,15 +170,37 @@ class SpeechRuntime:
         try:
             pcm = tts_engine.synthesize(text)
         except Exception as exc:
-            logger.warning("speech_runtime: synthesis failed for a sentence: %s", exc)
+            logger.warning("speech_runtime: synthesis failed: %s", exc)
             return
         if not pcm or self._interrupted.is_set():
-            return  # dropped — never send audio for text MARK was cut off saying
+            return   # discarded — never send audio for text MARK was cut off on
         if not self._spoke_anything:
             self._spoke_anything = True
+            # ── Proactive mute: silence the mic BEFORE the first audio byte ──
+            # This is the key fix for the self-echo loop.  By muting here, we
+            # guarantee MARK's speaker output is never processed by the VAD,
+            # regardless of browser AEC latency or round-trip timing.
+            self._mute_mic()
             self._broadcast_event(ServerEvents.SPEECH_START, {})
         self._broadcast_bytes(pcm)
-        # (audio delivered via connection_manager binary broadcast above)
+
+    # ── Mic control helpers ───────────────────────────────────────────────────
+
+    def _mute_mic(self) -> None:
+        try:
+            from smartagent.server.voice_pipeline import mute_active_session
+            mute_active_session()
+        except Exception as exc:
+            logger.debug("speech_runtime: mute_active_session failed: %s", exc)
+
+    def _unmute_mic(self) -> None:
+        try:
+            from smartagent.server.voice_pipeline import unmute_active_session
+            unmute_active_session()
+        except Exception as exc:
+            logger.debug("speech_runtime: unmute_active_session failed: %s", exc)
+
+    # ── Broadcast helpers ─────────────────────────────────────────────────────
 
     def _broadcast_event(self, name: str, payload: dict[str, Any]) -> None:
         if self._manager is None or self._loop is None or self._loop.is_closed():
@@ -241,10 +218,12 @@ class SpeechRuntime:
         if self._manager is None or self._loop is None or self._loop.is_closed():
             return
         try:
-            asyncio.run_coroutine_threadsafe(self._manager.broadcast_bytes(data), self._loop)
+            asyncio.run_coroutine_threadsafe(
+                self._manager.broadcast_bytes(data), self._loop
+            )
         except RuntimeError:
             pass
 
 
-# Module-level singleton used by api.py — mirrors connection_manager.
+# Module-level singleton shared with api.py and events.py.
 speech_runtime = SpeechRuntime()
