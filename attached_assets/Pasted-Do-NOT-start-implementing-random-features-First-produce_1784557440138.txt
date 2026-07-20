@@ -1,0 +1,156 @@
+Do NOT start implementing random features.
+
+First produce a complete implementation roadmap that I can review and approve.
+
+The roadmap should break the work into independent milestones with dependencies, estimated effort, risks, and success criteria.
+
+Each milestone must answer:
+
+Why are we doing this?
+What changes?
+Which files?
+Dependencies?
+Risk?
+Definition of Done?
+
+Do not modify code until the roadmap is approved.
+
+Required Milestones
+Phase 1 — Conversation Philosophy (Highest Priority)
+
+Rebuild MARK's conversational behavior.
+
+Goal:
+
+MARK should feel like a persistent person, not an engineering chatbot.
+
+Tasks:
+
+Remove engineering-first assumptions.
+Make normal conversation the default.
+Load owner memory before responding.
+Add initiative naturally.
+Remove scripted greetings.
+Ensure responses depend on context rather than canned prompts.
+
+Deliverable:
+
+Conversation feels human.
+
+Phase 2 — Unified Brain Runtime
+
+Merge reasoning, memory, emotion, identity and conversation into one runtime.
+
+Remove duplicate planners.
+
+Remove duplicate memory systems.
+
+One brain.
+
+Phase 3 — Memory Architecture
+
+Implement:
+
+Working Memory
+Episodic Memory
+Semantic Memory
+Owner Memory
+
+All through one interface.
+
+Phase 4 — Knowledge Engine
+
+Convert conversations into structured knowledge.
+
+Knowledge graph.
+
+Concept extraction.
+
+Relationships.
+
+Reflection.
+
+Learning.
+
+Phase 5 — Continuous Presence
+
+MARK is always alive.
+
+Dashboard connects to MARK.
+
+Dashboard never creates MARK.
+
+Idle thinking loop.
+
+Background reflection.
+
+Memory consolidation.
+
+Phase 6 — Voice
+
+Natural interruption.
+
+Continuous listening.
+
+Half duplex.
+
+Better pacing.
+
+Emotion-aware speech.
+
+Phase 7 — Dashboard
+
+Brain-first dashboard.
+
+Engineering becomes secondary.
+
+Live cognition.
+
+Memory activity.
+
+Knowledge growth.
+
+Current thought.
+
+Emotional state.
+
+Phase 8 — Executive Intelligence
+
+Reason first.
+
+Delegate only when necessary.
+
+Workers become tools.
+
+MARK remains the decision maker.
+
+Phase 9 — Continuous Learning
+
+Every conversation updates:
+
+owner profile
+semantic memory
+episodic memory
+knowledge graph
+reflection log
+Phase 10 — Optimization
+
+Token budgeting.
+
+Caching.
+
+Memory retrieval.
+
+Latency reduction.
+
+Cost monitoring.
+
+After Roadmap Approval
+
+Only implement Phase 1.
+
+Do not begin any later phase until I approve the previous one.
+
+Reason:
+
+Changing MARK's conversation philosophy will have the biggest immediate improvement while minimizing architectural risk.
