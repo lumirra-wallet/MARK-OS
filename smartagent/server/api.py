@@ -593,23 +593,43 @@ async def execute(req: ExecuteRequest) -> dict:
             self_state.task_started(agent, req.goal)
             await _broadcast_self_state(agent)
 
-            # ── Understand: the Intent Engine's single decision point ────────
-            intent = classify_intent(req.goal)
-            logger.info(
-                "MARK STATE intent  goal=%r  category=%s  route=%s",
-                req.goal[:60], intent.category.value, intent.route,
+            # ── Conversational fast path ──────────────────────────────────
+            # Short messages with no engineering signals bypass classify_intent
+            # + plan_response entirely, cutting first-token latency from ~15s
+            # to ~3-5s. The full pipeline stays intact for anything that might
+            # be a task; the heuristic errs on the side of running the full
+            # pipeline (any keyword match falls through to the else branch).
+            _goal_lower = req.goal.lower().strip()
+            _is_fast_chat = (
+                len(req.goal) < 120
+                and not any(kw in _goal_lower for kw in (
+                    "create", "build", "write", "fix", "add ", "update",
+                    "delete", "install", "deploy", "run ", "implement",
+                    "generate", "make ", "refactor", "test ", "commit",
+                    "push", "pull ", "branch", "debug", "```",
+                    "def ", "class ", "import ", "function ", "select ",
+                    "from ", "insert ", "drop ",
+                ))
             )
-
-            # ── Decide: agent.mind actually gets a say — a real confidence ───
-            # score from the Brain, not just a route label with no
-            # deliberation behind it. Dispatch below still keys off
-            # intent.route directly; this doesn't change behavior, it makes
-            # the reasoning real and visible (see response_planner.py).
-            plan = plan_response(agent, req.goal, intent)
-            logger.info(
-                "MARK STATE plan  action=%s  confidence=%.2f  reasoning=%s",
-                plan.action, plan.confidence, plan.reasoning,
-            )
+            if _is_fast_chat:
+                from types import SimpleNamespace as _SN
+                intent = _SN(route="conversational", category=_SN(value="conversational"))
+                plan   = _SN(action="chat", confidence=1.0,
+                             reasoning="fast-path: short non-engineering message")
+                logger.info("MARK STATE fast-path  goal=%r", req.goal[:60])
+            else:
+                # ── Understand: the Intent Engine's single decision point ────
+                intent = classify_intent(req.goal)
+                logger.info(
+                    "MARK STATE intent  goal=%r  category=%s  route=%s",
+                    req.goal[:60], intent.category.value, intent.route,
+                )
+                # ── Decide: agent.mind gets a real confidence score ──────────
+                plan = plan_response(agent, req.goal, intent)
+                logger.info(
+                    "MARK STATE plan  action=%s  confidence=%.2f  reasoning=%s",
+                    plan.action, plan.confidence, plan.reasoning,
+                )
 
             if intent.route == "conversational":
                 # ── CHAT PATH — greetings, questions, brainstorming; no ──────

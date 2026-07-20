@@ -262,6 +262,51 @@ const DEFAULT_WORKERS: WorkerState[] = [
   { name: 'Preview',   status: 'idle' },
 ];
 
+// ── Brain Foundation: self-state sync helper ─────────────────────────────────
+// Reads the memory_activity + emotional_state from a self-state snapshot and
+// writes them into the store. Called from both the poll path (fetchSelfState)
+// and the push path (SelfStateChanged) so the memory panel shows real counts
+// on load — before any live BrainEvent has fired.
+function _applySelfStateBrainFields(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: any,
+  _get: () => unknown,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  set: (partial: any) => void,
+): void {
+  // Treat data as a plain object — works for both SelfState and raw WS payload.
+  const d = data as Record<string, unknown>;
+  // Emotional state — only overwrite if the server reports a real state
+  const emo = d.emotional_state as string | undefined;
+  if (emo) {
+    set({ emotionalState: emo, emotionalReason: (data.emotional_reason as string) ?? '' });
+  }
+  // Memory counts — translate the `{ episodic_today, semantic_total,
+  // owner_attributes }` summary into one synthetic MemoryActivityEntry so
+  // the memory panel shows meaningful numbers immediately on load.
+  const ma = data.memory_activity as Record<string, number> | undefined;
+  if (ma) {
+    const episodic = ma.episodic_today  ?? 0;
+    const semantic  = ma.semantic_total  ?? 0;
+    const owner     = ma.owner_attributes ?? 0;
+    if (episodic + semantic + owner > 0) {
+      const entry: MemoryActivityEntry = {
+        id:        Math.random().toString(36).slice(2, 10),
+        timestamp: new Date().toISOString(),
+        layer:     'episodic',
+        summary:   `${episodic} events today · ${semantic} concepts · ${owner} owner attributes`,
+      };
+      // Only add the synthetic entry if the panel is still empty — once real
+      // BrainEvents arrive they take over and we don't want stale summaries.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      set((state: any) => ({
+        memoryActivity:  state.memoryActivity.length === 0 ? [entry] : state.memoryActivity,
+        knowledgeGrowth: state.knowledgeGrowth  === 0      ? semantic  : state.knowledgeGrowth,
+      }));
+    }
+  }
+}
+
 // ── WebSocket singleton ───────────────────────────────────────────────────────
 
 let ws: WebSocket | null = null;
@@ -271,8 +316,9 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 // connected": a fresh drop recovers almost instantly, and only a
 // genuinely dead server backs off toward a slower retry.
 let reconnectAttempts = 0;
-const RECONNECT_BASE_MS = 250;
-const RECONNECT_MAX_MS = 4000;
+const RECONNECT_BASE_MS    = 250;
+const RECONNECT_MAX_MS     = 15_000;  // back off to 15 s max (was 4 s)
+const RECONNECT_MAX_ATTEMPTS = 30;    // give up after 30 tries — user can manually reconnect
 let liveRecoveryListenersInstalled = false;
 // MARK's real voice player — receives binary PCM16 frames on the same /ws
 // connection (see connectWebSocket's onmessage). Lazily constructed at
@@ -383,7 +429,10 @@ export const useMarkStore = create<MarkState>((set, get) => {
     serverUrl:        (() => {
       if (localStorage.getItem('mark_server_url')) return localStorage.getItem('mark_server_url')!;
       const viteUrl = import.meta.env.VITE_API_URL as string | undefined;
-      if (!viteUrl) return window.location.origin;
+      // Default to /mark-api so the WS URL resolves correctly in Replit's
+      // proxied preview — bare origin gives wss://domain/ws which misses the
+      // path prefix and every reconnect fails silently.
+      if (!viteUrl) return window.location.origin + '/mark-api';
       // Relative path like /mark-api → prepend origin so WebSocket URLs work
       if (viteUrl.startsWith('/')) return window.location.origin + viteUrl;
       // Full URL like http://localhost:8000 → use directly
@@ -438,6 +487,9 @@ export const useMarkStore = create<MarkState>((set, get) => {
       try {
         const s = await markApi.getSelfState(get().serverUrl);
         set({ selfState: s });
+        // Brain Foundation: seed memory + emotional state from the poll so
+        // the panel shows real numbers on load, before any BrainEvent fires.
+        _applySelfStateBrainFields(s, get, set);
       } catch {
         /* stay null — the Presence Engine has an honest "unknown" state for this */
       }
@@ -519,7 +571,8 @@ export const useMarkStore = create<MarkState>((set, get) => {
       if (ws) { ws.close(); ws = null; }
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       const { serverUrl } = get();
-      const wsUrl = serverUrl.replace(/^http/, 'ws') + '/ws';
+      // Normalise trailing slash so we never produce `.../mark-api//ws`.
+      const wsUrl = serverUrl.replace(/^http/, 'ws').replace(/\/$/, '') + '/ws';
       set({ connectionStatus: 'connecting' });
 
       // Recover the instant the tab regains focus or the network comes
@@ -559,10 +612,13 @@ export const useMarkStore = create<MarkState>((set, get) => {
 
         ws.onclose = () => {
           set({ connectionStatus: 'disconnected' });
-          // Fast exponential backoff (250ms → 4s ceiling): a transient
-          // blip (server restart, brief network hiccup) recovers almost
-          // instantly; a genuinely dead server backs off instead of being
-          // hammered, but never waits longer than 4s between tries.
+          // Stop retrying after RECONNECT_MAX_ATTEMPTS — a genuinely dead
+          // server should not be hammered forever. The user can see the
+          // "Disconnected" badge and click it or refresh to force a reconnect.
+          if (reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) return;
+          // Exponential backoff: 250ms → 15s ceiling.
+          // Recovers almost instantly on a brief blip; backs off for
+          // a genuinely unavailable server without hammering it.
           const delay = Math.min(RECONNECT_BASE_MS * 2 ** reconnectAttempts, RECONNECT_MAX_MS);
           reconnectAttempts += 1;
           reconnectTimer = setTimeout(() => get().connectWebSocket(), delay);
@@ -644,6 +700,8 @@ export const useMarkStore = create<MarkState>((set, get) => {
               // polled. The Presence Engine reads this directly.
               case 'SelfStateChanged': {
                 set({ selfState: payload });
+                // Sync brain fields from pushed self-state (same data as the poll).
+                _applySelfStateBrainFields(payload, get, set);
                 break;
               }
 

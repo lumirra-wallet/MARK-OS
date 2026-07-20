@@ -81,6 +81,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     loop = asyncio.get_running_loop()
 
+    # Warm the persistent SmartAgent in the background so the first user
+    # message finds a ready agent rather than paying construction cost inline.
+    # Non-fatal — if it fails the first real request triggers construction.
+    async def _warm_agent() -> None:
+        try:
+            from smartagent.server import api as _api_mod  # type: ignore[attr-defined]
+            await _api_mod._get_mark_agent(None)
+            logger.info("SmartAgent warm-up complete")
+        except Exception as _exc:  # pragma: no cover
+            logger.warning("SmartAgent warm-up failed (non-fatal): %s", _exc)
+    asyncio.create_task(_warm_agent(), name="mark-warmup")
+
     # Start the preview auto-detection loop
     import os as _os
     _scan_interval = float(_os.environ.get("PREVIEW_SCAN_INTERVAL", "15"))
