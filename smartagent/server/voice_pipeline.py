@@ -303,16 +303,59 @@ class VoiceSession:
 # ── Module-level session registry ─────────────────────────────────────────────
 # speech_runtime calls mute_active_session() / unmute_active_session() directly
 # so the mute arrives BEFORE the first audio byte — no browser round-trip needed.
+#
+# _tts_active mirrors whether speech_runtime is currently sending TTS audio.
+# It is set by speech_runtime via set_tts_active() on every mute/unmute call.
+# When a new voice session registers mid-playback (model-load race or reconnect),
+# we can immediately mute it rather than letting it hear MARK's current sentence.
 
 _registry_lock = threading.Lock()
 _active_session: "VoiceSession | None" = None
+_tts_active = False   # True while speech_runtime is sending audio frames
+
+
+def set_tts_active(active: bool) -> None:
+    """Called by speech_runtime to keep the registry informed of TTS state."""
+    global _tts_active
+    _tts_active = active
+
+
+# How long (in samples at 16 kHz) to suppress transcription after a fresh
+# session registers when TTS is NOT currently active.  Absorbs any residual
+# echo from MARK's startup greeting that played before the VAD model loaded.
+_STARTUP_HOLDOFF_SAMPLES = int(1.5 * SAMPLE_RATE)   # 1.5 s
 
 
 def register_session(session: VoiceSession) -> None:
+    """Register a new VoiceSession.
+
+    If TTS is currently active (MARK is mid-sentence when the voice WS
+    reconnected or connected for the first time during playback), immediately
+    hard-mute the new session — it would otherwise start in LISTENING and
+    hear the tail of MARK's current sentence.
+
+    If TTS is not active, apply a 1.5-second startup holdoff so any room
+    echo from MARK's opening greeting (which may have played while the VAD
+    model was still loading) clears before transcription opens.
+    """
     global _active_session
     with _registry_lock:
         _active_session = session
-    logger.debug("voice_pipeline: session registered")
+    if _tts_active:
+        session.mute()
+        logger.debug("voice_pipeline: session registered mid-TTS — immediately hard-muted")
+    else:
+        # Startup holdoff — don't open the VAD until the echo from the
+        # greeting that played during model-load has had time to decay.
+        with _registry_lock:
+            pass   # just to serialise the state write below
+        session._state = _STATE_POST_SPEECH
+        session._post_holdoff_remaining = _STARTUP_HOLDOFF_SAMPLES
+        session._holdoff_done.clear()
+        logger.debug(
+            "voice_pipeline: session registered with %.1fs startup holdoff",
+            _STARTUP_HOLDOFF_SAMPLES / SAMPLE_RATE,
+        )
 
 
 def unregister_session(session: VoiceSession) -> None:

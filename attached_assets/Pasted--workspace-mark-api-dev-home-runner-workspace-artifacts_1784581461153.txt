@@ -1,0 +1,293 @@
+
+> @workspace/mark-api@ dev /home/runner/workspace/artifacts/mark-api
+> cd ../.. && pip install -q -r requirements.minimal.txt 2>&1 | tail -3 && PYTHONUTF8=1 python -m smartagent.server.mark_supervisor
+
+20:59:21 [INFO] __main__ — MARK supervisor starting (uvicorn port 18949)
+20:59:21 [INFO] smartagent.server.livekit_process — livekit_process: starting LiveKit server (port 7880)
+20:59:21 [INFO] __main__ — supervisor: waiting for LiveKit on port 7880 …
+20:59:27 [INFO] smartagent.server.livekit_process — livekit_process: LiveKit healthy on port 7880
+20:59:27 [INFO] __main__ — supervisor: ✓ LiveKit healthy
+20:59:27 [INFO] __main__ — supervisor: starting uvicorn
+INFO:     Started server process [165]
+INFO:     Waiting for application startup.
+  [server] MARK API ready  →  http://localhost:18949
+  [server] WebSocket stream →  ws://localhost:18949/ws
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:18949 (Press CTRL+C to quit)
+INFO:     127.0.0.1:35950 - "GET / HTTP/1.1" 404 Not Found
+INFO:     10.56.2.60:0 - "GET /mark-api HTTP/1.1" 404 Not Found
+INFO:     10.56.6.5:0 - "GET /mark-api HTTP/1.1" 404 Not Found
+INFO:     10.56.0.140:0 - "GET /mark-api HTTP/1.1" 404 Not Found
+INFO:     10.56.12.118:0 - "GET /mark-api HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:35950 - "GET / HTTP/1.1" 404 Not Found
+INFO:     10.56.2.60:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.12.118:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "WebSocket /mark-api/ws" [accepted]
+INFO:     connection open
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/self-state HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "WebSocket /mark-api/ws" [accepted]
+INFO:     connection open
+INFO:     10.56.6.5:0 - "GET /mark-api/self-state HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "WebSocket /mark-api/ws" [accepted]
+INFO:     connection open
+INFO:     10.56.6.5:0 - "GET /mark-api/self-state HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "WebSocket /mark-api/ws" [accepted]
+INFO:     connection open
+INFO:     10.56.6.5:0 - "GET /mark-api/self-state HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "WebSocket /mark-api/ws/voice?workspace=." [accepted]
+INFO:     connection open
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.1.85:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.1.85:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.1.85:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.1.85:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/agent/messages?limit=100 HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/task-graph HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/task-graph HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/agent/messages?limit=100 HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/task-graph HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/agent/messages?limit=100 HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.1.85:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.1.85:0 - "WebSocket /mark-api/ws" [accepted]
+INFO:     connection open
+INFO:     10.56.2.60:0 - "GET /mark-api/self-state HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/task-graph HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/agent/messages?limit=100 HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.1.85:0 - "POST /mark-api/voice/message HTTP/1.1" 202 Accepted
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "POST /mark-api/voice/message HTTP/1.1" 202 Accepted
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "POST /mark-api/voice/message HTTP/1.1" 202 Accepted
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "POST /mark-api/voice/message HTTP/1.1" 202 Accepted
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "POST /mark-api/voice/message HTTP/1.1" 202 Accepted
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "POST /mark-api/voice/message HTTP/1.1" 202 Accepted
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "POST /mark-api/voice/message HTTP/1.1" 202 Accepted
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34454 - "GET / HTTP/1.1" 404 Not Found
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.0.140:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.11.25:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK
+INFO:     10.56.6.5:0 - "POST /mark-api/voice/message HTTP/1.1" 202 Accepted
+INFO:     10.56.6.5:0 - "GET /mark-api/metrics HTTP/1.1" 200 OK

@@ -126,32 +126,37 @@ export function useVoice() {
   // cycle delay.  This means micMutedRef flips the moment isMarkSpeaking
   // changes, so the VERY NEXT onaudioprocess invocation (~85ms later) already
   // sees the correct value.
+  //
+  // We use the plain two-argument subscribe(listener) form (state + prevState)
+  // so we don't require the subscribeWithSelector middleware.  We compare the
+  // scalar ourselves and bail early when it hasn't changed.
   useEffect(() => {
-    return useMarkStore.subscribe(
-      (state) => state.isMarkSpeaking,
-      (speaking) => {
-        micMutedRef.current = speaking;
+    return useMarkStore.subscribe((state, prevState) => {
+      const speaking = state.isMarkSpeaking;
+      if (speaking === prevState.isMarkSpeaking) return;
 
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          if (speaking) {
-            // Secondary/safety-net mute signal to the server.
-            // The primary mute already happened inside speech_runtime before
-            // the first audio byte — this is belt-and-suspenders.
-            wsRef.current.send(JSON.stringify({ type: 'tts_start' }));
-          } else {
-            // Secondary unmute signal.  Server's VoiceSession already started
-            // its 900ms sample-accurate holdoff via speech_runtime.unmute_active_session().
-            // This is belt-and-suspenders.
-            wsRef.current.send(JSON.stringify({ type: 'tts_end' }));
-          }
+      micMutedRef.current = speaking;
+
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        if (speaking) {
+          // Secondary/safety-net mute signal to the server.
+          // The primary mute already happened inside speech_runtime before
+          // the first audio byte — this is belt-and-suspenders.
+          wsRef.current.send(JSON.stringify({ type: 'tts_start' }));
+        } else {
+          // Secondary unmute signal.  Server's VoiceSession already started
+          // its 900ms sample-accurate holdoff via speech_runtime.unmute_active_session().
+          wsRef.current.send(JSON.stringify({ type: 'tts_end' }));
         }
-      },
-    );
+      }
+    });
   }, []);
 
-  // Keep the exposed `isMarkSpeaking` prop in sync too (used by return value)
-  // via the normal useEffect path — rendering doesn't need sub-tick accuracy.
-  useEffect(() => { micMutedRef.current = isMarkSpeaking; }, [isMarkSpeaking]);
+  // NOTE: micMutedRef is intentionally NOT synced via useEffect — the
+  // synchronous Zustand subscribe above already handles it in the same tick as
+  // the store change.  A second useEffect path here would create a render-cycle
+  // race where the ref could briefly hold the wrong value between subscribe
+  // firing and the effect running, letting a PCM frame slip through.
 
   // ── Mic level polling ─────────────────────────────────────────────────────
   const pollLevel = useCallback(() => {
@@ -203,6 +208,11 @@ export function useVoice() {
     ws.onopen = async () => {
       if (!enabledRef.current) { ws.close(); return; }
       reconnectDelayRef.current = 1000;   // reset backoff on successful open
+      // Clear any transcript that was queued before the reconnect.
+      // If MARK was speaking when the WS dropped, the VAD may have transcribed
+      // his echo and queued it — sending it after RunCompleted would restart
+      // the loop on the next run completion.
+      pendingMsgRef.current = null;
 
       // Acquire mic
       let stream: MediaStream;

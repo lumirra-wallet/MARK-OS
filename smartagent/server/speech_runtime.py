@@ -188,15 +188,21 @@ class SpeechRuntime:
 
     def _mute_mic(self) -> None:
         try:
-            from smartagent.server.voice_pipeline import mute_active_session
+            from smartagent.server.voice_pipeline import mute_active_session, set_tts_active
+            # Mark TTS as active BEFORE muting so any session that registers
+            # mid-sentence (reconnect race) sees the flag and hard-mutes itself.
+            set_tts_active(True)
             mute_active_session()
         except Exception as exc:
             logger.debug("speech_runtime: mute_active_session failed: %s", exc)
 
     def _unmute_mic(self) -> None:
         try:
-            from smartagent.server.voice_pipeline import unmute_active_session
+            from smartagent.server.voice_pipeline import unmute_active_session, set_tts_active
             unmute_active_session()
+            # Clear the flag AFTER unmuting so the POST_SPEECH holdoff in
+            # VoiceSession — not the flag — is the authoritative gate.
+            set_tts_active(False)
         except Exception as exc:
             logger.debug("speech_runtime: unmute_active_session failed: %s", exc)
 

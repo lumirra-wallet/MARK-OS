@@ -41,6 +41,45 @@ By step 3, MARK's TTS audio had been playing for 200-500ms and the mic had alrea
 - On speech_start: immediately clears interimTranscript and calls stopMarkSpeech()
 - Removed separate holdoffTimerRef — server handles holdoff
 
+## The Self-Talk Loop (July 2026 fix)
+
+Three bugs combined to make MARK talk to himself with zero user input:
+
+**Bug 1 — Model-load race (primary cause):**
+`VoiceSession.__init__` calls `_get_vad_model()` + `_get_whisper_model()` lazily on first call,
+taking 10-60s. `register_session()` is called only AFTER the constructor returns. Meanwhile
+MARK's startup greeting TTS was already playing. `mute_active_session()` is a no-op when
+`_active_session is None`. Mic was open the whole time.
+
+Fix: `register_session()` now applies a 1.5s POST_SPEECH startup holdoff unconditionally
+when TTS is not active, absorbing model-load-era echo.
+
+**Bug 2 — Reconnect mute miss:**
+When the voice WS reconnects (Replit proxy cycle), the new session starts in LISTENING.
+If MARK is mid-sentence, `_active_session` just changed to the new session. The new session
+was never muted.
+
+Fix: Added `_tts_active` global flag in voice_pipeline. speech_runtime sets it True in
+`_mute_mic()` before calling `mute_active_session()` and False in `_unmute_mic()` after
+`unmute_active_session()`. `register_session()` checks `_tts_active`: if True → immediately
+hard-mute the new session; if False → apply 1.5s startup holdoff.
+
+**Bug 3 — Pending message survives reconnect:**
+If VAD fires a `final` event while `isRunning=True`, the text goes into `pendingMsgRef`.
+On WS drop+reconnect, `RunCompleted` arrives, `isRunning → False`, useEffect fires →
+sends the old pending message → loop restarts.
+
+Fix: `pendingMsgRef.current = null` cleared in `ws.onopen` inside `connectVoiceSocket()`.
+
+**Bug 4 — Duplicate micMutedRef update path:**
+`useMarkStore.subscribe()` was called with two args (selector + callback) — the
+subscribeWithSelector form — but the store has no subscribeWithSelector middleware.
+TypeScript error masked by Vite. Fixed to use plain subscribe(state, prevState) form
+with inline equality check.
+
+Also removed redundant `useEffect(() => { micMutedRef.current = isMarkSpeaking })` that
+could create a race condition with the synchronous subscribe path.
+
 ## Key Invariant
 `mute_active_session()` is ALWAYS called before `broadcast_bytes()` for any sentence. VoiceSession.feed() discards all audio during TTS_ACTIVE. The mic gate on the client is a secondary layer only.
 
