@@ -2,6 +2,6 @@
   "name": "@workspace/mark-api",
   "private": true,
   "scripts": {
-    "dev": "cd ../.. && PYTHONUTF8=1 python -m uvicorn smartagent.server.app:app --host 0.0.0.0 --port ${PORT:-18949} --reload --reload-dir smartagent"
+    "dev": "cd ../.. && pip install -q -r requirements.minimal.txt 2>&1 | tail -3 && PYTHONUTF8=1 python -m smartagent.server.watchdog"
   }
 }

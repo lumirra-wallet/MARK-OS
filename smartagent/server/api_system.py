@@ -341,7 +341,7 @@ async def list_models() -> dict:
             return {"models": [], "active": active, "provider": "openai", "error": str(exc)}
 
     if provider == "anthropic":
-        active = settings.get("model", "claude-haiku-3-5")
+        active = settings.get("model", "claude-haiku-3-5")  # anthropic default
         try:
             from smartagent.llm.anthropic_provider import AnthropicProvider
             p = AnthropicProvider()

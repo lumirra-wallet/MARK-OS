@@ -1,129 +1,79 @@
-# SmartAgent MARK
+# MARK — AI Operating System
 
-> **Superseded.** The canonical specification is
-> [`docs/canonical/`](docs/canonical/README.md). **If you are Replit
-> Agent, read [`docs/canonical/REPLIT_BOOTSTRAP.md`](docs/canonical/REPLIT_BOOTSTRAP.md)
-> first**, then [`docs/SESSION_HANDOFF.md`](docs/SESSION_HANDOFF.md) for
-> what's currently real and verified. The package map and milestone table
-> below describe the `smartagent/brain/`-rooted CLI/REPL system, confirmed
-> by audit to be disconnected from the live FastAPI+React product.
-> Historical reference for that code path only.
+MARK is a persistent cognitive AI — not a chatbot, not a coding tool. He is a single intelligence that lives continuously, remembers everything, listens to your voice, speaks back, and grows smarter over time.
 
-MARK is an autonomous Python AI agent with a modular architecture covering memory, multi-agent orchestration, self-debugging, project awareness, and a full software-engineer pipeline.
+> **"MARK is the persistent intelligence. AI models are reasoning instruments MARK may choose to consult, but they never define his identity, memory, personality, or cognition. MARK owns his own mind; external models only extend his capabilities when necessary."**
 
-## Run & Operate
+---
 
-```bash
-# Run the REPL console
-python -m smartagent
+## How to Run
 
-# Run the full test suite
-pytest
+### Start Everything
+The workspace uses pnpm. All three services start automatically via Replit workflows:
 
-# Run tests for a specific milestone
-pytest tests/test_project_memory.py    # M22
-pytest tests/test_long_running.py      # M23
-pytest tests/test_dev_loop.py          # M24
-pytest tests/test_engineer.py          # M25
-```
-
-## Stack
-
-- Python 3.11, no external framework dependencies for core agent
-- Ollama (optional) for local LLM inference
-- pytest for all tests
-- Modular packages under `smartagent/`
-
-## Where Things Live
-
-| Area | Package | Key files |
+| Service | Command | Port |
 |---|---|---|
-| Brain / wiring | `smartagent/brain/` | `agent.py` — composition root |
-| Memory | `smartagent/memory/` | `memory_manager.py` |
-| Tools | `smartagent/tools/` | `tool_engine.py` |
-| Models | `smartagent/models/` | `model_manager.py`, `model_registry.py` |
-| MARK Mind OS | `smartagent/mind/` | `mind_os.py`, `identity_engine.py` |
-| Executive | `smartagent/executive/` | `executive_controller.py`, `orchestrator.py` |
-| Multi-Agent | `smartagent/multi_agent/` | `ceo_agent.py`, `team_planner.py`, `team_runner.py` |
-| Reflection | `smartagent/reflection/` | `reflection_engine.py` |
-| Intelligence | `smartagent/intelligence/` | `project_scanner.py` |
-| File Editing | `smartagent/editing/` | `file_editor.py` |
-| Debugging | `smartagent/debug/` | `debug_loop.py`, `traceback_parser.py` |
-| **Git Engine** | `smartagent/git/` | `git_client.py`, `pr_builder.py` |
-| **Project Memory** | `smartagent/project_memory/` | `project_memory.py`, `project_profile.py` |
-| **Long Running** | `smartagent/long_running/` | `long_running_engine.py`, `completion_report.py` |
-| **Dev Loop** | `smartagent/dev_loop/` | `dev_loop.py`, `loop_result.py` |
-| **Engineer** | `smartagent/engineer/` | `software_engineer.py`, `requirement_analyzer.py`, `clarification_engine.py` |
-| Console UI | `smartagent/ui/` | `console.py`, `commands/` |
+| **MARK Python Server** | `pnpm --filter @workspace/mark-api run dev` | 18949 |
+| **MARK Dashboard** | `pnpm --filter @workspace/mark-dashboard run dev` | auto |
+| **API Server (Node)** | `pnpm --filter @workspace/api-server run dev` | 8080 |
 
-## Milestones
-
-| # | Name | Status | Console command |
-|---|---|---|---|
-| 1–8 | Core agent + console | ✓ done | `help` |
-| 9 | Ollama integration | ✓ done | `model list` |
-| 10 | Streaming | ✓ done | — |
-| 11 | Executive framework | ✓ done | `plan <goal>` |
-| 15 | Workspace manager | ✓ done | `workspace list` |
-| 17 | Multi-agent | ✓ done | `ceo <goal>` |
-| 18 | Intelligence | ✓ done | `scan <path>` |
-| 19 | File editing | ✓ done | — |
-| 20 | Self-debugging | ✓ done | `debug <cmd>` |
-| 21 | **Git Engine** | ✓ done | `git status / commit / push / pr …` |
-| 22 | **Project Memory** | ✓ done | `project show / set / scan / list` |
-| 23 | **Long Running Execution** | ✓ done | `long-run <goal>` |
-| 24 | **Autonomous Dev Loop** | ✓ done | `dev-loop <goal>` |
-| 25 | **Full Software Engineer** | ✓ done | `engineer <goal>` |
-
-## Architecture Decisions
-
-- **Composition root in `agent.py`**: every subsystem is wired in one place; subsystems never import each other directly — they receive dependencies via constructor.
-- **`with_agent(agent)` factory pattern**: every engine class (CEOAgent, DevLoop, SoftwareEngineer, …) has a classmethod that extracts what it needs from a live `SmartAgent`. This keeps tests clean (inject mocks) and the agent.py wiring simple.
-- **Best-effort subsystems**: each milestone wraps its imports in try/except so a missing optional dependency (Ollama, git binary) degrades gracefully instead of crashing on import.
-- **JSON-on-disk for persistent state**: project profiles, memory entries, knowledge, and skills are all stored as JSON files — no database dependency required.
-- **Console commands always return strings**: `handle_*` functions in `ui/commands/` return display strings (never print directly in library code) so they can be tested without capturing stdout.
-
-## Key Agent Attributes
-
-After `SmartAgent.__init__`, the following are always available:
-
-```python
-agent.memory            # MemoryManager
-agent.executive         # ExecutiveController
-agent.ceo               # CEOAgent
-agent.reflection_engine # ReflectionEngine
-agent.project_memory    # ProjectMemory      (M22)
-agent.long_running_engine # LongRunningEngine (M23)
-agent.dev_loop          # DevLoop            (M24)
-agent.software_engineer # SoftwareEngineer   (M25)
+### First Run / After Environment Reset
+Python packages install automatically when the MARK server starts (via `requirements.minimal.txt`). If you need to install manually:
+```bash
+pip install -r requirements.minimal.txt
 ```
 
-## Console Quick Reference
+### Ollama (local LLM)
+MARK's primary intelligence is **llama3.2:3b via Ollama**. Set `OLLAMA_HOST` in Replit Secrets to point to your Ollama server (e.g. `http://your-server:11434`). Without it, MARK falls back to NVIDIA/GitHub models.
+
+---
+
+## Architecture
 
 ```
-project show                      # show active project profile
-project set language Python        # remember a field
-project scan /path/to/project      # auto-detect tech stack
-long-run Build a SaaS backend      # CEO pipeline with completion report
-dev-loop --commit Build login API  # autonomous code→test→debug loop
-engineer Build me a Trello clone   # full software engineer pipeline
-engineer analyze Build a chat app  # requirement analysis only
-git status / git commit "msg"      # git operations
+MARK Brain (single intelligence)
+├── Identity & Personality    smartagent/identity/mark_identity.py
+├── Memory                    smartagent/memory/memory_manager.py
+├── Voice Pipeline            smartagent/server/voice_pipeline.py (STT)
+│                             smartagent/server/tts_engine.py     (TTS)
+│                             smartagent/server/speech_runtime.py (streaming)
+├── Executive Reasoning       smartagent/executive/
+├── Engineering Workers       smartagent/engineer/
+└── Web API                   smartagent/server/app.py (FastAPI)
+
+Dashboard (React + Vite)      artifacts/mark-dashboard/
+Persistent Server (watchdog)  smartagent/server/watchdog.py
 ```
 
-## Test Count by Milestone Area
+## Voice System
 
-```
-pytest --co -q | grep "test session" → 1896 total tests
-```
+MARK's voice runs **100% locally** — no browser speech API, no cloud TTS:
 
-## Gotchas
+- **STT**: [Faster-Whisper](https://github.com/SYSTRAN/faster-whisper) (base.en, CPU int8) — your microphone audio streams from the browser over `/ws/voice`, VAD detects speech boundaries, Whisper transcribes in real-time
+- **VAD**: [Silero VAD](https://github.com/snakers4/silero-vad) — detects when you start/stop speaking for natural interruption
+- **TTS**: [Kokoro-ONNX](https://github.com/thewh1teagle/kokoro-onnx) (af_bella voice, 82M params) — synthesizes MARK's replies as PCM16 audio, streamed back over `/ws`
 
-- `DevLoop.with_agent()` imports `DebugLoop` lazily; there is **no** `debug_worker.py` — only `debug_loop.py` and `traceback_parser.py` in `smartagent/debug/`.
-- `ProjectMemory.scan()` must NOT `break` after the first filename-pattern match: a single file (e.g. `conftest.py`) can satisfy multiple rules (Python language + pytest test runner).
-- `GitWorker` keyword routing: the `commit` `elif` branch must exclude rollback/reset tasks because `"rollback 2 commits"` contains the substring `"commit"`.
-- `PRBuilder._infer_title` branch-name priority: a descriptive slug (`feature/login-system` → "Login System") wins over the single-commit message; a trivial slug (`feature/x`) falls through to the commit message.
+To activate: click the **microphone button** on MARK's home screen (browser asks for mic permission once).
+
+## Persistent Server
+
+The MARK Python server never stays down. `smartagent/server/watchdog.py` supervises uvicorn and restarts it automatically within 3 seconds if it crashes. This is MARK's "continuous presence" — he is always available.
+
+## Secrets
+
+| Secret | Purpose |
+|---|---|
+| `OLLAMA_HOST` | URL of your Ollama server (e.g. `http://192.168.1.x:11434`) |
+| `MARK_MODEL` | Override model name (default: `llama3.2:3b`) |
+| `NVIDIA_API_KEY` | NVIDIA cloud fallback when Ollama unreachable |
+| `GITHUB_TOKEN` | GitHub Models provider |
+| `ACTIVE_PROVIDER` | Force a provider (`ollama`, `nvidia`, `github`, `openai`, `anthropic`) |
+| `SESSION_SECRET` | Web session signing key |
+| `MONGODB_URI` | MongoDB for persistent memory (optional) |
 
 ## User Preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- MARK is the intelligence — external AI models (Claude, GPT, etc.) are tools MARK may consult, never MARK's identity
+- Voice-first: microphone input + local TTS output, never browser speechSynthesis as primary
+- Server must never stay down — watchdog auto-restarts on crash
+- All Python dependencies auto-install on server start via `requirements.minimal.txt`

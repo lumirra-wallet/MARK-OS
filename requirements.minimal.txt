@@ -1,0 +1,53 @@
+# MARK minimal runtime dependencies — installs fast, no optional extras
+# Voice pipeline (local STT + TTS, no cloud, no API key)
+faster-whisper
+silero-vad
+kokoro-onnx
+
+# Core server
+fastapi
+uvicorn[standard]
+starlette
+pydantic
+pydantic-settings
+python-multipart
+
+# Database / storage
+sqlalchemy[asyncio]
+asyncpg
+redis
+motor
+pymongo
+
+# LLM providers
+openai
+anthropic
+ollama
+
+# HTTP / networking
+httpx
+aiohttp
+websockets
+requests
+
+# Config / env
+python-dotenv
+pyyaml
+tomli
+tomli-w
+orjson
+
+# Auth
+python-jose[cryptography]
+passlib[bcrypt]
+cryptography
+pyjwt
+
+# Utilities
+aiofiles
+tenacity
+numpy
+structlog
+loguru
+typer
+rich

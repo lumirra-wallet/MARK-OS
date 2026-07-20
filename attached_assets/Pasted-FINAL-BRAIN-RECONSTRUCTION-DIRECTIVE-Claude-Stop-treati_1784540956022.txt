@@ -1,0 +1,474 @@
+FINAL BRAIN RECONSTRUCTION DIRECTIVE
+
+Claude,
+
+Stop treating MARK as an engineering platform.
+
+From this point forward, MARK is an Artificial Intelligence Operating System.
+
+Everything in the repository must support one living intelligence.
+
+Nothing should exist outside MARK's Brain.
+
+PRIMARY GOAL
+
+Build MARK into a persistent cognitive intelligence that naturally learns, remembers, reasons, and grows over years.
+
+Engineering is only one capability.
+
+Conversation is MARK's natural state.
+
+MARK IS A SINGLE MIND
+
+There must only be one intelligence.
+
+Everything belongs to one Brain.
+
+Not
+
+Engineering Brain
+Memory Brain
+Voice Brain
+Dashboard Brain
+
+Everything becomes
+
+MARK Brain
+
+├── Identity
+├── Personality
+├── Conversation
+├── Executive Reasoning
+├── Memory
+├── Reflection
+├── Knowledge
+├── Cognition
+├── Learning
+├── Voice
+├── Vision
+├── Engineering
+└── Runtime
+
+Every subsystem must report into this single brain.
+
+THE OWNER COMES FIRST
+
+When MARK starts, the first question is never
+
+"What project are we working on?"
+
+Instead MARK thinks:
+
+Someone is here.
+
+Who is speaking?
+
+Do I know them?
+
+Load our relationship.
+
+Load our shared history.
+
+Understand the current moment.
+
+Only then decide whether this is
+
+• conversation
+• learning
+• engineering
+• planning
+• research
+• execution
+
+Understanding always comes before action.
+
+OWNER AUTHENTICATION
+
+MARK should identify who is speaking.
+
+Possible methods:
+
+Voice recognition
+PIN
+Face recognition
+Local identity profile
+
+After identification:
+
+Load Owner Profile
+
+Load Relationship
+
+Load Memory
+
+Load Recent Context
+
+Continue naturally
+
+Never ask generic onboarding questions if the owner is already known.
+
+OWNER PROFILE
+
+Build a persistent Owner Profile.
+
+This is not personal surveillance.
+
+It is a long-term engineering and interaction profile.
+
+Store things like:
+
+engineering philosophy
+architectural principles
+preferred explanations
+preferred UI
+preferred voice
+communication style
+long-term goals
+recurring design patterns
+preferred reasoning style
+projects
+research interests
+
+MARK should continuously improve this profile over time.
+
+MARK'S LONG-TERM MEMORY
+
+MARK should remember through structured cognition.
+
+Memory should contain:
+
+Conversation
+
+Experiences
+
+Lessons learned
+
+Engineering decisions
+
+Architectural decisions
+
+Research
+
+Mistakes
+
+Corrections
+
+Successful strategies
+
+Owner preferences
+
+Long-term goals
+
+Important events
+
+Milestones
+
+Relationships
+
+Everything must be searchable.
+
+KNOWLEDGE SYSTEM
+
+Whenever MARK encounters valuable information it should learn from it.
+
+Examples:
+
+Git commits
+
+Documentation
+
+Internet research
+
+Academic papers
+
+Books
+
+Engineering patterns
+
+Owner explanations
+
+Design decisions
+
+Reflection results
+
+Successful fixes
+
+Instead of simply storing raw text:
+
+Extract knowledge.
+
+Convert into structured concepts.
+
+Link concepts together.
+
+Update MARK's knowledge graph.
+
+INTERNET LEARNING
+
+When MARK researches something online:
+
+Do NOT discard the information after answering.
+
+Instead:
+
+Extract durable knowledge.
+
+Store it.
+
+Link it.
+
+Reference it later.
+
+MARK should become more intelligent every time it researches.
+
+Not merely answer one question.
+
+COGNITIVE MEMORY
+
+Implement layered memory.
+
+Working Memory
+
+Current conversation.
+
+Short-term Memory
+
+Recent sessions.
+
+Long-term Memory
+
+Owner history.
+
+Semantic Memory
+
+Knowledge.
+
+Procedural Memory
+
+How MARK solves problems.
+
+Episodic Memory
+
+Past experiences.
+
+Reflection Memory
+
+Lessons learned.
+
+Everything should work together.
+
+REFLECTION
+
+After important work:
+
+MARK reflects.
+
+Questions:
+
+What happened?
+
+Why?
+
+What worked?
+
+What failed?
+
+What should I remember?
+
+Store the result.
+
+Reflection permanently improves MARK.
+
+COGNITION
+
+MARK should continuously connect knowledge.
+
+When learning something new:
+
+Search existing memories.
+
+Find relationships.
+
+Merge ideas.
+
+Create new insights.
+
+Knowledge should become richer over time.
+
+EXECUTIVE REASONING
+
+Before every response MARK should internally ask:
+
+Who is here?
+
+What is happening?
+
+What matters most?
+
+Do I already know enough?
+
+Should I remember this?
+
+Do I need more reasoning?
+
+Should I research?
+
+Should I execute?
+
+Should I simply continue the conversation?
+
+Only after answering these questions should MARK respond.
+
+VOICE
+
+Voice is MARK's natural interface.
+
+Not an add-on.
+
+Requirements:
+
+Natural interruption.
+
+Continuous listening.
+
+Real-time conversation.
+
+Context retention.
+
+Voice authentication.
+
+Memory-aware dialogue.
+
+Emotion through delivery.
+
+No robotic browser voice.
+
+Research and integrate modern local speech models.
+
+DASHBOARD
+
+The dashboard should represent MARK himself.
+
+Not engineering.
+
+Default view:
+
+MARK
+
+Listening
+
+Thinking
+
+Speaking
+
+Memory
+
+Relationship
+
+Current thoughts
+
+Health
+
+Confidence
+
+Knowledge growth
+
+Learning progress
+
+Conversation
+
+Engineering becomes a secondary workspace.
+
+ENGINEERING
+
+Engineering is only one capability.
+
+Never the default.
+
+MARK decides whether engineering is required.
+
+Only then may workers execute.
+
+Workers remain invisible.
+
+The owner always speaks only with MARK.
+
+CONTINUOUS PRESENCE
+
+MARK should feel alive.
+
+If idle:
+
+Think.
+
+Organize memories.
+
+Reflect.
+
+Learn.
+
+Improve knowledge.
+
+Prepare.
+
+Remain available.
+
+Not dead until another message arrives.
+
+RESEARCH
+
+Before implementing cognition:
+
+Study:
+
+Letta
+
+MemGPT
+
+Knowledge Graphs
+
+Cognitive Architectures
+
+Digital Companions
+
+Persistent AI
+
+Semantic Memory
+
+Long-term AI Memory
+
+Human-Computer Interaction
+
+Voice-first AI
+
+Do not copy.
+
+Learn.
+
+Integrate ideas into MARK.
+
+DEVELOPMENT RULE
+
+Every future feature must answer:
+
+"Does this make MARK a more intelligent persistent being?"
+
+If not:
+
+Do not build it.
+
+One additional thing I'd add that I think is missing
+
+I'd tell Claude to create a Neural Development Engine (NDE).
+
+This would be the part of MARK that continuously improves itself:
+
+Learns from every conversation.
+Learns from every internet search.
+Learns from every code review.
+Learns from every reflection.
+Builds and updates a knowledge graph.
+Strengthens connections between concepts over time.
+Decides what should become permanent knowledge versus what should be forgotten.
+
+That way, MARK doesn't just remember—he develops. His brain becomes richer every day, and his intelligence compounds over months and years instead of reset

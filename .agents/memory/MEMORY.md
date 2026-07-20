@@ -23,3 +23,4 @@
 - [Production Architecture v3](production-architecture.md) — storage/vector/provider abstractions; OpenAI+Anthropic providers; Docker; docs/; unified pnpm dev launcher; all 15 spec tasks complete.
 - [MARK Web LLM Routing & Provider Bugs](mark-web-llm-routing.md) — ImportError in factory silently killed GitHub provider; stale state file set invalid model; chat/code routing; fast-path fence fallback.
 - [Live Engineer Panel](live-engineer-panel.md) — workspace analysis on WS connect, activity feed, reasoning stages, browser TTS auto-start, idle inspector; `completedMilestones` not `milestones` field name.
+- [MARK Web Voice + Persistent Server](mark-web-voice-pipeline.md) — watchdog.py supervisor, faster-whisper STT, kokoro-onnx TTS, silero VAD; Windows scriptShell removed; requirements.minimal.txt auto-installs on startup.
