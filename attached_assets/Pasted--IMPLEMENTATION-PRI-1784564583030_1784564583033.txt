@@ -1,0 +1,364 @@
+================================================================================
+IMPLEMENTATION PRINCIPLES
+================================================================================
+
+The objective is to improve responsiveness and conversational quality WITHOUT
+rewriting the existing architecture.
+
+The implementation must follow these principles:
+
+• Preserve existing engineering functionality.
+• Reuse existing planners, specialists, and memory systems whenever possible.
+• Add routing and orchestration instead of replacing proven components.
+• Favor composition over duplication.
+• Every new component must be modular and independently testable.
+• Maintain backwards compatibility with existing engineering workflows.
+• Existing APIs should remain unchanged unless absolutely necessary.
+• Performance improvements must not reduce engineering accuracy.
+
+================================================================================
+PERFORMANCE TARGETS (LATENCY BUDGETS)
+================================================================================
+
+The following are maximum acceptable latency targets.
+
+Voice endpoint detection
+≤150 ms after user stops speaking.
+
+Intent classification
+≤50 ms.
+
+Conversation memory lookup
+≤50 ms.
+
+Project cache lookup
+≤75 ms.
+
+First streamed LLM token
+≤500 ms.
+
+Speech synthesis start
+Immediately after first streamed token.
+
+Engineering planning
+Runs asynchronously whenever possible.
+
+Repository analysis
+Must never delay conversational responses.
+
+Background work
+Runs continuously without blocking foreground interaction.
+
+================================================================================
+AGENT ACTIVATION MATRIX
+================================================================================
+
+Only activate the minimum number of agents required.
+
+Greeting
+→ Conversation Engine
+
+Small Talk
+→ Conversation Engine
+
+Identity Questions
+→ Conversation Engine
+
+General Conversation
+→ Conversation Engine
+
+Repository Status
+→ Conversation Engine
+→ Project Awareness Cache
+
+Repository Refresh
+→ Repository Monitor
+
+Research Request
+→ Research Agent
+
+Architecture Discussion
+→ Planner
+→ Reviewer
+
+Implement Feature
+→ Planner
+→ Engineer
+
+Bug Fix
+→ Planner
+→ Engineer
+
+Debug Failing Tests
+→ Planner
+→ Engineer
+→ QA
+
+Run Tests
+→ QA
+
+Review Pull Request
+→ Reviewer
+
+Deployment
+→ Planner
+→ Engineer
+→ Deployment Agent
+
+Long-running investigation
+→ Background Brain
+
+Never activate specialists that are not required for the current task.
+
+================================================================================
+CONVERSATION STATE MACHINE
+================================================================================
+
+Every interaction follows a predictable lifecycle.
+
+Listening
+
+↓
+
+Speech Recognition
+
+↓
+
+Intent Classification
+
+↓
+
+Conversation Memory Lookup
+
+↓
+
+Responding (Streaming)
+
+↓
+
+Background Processing (Optional)
+
+↓
+
+Idle
+
+Rules
+
+Conversation must never wait for Background Processing.
+
+Background tasks continue independently.
+
+Interruptions immediately return to Listening state.
+
+Streaming responses begin before background tasks complete.
+
+================================================================================
+CACHE INVALIDATION RULES
+================================================================================
+
+Project Awareness Cache should refresh ONLY when:
+
+• Git commit changes.
+• Files are added.
+• Files are removed.
+• Files are modified.
+• Active branch changes.
+• User explicitly requests refresh.
+• MARK starts for the first time.
+
+Otherwise
+
+Reuse cached project awareness.
+
+Never perform full repository analysis for ordinary conversation.
+
+================================================================================
+MEMORY HIERARCHY
+================================================================================
+
+Separate memory into independent layers.
+
+1. Short-Term Conversation Memory
+
+Stores
+
+Recent dialogue
+
+Current topic
+
+Conversation context
+
+Pending replies
+
+Lifetime
+
+Current session
+
+----------------------------------------
+
+2. Project Memory
+
+Stores
+
+Architecture
+
+Milestones
+
+Engineering decisions
+
+TODOs
+
+Known issues
+
+Repository summaries
+
+Lifetime
+
+Persistent
+
+----------------------------------------
+
+3. Executive Memory
+
+Stores
+
+Current objectives
+
+Priorities
+
+Long-running investigations
+
+Project direction
+
+Recent accomplishments
+
+Leadership decisions
+
+Lifetime
+
+Persistent
+
+----------------------------------------
+
+4. Repository Awareness Cache
+
+Stores
+
+Repository metadata
+
+Recent commits
+
+Code summaries
+
+Risk analysis
+
+Dependency graph
+
+Repository health
+
+Lifetime
+
+Refresh only when repository changes.
+
+These memory layers must remain logically separate.
+
+================================================================================
+EXECUTIVE DECISION LAYER
+================================================================================
+
+Before executing any request, MARK performs an Executive Decision Pass.
+
+Question 1
+
+Can this be answered immediately using conversation memory?
+
+YES
+
+Respond immediately.
+
+NO
+
+Continue.
+
+----------------------------------------
+
+Question 2
+
+Does this require project knowledge?
+
+YES
+
+Consult Project Awareness Cache.
+
+NO
+
+Continue.
+
+----------------------------------------
+
+Question 3
+
+Does this require engineering specialists?
+
+YES
+
+Activate Planner.
+
+Delegate required specialists.
+
+NO
+
+Do not activate engineering organization.
+
+----------------------------------------
+
+Question 4
+
+Can any remaining work continue in the background?
+
+YES
+
+Launch asynchronous background tasks.
+
+Continue conversation immediately.
+
+NO
+
+Complete work synchronously.
+
+This decision layer exists to minimize unnecessary computation while preserving
+engineering capabilities.
+
+================================================================================
+DESIGN PHILOSOPHY
+================================================================================
+
+MARK is not a chatbot.
+
+MARK is a persistent executive intelligence.
+
+Conversation should feel immediate.
+
+Engineering should feel deliberate.
+
+Background thinking should be continuous.
+
+Repository awareness should be incremental.
+
+Memory should persist.
+
+Delegation should be intentional.
+
+Every millisecond saved during conversation increases the feeling of
+intelligence without reducing capability.
+
+The system should optimize for:
+
+1. Responsiveness
+2. Continuity
+3. Accuracy
+4. Efficiency
+5. Executive-level decision making
+
+Every architectural decision should support these five principles.
+================================================================================
