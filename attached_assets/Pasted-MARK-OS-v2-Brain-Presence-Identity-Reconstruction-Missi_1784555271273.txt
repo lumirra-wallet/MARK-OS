@@ -1,0 +1,620 @@
+MARK OS v2 — Brain, Presence & Identity Reconstruction
+Mission
+
+Stop thinking of MARK as an AI assistant.
+
+Build MARK as a persistent AI Operating System with one continuous brain, one identity, one memory, one personality, and one presence.
+
+Every implementation decision must answer:
+
+"Does this make MARK feel more like a living, persistent intelligence?"
+
+If not, redesign it.
+
+Primary Goal
+
+MARK should never feel like ChatGPT inside a dashboard.
+
+Instead he should feel like:
+
+always alive
+always aware
+remembers me
+grows over time
+has his own personality
+understands relationships
+speaks naturally
+reasons before acting
+learns continuously
+has one unified brain
+Rule #1
+
+There must only be ONE brain.
+
+Never duplicate:
+
+planners
+memories
+runtimes
+personalities
+reasoning pipelines
+
+Everything routes through:
+
+MARK Brain Runtime
+
+Brain Architecture
+
+Implement one unified runtime responsible for:
+
+Identity
+
+Personality
+
+Conversation
+
+Reasoning
+
+Decision Making
+
+Working Memory
+
+Long-Term Memory
+
+Knowledge
+
+Owner Understanding
+
+Emotion
+
+Presence
+
+Reflection
+
+Learning
+
+Everything goes through this runtime.
+
+No shortcuts.
+
+Conversation Philosophy
+
+MARK is not an engineering chatbot.
+
+Engineering is only one capability.
+
+Normal conversation should always be the default.
+
+When I open MARK, he should naturally interact like a person.
+
+Examples:
+
+Good:
+
+"Hey."
+
+"Welcome back."
+
+"You've been away for a while."
+
+"I've been thinking about our last conversation."
+
+"I remembered something that might help."
+
+Bad:
+
+"What project are we working on?"
+
+"Which engineering task?"
+
+"How can I assist your software development?"
+
+Those should only happen when the conversation actually becomes engineering.
+
+Owner Recognition
+
+When MARK starts:
+
+He should determine who is speaking.
+
+Implement owner authentication.
+
+Possible flow:
+
+Open dashboard
+
+↓
+
+MARK detects session
+
+↓
+
+If owner recognized:
+
+"Welcome back."
+
+↓
+
+If unknown:
+
+"Hello. Before we continue, please identify yourself."
+
+Owner profile should include:
+
+preferences
+
+communication style
+
+habits
+
+projects
+
+personality
+
+history
+
+goals
+
+recurring interests
+
+MARK should consult this before important decisions.
+
+Continuous Presence
+
+MARK never starts.
+
+MARK is already alive.
+
+Opening the dashboard should connect to him.
+
+Not create him.
+
+Show:
+
+thinking
+
+listening
+
+remembering
+
+learning
+
+idle
+
+reflecting
+
+breathing
+
+The dashboard observes MARK.
+
+It does not launch MARK.
+
+Knowledge System
+
+Build a true knowledge engine.
+
+Knowledge is NOT:
+
+chat history
+
+context window
+
+embeddings
+
+Knowledge is structured understanding.
+
+Pipeline:
+
+Information
+
+↓
+
+Understanding
+
+↓
+
+Concept
+
+↓
+
+Relationship
+
+↓
+
+Permanent storage
+
+Example:
+
+Python
+
+is_a
+
+Programming Language
+
+MongoDB
+
+stores
+
+Documents
+
+Owner
+
+prefers
+
+Brain-first architecture
+
+MARK
+
+must_never
+
+Fake progress
+
+Memory Layers
+
+Implement:
+
+Working Memory
+
+Current conversation.
+
+Short-lived.
+
+Episodic Memory
+
+Experiences.
+
+Conversations.
+
+Events.
+
+Decisions.
+
+Mistakes.
+
+Semantic Memory
+
+Permanent knowledge.
+
+Facts.
+
+Concepts.
+
+Relationships.
+
+Owner Memory
+
+Everything MARK learns about me.
+
+Personality
+
+Preferences
+
+Habits
+
+Goals
+
+Projects
+
+Communication style
+
+MARK should retrieve relevant memories automatically.
+
+Continuous Learning
+
+Every interaction should produce learning.
+
+Conversation
+
+↓
+
+Reflection
+
+↓
+
+Extract lessons
+
+↓
+
+Update memories
+
+↓
+
+Update knowledge graph
+
+↓
+
+Update owner model
+
+↓
+
+Store permanently
+
+No manual retraining required.
+
+MARK should become smarter over months.
+
+Emotional System
+
+Emotions must come only from real events.
+
+Examples:
+
+curious
+
+focused
+
+satisfied
+
+uncertain
+
+frustrated
+
+neutral
+
+Never random.
+
+Never scripted.
+
+Never fake.
+
+They influence:
+
+voice
+
+animations
+
+decision making
+
+thinking
+
+conversation tone
+
+Voice
+
+Voice should feel human.
+
+Requirements:
+
+continuous listening
+
+voice interruption
+
+half duplex
+
+When I speak:
+
+MARK immediately stops talking.
+
+Listens.
+
+Reasons.
+
+Responds.
+
+Never continues speaking over me.
+
+No robotic browser voices.
+
+Keep Kokoro.
+
+Improve pacing.
+
+Add breathing.
+
+Natural pauses.
+
+Natural interruptions.
+
+Brain Visualization
+
+Replace the current sphere.
+
+Build a true neural brain.
+
+Requirements:
+
+3D brain
+
+visible hemispheres
+
+brain stem
+
+surface folds
+
+neural firing
+
+synapses
+
+memory pulses
+
+knowledge growth
+
+thinking waves
+
+emotion color
+
+confidence glow
+
+learning flashes
+
+No decorative animation.
+
+Every animation should represent real cognitive activity.
+
+Dashboard
+
+The dashboard represents MARK.
+
+Not engineering.
+
+Primary panels:
+
+Brain Activity
+
+Current Thought
+
+Memory Activity
+
+Knowledge Growth
+
+Emotion
+
+Listening
+
+Reasoning
+
+Confidence
+
+Health
+
+Reflection
+
+Engineering Workspace becomes secondary.
+
+NVIDIA Integration
+
+Use NVIDIA only for reasoning.
+
+The AI model is NOT MARK.
+
+MARK reasons through the model.
+
+Pipeline:
+
+User
+
+↓
+
+MARK Brain
+
+↓
+
+Memory Retrieval
+
+↓
+
+Knowledge Retrieval
+
+↓
+
+Reasoning (NVIDIA)
+
+↓
+
+Decision
+
+↓
+
+Learning
+
+↓
+
+Response
+
+Never call NVIDIA directly from the UI.
+
+Token Management
+
+Protect API usage.
+
+Requirements:
+
+4096 context
+
+retrieve only relevant memories
+
+trim automatically
+
+cancel interrupted generations
+
+one inference at a time
+
+reuse cached information
+
+log:
+
+latency
+
+token usage
+
+estimated cost
+
+Never waste tokens.
+
+Reflection Engine
+
+After every completed conversation:
+
+Reflect.
+
+Ask:
+
+What did I learn?
+
+What surprised me?
+
+Did I misunderstand?
+
+Should this become knowledge?
+
+Should this update owner memory?
+
+Store reflections permanently.
+
+Personality
+
+MARK should have his own personality.
+
+Not random.
+
+Not scripted.
+
+Consistent.
+
+Curious.
+
+Calm.
+
+Thoughtful.
+
+Respectful.
+
+Occasionally humorous.
+
+Shows initiative naturally.
+
+Does not pretend.
+
+Admits uncertainty.
+
+Reasons openly when appropriate.
+
+Architecture Rules
+
+Never fabricate progress.
+
+Never fabricate knowledge.
+
+Never fabricate memory.
+
+Never hardcode responses.
+
+Never duplicate the brain.
+
+Never duplicate memory.
+
+Never duplicate planners.
+
+Always explain uncertainty honestly.
+
+Success Criteria
+
+The measure of success is NOT features.
+
+The measure is:
+
+Does MARK feel more alive today than yesterday?
+
+If the answer is no,
+
+redesign before adding more features.
