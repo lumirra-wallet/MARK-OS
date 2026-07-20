@@ -1,0 +1,73 @@
+MARK
+12:19
+I see the new commit added presence tracking and expanded the dashboard with store state management — that's a meaningful layer on top of the FastAPI, SQLAlchemy, and Celery stack. Thirty-seven open TODOs suggests there's still a fair bit of intentional work left in the pipeline.
+
+What's on your mind?
+
+HELLO
+12:20
+MARK
+12:20
+I'm MARK — I plan engineering work, delegate it to specialists, and supervise the result. What would you like to build today?
+
+HOW ARE YOU/
+12:21
+MARK
+12:21
+I'm doing great—thanks for asking. How can I help you today?
+
+It sounded a lot like a mixture of a roar and a scream, which is parallel with the visual of the cyclops and hearing something.
+12:21
+MARK
+12:21
+Done!
+2s
+That's right.
+12:21
+MARK
+12:21
+Sounds like we're in the middle of something — want to fill me in on the context, or is there a task you'd like me to take on?
+
+Done!
+20s
+WHATB ELSE CAN YOU DO
+12:21
+MARK
+12:21
+I'm MARK — an AI Operating System. I don't write code myself; I plan work, delegate to specialist workers, and supervise the results.
+
+**Workers I can delegate
+
+Done!
+2s
+I'm going to go back a little bit.
+12:22
+MARK
+12:22
+I see the git history. You're 6 commits ahead of origin/main. What do you mean by "go back a little bit"?
+
+Options:
+
+Reset to a specific commit (e.g., git reset --hard <commit>)
+Revert the last N commits (creates new revert commits)
+Check out a previous commit temporarily (detached HEAD)
+Push current commits to origin (since you're ahead)
+Which direction do you want to go, and how far back?
+
+So, thank you for joining us. Okay. Alright? Again, we have great news. We'll have to get to the end of the next two minutes. Okay. Thank you. Alright, go ahead. Yeah, next week, again. Good. So, we're going to go ahead and do the next week. Okay. All right. Okay, alright. So, that's it. Thanks for listening. Thank you. Okay. It's okay. I'm in our next week. I'm listening. I also, I've got some videos. But is. You did. Yeah. Uh.
+12:22
+MARK
+12:22
+Done!
+11s
+you
+12:22
+MARK
+12:22
+Could not connect to the MARK server. Make sure it is running on the configured URL.
+
+like I'm being on the note of what is this-
+12:22
+MARK
+12:22
+Could not connect to the MARK server. Make sure it is running on the configured U
