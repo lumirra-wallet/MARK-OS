@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { markApi, PermissionInfo, SelfState } from '@/lib/markApi';
+import { SpeechPlayer } from '@/lib/speechPlayer';
 
 // ── Chat message model ────────────────────────────────────────────────────────
 
@@ -183,6 +184,17 @@ interface MarkState {
   selfState: SelfState | null;
   fetchSelfState: () => Promise<void>;
 
+  // MARK's real voice — audio frames are real Kokoro output, broadcast by
+  // smartagent/server/speech_runtime.py over this same WebSocket (see
+  // ws.onmessage's binary branch). isMarkSpeaking reflects the actual
+  // audio player's state (SpeechPlayer), not a guess from text events.
+  // speechEngineUnavailable is set once, at most, by a real backend
+  // SpeechEngineUnavailable check — it's the only condition under which
+  // use-voice.ts is allowed to fall back to the browser's speechSynthesis.
+  isMarkSpeaking: boolean;
+  speechEngineUnavailable: boolean;
+  stopMarkSpeech: () => void;
+
   // Preview actions
   setActivePreviewId: (id: string | null) => void;
   setDeviceMode:      (mode: DeviceMode) => void;
@@ -227,6 +239,10 @@ const DEFAULT_WORKERS: WorkerState[] = [
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+// MARK's real voice player — receives binary PCM16 frames on the same /ws
+// connection (see connectWebSocket's onmessage). Lazily constructed at
+// 24000Hz (Kokoro's native rate — see smartagent/server/tts_engine.py).
+let speechPlayer: SpeechPlayer | null = null;
 
 // ── Store ─────────────────────────────────────────────────────────────────────
 
@@ -392,6 +408,14 @@ export const useMarkStore = create<MarkState>((set, get) => {
       }
     },
 
+    // MARK's real voice
+    isMarkSpeaking: false,
+    speechEngineUnavailable: false,
+    stopMarkSpeech: () => {
+      speechPlayer?.stop();
+      set({ isMarkSpeaking: false });
+    },
+
     // ── Branch actions (Feature 9) ────────────────────────────────────────────
 
     createBranch: (name) => set(state => ({
@@ -457,6 +481,9 @@ export const useMarkStore = create<MarkState>((set, get) => {
 
       try {
         ws = new WebSocket(wsUrl);
+        // Binary frames on this socket are MARK's real synthesized speech
+        // (see speech_runtime.py) — arraybuffer avoids an async Blob hop.
+        ws.binaryType = 'arraybuffer';
 
         ws.onopen = () => {
           set({ connectionStatus: 'connected' });
@@ -480,6 +507,16 @@ export const useMarkStore = create<MarkState>((set, get) => {
         ws.onerror = () => { /* handled by close */ };
 
         ws.onmessage = (event) => {
+          // Binary frame = real synthesized speech audio (PCM16 mono,
+          // 24kHz) from speech_runtime.py — never JSON, routed straight to
+          // the player rather than through the event switch below.
+          if (event.data instanceof ArrayBuffer) {
+            if (!speechPlayer) {
+              speechPlayer = new SpeechPlayer(24000, speaking => set({ isMarkSpeaking: speaking }));
+            }
+            speechPlayer.enqueue(event.data);
+            return;
+          }
           try {
             const data = JSON.parse(event.data);
             if (data.type !== 'event') return;
@@ -543,6 +580,27 @@ export const useMarkStore = create<MarkState>((set, get) => {
               // polled. The Presence Engine reads this directly.
               case 'SelfStateChanged': {
                 set({ selfState: payload });
+                break;
+              }
+
+              // MARK's real voice — SpeechStart/SpeechEnd just bracket the
+              // binary audio frames handled above (isMarkSpeaking itself
+              // reflects the player's actual state, not these events).
+              // SpeechInterrupted is the backend-confirmed stop; the
+              // frontend usually already stopped playback faster, directly
+              // from /ws/voice's own speech_start — see use-voice.ts.
+              case 'SpeechStart':
+              case 'SpeechEnd':
+                break;
+
+              case 'SpeechInterrupted': {
+                get().stopMarkSpeech();
+                break;
+              }
+
+              case 'SpeechEngineUnavailable': {
+                set({ speechEngineUnavailable: true });
+                addTimeline('Real voice engine unavailable — falling back to browser speech as a last resort.');
                 break;
               }
 

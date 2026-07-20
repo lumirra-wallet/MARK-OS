@@ -2,3 +2,11 @@
 # cloud STT account or API key. See smartagent/server/voice_pipeline.py.
 faster-whisper>=1.2.1
 silero-vad>=6.2.1
+
+# MARK's real spoken voice — local Kokoro-82M TTS via onnxruntime, no
+# cloud TTS account or API key, and no browser speechSynthesis on the
+# primary path. See smartagent/server/tts_engine.py for why kokoro-onnx
+# (not the official `kokoro` package, which needs Python <3.13).
+kokoro-onnx>=0.5.0
+espeakng-loader>=0.2.4
+phonemizer-fork>=3.3.2

@@ -73,6 +73,23 @@ class ConnectionManager:
         except Exception:
             self._active.discard(ws)
 
+    async def broadcast_bytes(self, data: bytes) -> None:
+        """
+        Send a raw binary frame (MARK's synthesized speech audio — PCM16
+        mono, 24kHz) to every connected client. Same dead-connection
+        cleanup as broadcast(); a separate method because audio frames are
+        binary WebSocket frames, not JSON text frames.
+        """
+        if not self._active:
+            return
+        dead: set[WebSocket] = set()
+        for ws in set(self._active):
+            try:
+                await ws.send_bytes(data)
+            except Exception:
+                dead.add(ws)
+        self._active -= dead
+
     @property
     def count(self) -> int:
         return len(self._active)

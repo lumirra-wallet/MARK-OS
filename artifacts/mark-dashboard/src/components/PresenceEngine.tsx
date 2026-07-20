@@ -7,11 +7,21 @@ import { useSelfState } from '@/hooks/use-self-state';
  * PresenceEngine — MARK's neural core, in 3D.
  *
  * Not a literal anatomical brain mesh (that would need a licensed 3D
- * asset this project doesn't have) — a stylized neural network: a
- * displaced core, a web of synapse connections, and an orbiting particle
- * field, all real-time-rendered with Three.js. What it shows is real:
+ * asset this project doesn't have) — a procedurally-shaped brain silhouette
+ * built from a subdivided icosahedron whose vertices are displaced, once at
+ * startup, into recognizable landmarks: two hemispheres split by a
+ * longitudinal fissure, temporal-lobe bulges on the sides, and a
+ * cerebellum + brainstem stub at the back-bottom. That static shape is what
+ * makes it read as "a brain" rather than "a glowing ball" — a symmetric
+ * sphere looks identical from every angle even while correctly lit and
+ * rotating, so no amount of shading fixes that on its own. The surface is
+ * then lit with real THREE.js lights (not baked/decorative — genuine
+ * per-pixel Lambertian + specular shading, so turning the shape reveals real
+ * depth) plus an additive Fresnel rim shell for the "holographic" glow.
  *
- *   - Core displacement, glow radius, pulse speed, particle motion →
+ * Every real-time value driving it is genuine:
+ *
+ *   - Core ripple, glow intensity, pulse speed, particle motion →
  *     agent.mind's actual mode + confidence (useSelfState).
  *   - Synapse firing → real WebSocket events from the store's `timeline`
  *     (worker started, files changed, tests run, tokens streamed — the
@@ -36,6 +46,7 @@ interface PresenceEngineProps {
 
 const BASE_HUE = 144 / 360; // MARK's own accent (index.css --accent, a green), as a 0-1 hue
 const ERROR_HUE = 6 / 360;
+const BRAIN_RADIUS = 1.5;
 
 const MODE_ENERGY: Record<string, number> = {
   idle: 0.16, listening: 0.3, waiting: 0.12, sleeping: 0.05,
@@ -43,6 +54,89 @@ const MODE_ENERGY: Record<string, number> = {
   executing: 0.85, reflecting: 0.5, learning: 0.55,
   error: 0.4, recovering: 0.35,
 };
+
+/**
+ * Displaces a unit-sphere direction into a point on the brain's static
+ * "rest" surface: layered gyri/sulci folds, a longitudinal fissure along
+ * the midline, temporal-lobe bulges on the sides, and a cerebellum bulge
+ * at the back-bottom. Called once per vertex at startup to bake the shape
+ * — the per-frame animation loop only ripples on top of this, it never
+ * re-derives it, so the anatomical landmarks never wash out.
+ */
+function shapeBrainPoint(nx: number, ny: number, nz: number, radius: number, out: THREE.Vector3): THREE.Vector3 {
+  let fold = 0;
+  fold += Math.sin(nx * 4.1 + nz * 3.3) * Math.cos(ny * 3.7) * 0.5;
+  fold += Math.sin(nx * 8.6 - ny * 7.2 + nz * 6.1) * 0.28;
+  fold += Math.sin(nx * 15.0 + ny * 13.0 - nz * 11.0) * 0.13;
+  const foldMul = 1 + fold * 0.045;
+
+  // Longitudinal fissure — a groove along the x=0 midline, strongest on
+  // the dorsal (top) surface, fading out toward the base.
+  const topWeight = Math.max(0, Math.min(1, ny + 0.35));
+  const fissure = Math.exp(-(nx * nx) / 0.02) * topWeight * 0.32;
+
+  // Temporal lobes — bulges low on each side.
+  const temporal = Math.exp(-((Math.abs(nx) - 0.72) ** 2) / 0.032) *
+                    Math.exp(-((ny - 0.02) ** 2) / 0.09) * 0.14;
+
+  const radialMul = foldMul * (1 - fissure) * (1 + temporal);
+
+  let x = nx * radius * 1.05 * radialMul;
+  let y = ny * radius * 0.92 * radialMul;
+  let z = nz * radius * 1.2 * radialMul;
+
+  // Cerebellum — a bulge at the back-bottom, the landmark that makes the
+  // silhouette read as "brain" rather than "folded egg" from any angle.
+  const cx = 0, cy = -radius * 0.6, cz = -radius * 0.82;
+  const dx = x - cx, dy = y - cy, dz = z - cz;
+  const spread = radius * 0.4;
+  const cerebBump = Math.exp(-(dx * dx + dy * dy + dz * dz) / (2 * spread * spread)) * radius * 0.24;
+  if (cerebBump > 0.0005) {
+    const len = Math.sqrt(x * x + y * y + z * z) || 1;
+    x += (x / len) * cerebBump;
+    y += (y / len) * cerebBump * 0.5;
+    z += (z / len) * cerebBump;
+  }
+
+  return out.set(x, y, z);
+}
+
+/** Bakes shapeBrainPoint into every vertex of `geo` (a unit icosahedron). */
+function bakeBrainGeometry(geo: THREE.BufferGeometry, radius: number): Float32Array {
+  const posAttr = geo.attributes.position;
+  const tmp = new THREE.Vector3();
+  const shaped = new THREE.Vector3();
+  for (let i = 0; i < posAttr.count; i++) {
+    tmp.fromBufferAttribute(posAttr, i).normalize();
+    shapeBrainPoint(tmp.x, tmp.y, tmp.z, radius, shaped);
+    posAttr.setXYZ(i, shaped.x, shaped.y, shaped.z);
+  }
+  posAttr.needsUpdate = true;
+  geo.computeVertexNormals();
+  return (posAttr.array as Float32Array).slice();
+}
+
+const FRESNEL_VERTEX = `
+  varying vec3 vNormalView;
+  varying vec3 vViewDir;
+  void main() {
+    vNormalView = normalize(normalMatrix * normal);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vViewDir = normalize(-mvPosition.xyz);
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+const FRESNEL_FRAGMENT = `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+  uniform float uPower;
+  varying vec3 vNormalView;
+  varying vec3 vViewDir;
+  void main() {
+    float fresnel = pow(1.0 - max(dot(normalize(vNormalView), normalize(vViewDir)), 0.0), uPower);
+    gl_FragColor = vec4(uColor, fresnel * uOpacity);
+  }
+`;
 
 export function PresenceEngine({ className = '', micLevel = 0, isListening = false, isVoiceSpeaking = false }: PresenceEngineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -64,7 +158,8 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-    camera.position.set(0, 0, 6.2);
+    camera.position.set(0, 0.35, 6.8);
+    camera.lookAt(0, -0.05, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -80,39 +175,98 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(container);
+    window.addEventListener('resize', resize);
+    // Defensive: some layouts settle a tick after mount, before the first
+    // ResizeObserver callback fires — retry briefly so the canvas is never
+    // stuck at the browser's 300x150 default if that first read raced layout.
+    const retryTimers = [50, 200, 500, 1000].map(ms => window.setTimeout(resize, ms));
 
-    // ── Core: an icosphere, vertex-displaced by real energy/jitter ──────
-    const coreGeo = new THREE.IcosahedronGeometry(1.5, 5);
-    const basePositions = coreGeo.attributes.position.array.slice();
-    const coreMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color().setHSL(BASE_HUE, 1, 0.55),
+    const initialColor = new THREE.Color().setHSL(BASE_HUE, 1, 0.55);
+
+    // ── Real lights — genuine Lambertian + specular shading, the single ──
+    // strongest cue that this is a 3D object and not a flat sprite.
+    const ambientLight = new THREE.AmbientLight(0x1c2a33, 0.55);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 0.85);
+    keyLight.position.set(2.5, 3, 4);
+    const rimLight = new THREE.PointLight(initialColor.getHex(), 1.3, 14, 2);
+    rimLight.position.set(-2.2, 1.4, 3.2);
+    scene.add(ambientLight, keyLight, rimLight);
+
+    const brainGroup = new THREE.Group();
+    scene.add(brainGroup);
+
+    // ── Hull: the brain surface itself, lit and semi-translucent ────────
+    const coreGeo = new THREE.IcosahedronGeometry(1, 5);
+    const basePositions = bakeBrainGeometry(coreGeo, BRAIN_RADIUS);
+    const hullMat = new THREE.MeshPhysicalMaterial({
+      color: initialColor,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.55,
+      roughness: 0.35,
+      metalness: 0.05,
+      clearcoat: 0.4,
+      clearcoatRoughness: 0.3,
+      emissive: initialColor,
+      emissiveIntensity: 0.35,
+      side: THREE.FrontSide,
+    });
+    const hull = new THREE.Mesh(coreGeo, hullMat);
+    brainGroup.add(hull);
+
+    // ── Circuit overlay: the same surface, as glowing fold-lines ────────
+    const wireMat = new THREE.MeshBasicMaterial({
+      color: initialColor,
       wireframe: true,
-    });
-    const core = new THREE.Mesh(coreGeo, coreMat);
-    scene.add(core);
-
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color().setHSL(BASE_HUE, 1, 0.55),
       transparent: true,
-      opacity: 0.12,
+      opacity: 0.32,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
     });
-    const glow = new THREE.Mesh(new THREE.IcosahedronGeometry(1.85, 3), glowMat);
-    scene.add(glow);
+    const wireMesh = new THREE.Mesh(coreGeo, wireMat);
+    wireMesh.scale.setScalar(1.008);
+    brainGroup.add(wireMesh);
 
-    // ── Synapse network: fixed points on a larger shell, connected to ───
+    // ── Fresnel glow shell: additive rim-light for the holographic edge ──
+    const glowGeo = new THREE.IcosahedronGeometry(1, 4);
+    bakeBrainGeometry(glowGeo, BRAIN_RADIUS * 1.18);
+    const glowMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: initialColor.clone() },
+        uOpacity: { value: 0.55 },
+        uPower: { value: 2.1 },
+      },
+      vertexShader: FRESNEL_VERTEX,
+      fragmentShader: FRESNEL_FRAGMENT,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.FrontSide,
+    });
+    const glowShell = new THREE.Mesh(glowGeo, glowMat);
+    brainGroup.add(glowShell);
+
+    // ── Brainstem: a tapered stub under the cerebellum bulge ────────────
+    const stemGeo = new THREE.CylinderGeometry(BRAIN_RADIUS * 0.16, BRAIN_RADIUS * 0.24, BRAIN_RADIUS * 0.6, 12);
+    const stem = new THREE.Mesh(stemGeo, hullMat);
+    stem.position.set(0, -BRAIN_RADIUS * 1.02, -BRAIN_RADIUS * 0.5);
+    stem.rotation.x = 0.4;
+    brainGroup.add(stem);
+
+    // ── Synapse network: nodes on the brain's own surface, connected to ──
     // their nearest neighbours. Each line's brightness = ambient (energy)
     // + a real firing pulse triggered by a genuine timeline event.
-    const NODE_COUNT = 90;
+    const NODE_COUNT = 80;
     const nodePositions: THREE.Vector3[] = [];
+    const tmpDir = new THREE.Vector3();
     for (let i = 0; i < NODE_COUNT; i++) {
-      // Fibonacci sphere distribution — even coverage, no RNG needed.
+      // Fibonacci sphere distribution — even angular coverage, no RNG needed.
       const y = 1 - (i / (NODE_COUNT - 1)) * 2;
       const r = Math.sqrt(1 - y * y);
       const theta = Math.PI * (1 + Math.sqrt(5)) * i;
-      const radius = 2.3 + (i % 5) * 0.12;
-      nodePositions.push(new THREE.Vector3(Math.cos(theta) * r * radius, y * radius, Math.sin(theta) * r * radius));
+      tmpDir.set(Math.cos(theta) * r, y, Math.sin(theta) * r).normalize();
+      const shaped = new THREE.Vector3();
+      shapeBrainPoint(tmpDir.x, tmpDir.y, tmpDir.z, BRAIN_RADIUS * 1.05, shaped);
+      nodePositions.push(shaped);
     }
     type Synapse = { a: THREE.Vector3; b: THREE.Vector3; fire: number };
     const synapses: Synapse[] = [];
@@ -135,11 +289,12 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     synapseGeo.setAttribute('position', new THREE.BufferAttribute(synapsePos, 3));
     const synapseColors = new Float32Array(synapses.length * 6);
     synapseGeo.setAttribute('color', new THREE.BufferAttribute(synapseColors, 3));
-    const synapseMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55 });
+    const synapseMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.6 });
     const synapseLines = new THREE.LineSegments(synapseGeo, synapseMat);
     scene.add(synapseLines);
 
-    // ── Particle field — orbit speed tied to real energy ────────────────
+    // ── Particle field — an ellipsoid halo echoing the brain's own ──────
+    // proportions, orbit speed tied to real energy.
     const PARTICLE_COUNT = 260;
     const particleGeo = new THREE.BufferGeometry();
     const particlePos = new Float32Array(PARTICLE_COUNT * 3);
@@ -147,7 +302,7 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
-      const r = 2.8 + Math.random() * 1.6;
+      const r = 2.6 + Math.random() * 1.4;
       particleAngles.push({ theta, phi, r, speed: 0.05 + Math.random() * 0.15 });
     }
     particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
@@ -191,33 +346,38 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       const jitterAmt = health < 0.5 ? (1 - health) * 0.08 : 0.008;
       const spin = reduceMotion ? 0 : 0.06 + energy * 0.12;
 
-      // Core vertex displacement — real energy/jitter, phased by elapsed
-      // time for organic motion (time is the animation clock, not a state
-      // source: it only decides *where in the wave* to sample, the wave's
-      // amplitude is entirely energy/jitter-driven).
+      // Core ripple — a small perturbation layered on top of the baked
+      // brain shape (never replaces it), phased by elapsed time for
+      // organic motion. Amplitude is entirely energy/jitter-driven; time
+      // only decides *where in the wave* to sample.
       const posAttr = coreGeo.attributes.position;
       for (let i = 0; i < posAttr.count; i++) {
         const ix = i * 3;
         const bx = basePositions[ix], by = basePositions[ix + 1], bz = basePositions[ix + 2];
-        const n = Math.sin(bx * 2.4 + t * (0.6 + energy)) * Math.cos(by * 2.1 + t * 0.4) * Math.sin(bz * 2.7 - t * 0.5);
-        const displacement = 1 + n * (0.06 + energy * 0.16) + (Math.random() - 0.5) * jitterAmt;
-        posAttr.setXYZ(i, bx * displacement, by * displacement, bz * displacement);
+        const n = Math.sin(bx * 3.0 + t * (0.5 + energy)) * Math.cos(by * 2.6 + t * 0.35) * Math.sin(bz * 3.2 - t * 0.45);
+        const rippleMul = 1 + n * (0.05 + energy * 0.11) + (Math.random() - 0.5) * jitterAmt;
+        posAttr.setXYZ(i, bx * rippleMul, by * rippleMul, bz * rippleMul);
       }
       posAttr.needsUpdate = true;
       coreGeo.computeVertexNormals();
 
       const color = new THREE.Color().setHSL(hue, 1, 0.5 + energy * 0.15);
-      coreMat.color.copy(color);
-      glowMat.color.copy(color);
-      glowMat.opacity = 0.08 + energy * 0.22;
-      coreMat.opacity = 0.7 + energy * 0.25;
+      hullMat.color.copy(color);
+      hullMat.emissive.copy(color);
+      hullMat.emissiveIntensity = 0.25 + energy * 0.35;
+      hullMat.opacity = 0.4 + energy * 0.3;
+      wireMat.color.copy(color);
+      wireMat.opacity = 0.2 + energy * 0.3;
+      glowMat.uniforms.uColor.value.copy(color);
+      glowMat.uniforms.uOpacity.value = 0.35 + energy * 0.4;
+      rimLight.color.copy(color);
+      rimLight.intensity = 0.9 + energy * 1.1;
       particleMat.color.copy(color);
 
-      core.rotation.y += (reduceMotion ? 0.0006 : 0.0015) + energy * 0.001;
-      core.rotation.x += 0.0004;
-      glow.rotation.y = -core.rotation.y * 0.6;
-      synapseLines.rotation.y += spin * 0.003;
-      synapseLines.rotation.x = Math.sin(t * 0.15) * 0.08;
+      brainGroup.rotation.y += (reduceMotion ? 0.0008 : 0.0018) + energy * 0.001;
+      brainGroup.rotation.x = Math.sin(t * 0.08) * 0.05;
+      synapseLines.rotation.y = brainGroup.rotation.y;
+      synapseLines.rotation.x = brainGroup.rotation.x;
       particles.rotation.y += spin * 0.002;
 
       // ── Synapse firing — driven by real timeline events, not a clock ──
@@ -244,10 +404,11 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
         colorAttr.setXYZ(i * 2 + 1, c.r, c.g, c.b);
       }
       colorAttr.needsUpdate = true;
-      synapseMat.opacity = 0.3 + energy * 0.35;
+      synapseMat.opacity = 0.35 + energy * 0.35;
 
-      // Particles: orbit speed from energy; when listening, drift inward
-      // toward the core in proportion to real mic amplitude.
+      // Particles: orbit speed from energy; ellipsoid shape echoes the
+      // brain's own proportions; when listening, drift inward toward the
+      // core in proportion to real mic amplitude.
       const posArr = particleGeo.attributes.position.array as Float32Array;
       for (let i = 0; i < PARTICLE_COUNT; i++) {
         const p = particleAngles[i];
@@ -255,9 +416,9 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
         const inward = isListening ? micLevel * 0.9 : 0;
         const r = p.r * (1 - inward * 0.35);
         const ix = i * 3;
-        posArr[ix]     = Math.sin(p.phi) * Math.cos(p.theta) * r;
-        posArr[ix + 1] = Math.cos(p.phi) * r;
-        posArr[ix + 2] = Math.sin(p.phi) * Math.sin(p.theta) * r;
+        posArr[ix]     = Math.sin(p.phi) * Math.cos(p.theta) * r * 1.05;
+        posArr[ix + 1] = Math.cos(p.phi) * r * 0.9;
+        posArr[ix + 2] = Math.sin(p.phi) * Math.sin(p.theta) * r * 1.15;
       }
       particleGeo.attributes.position.needsUpdate = true;
 
@@ -267,11 +428,15 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     return () => {
       renderer.setAnimationLoop(null);
       ro.disconnect();
+      window.removeEventListener('resize', resize);
+      retryTimers.forEach(id => window.clearTimeout(id));
       renderer.dispose();
       coreGeo.dispose();
-      coreMat.dispose();
-      glow.geometry.dispose();
+      hullMat.dispose();
+      wireMat.dispose();
+      glowGeo.dispose();
       glowMat.dispose();
+      stemGeo.dispose();
       synapseGeo.dispose();
       synapseMat.dispose();
       particleGeo.dispose();

@@ -76,6 +76,8 @@ from smartagent.server.models import (
     WorkerInfo,
 )
 from smartagent.server.permissions import APPROVED, permission_gate
+from smartagent.server.speech_runtime import speech_runtime
+from smartagent.server import tts_engine
 from smartagent.server.websocket import connection_manager
 from smartagent.storage.factory import get_storage
 
@@ -539,6 +541,14 @@ async def execute(req: ExecuteRequest) -> dict:
             event_bus = EventBus()
             broadcaster.install(event_bus, connection_manager, loop)
 
+            # MARK's real voice — subscribes to the same StreamingToken
+            # events the dashboard reads, synthesizes+broadcasts real audio
+            # sentence-by-sentence as MARK's reply is generated. See
+            # speech_runtime.py; flushed/reset around this run below.
+            speech_runtime.attach(connection_manager, loop)
+            speech_runtime.reset()
+            event_bus.subscribe(ServerEvents.STREAMING_TOKEN, speech_runtime.on_token)
+
             logger.info("MARK STATE planning   EventBus wired")
 
             # Periodic StatusChanged ticker — keeps the dashboard's elapsed timer live.
@@ -786,6 +796,10 @@ async def execute(req: ExecuteRequest) -> dict:
                     broadcaster.uninstall(event_bus)
                 except Exception:
                     pass
+            try:
+                speech_runtime.flush()
+            except Exception:
+                pass
             if agent is not None:
                 self_state.task_finished(
                     agent, req.goal,
@@ -1161,6 +1175,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     # Idle inspector — start once per server process
     _ensure_idle_inspector()
 
+    # Real-voice engine readiness — checked once per server process. First
+    # call downloads real model weights if they're not cached yet, so this
+    # runs in a background thread rather than blocking this connection.
+    _ensure_speech_engine_checked()
+
     try:
         while True:
             try:
@@ -1203,6 +1222,13 @@ async def voice_websocket(ws: WebSocket) -> None:
             data = await ws.receive_bytes()
             events = await asyncio.to_thread(session.feed, data)
             for event in events:
+                if event.get("type") == "speech_start":
+                    # The owner started talking — stop MARK's speech
+                    # generation immediately (see speech_runtime.interrupt).
+                    # The frontend independently stops PLAYBACK the instant
+                    # it sees this same event below; this call is what
+                    # stops the backend from generating any more of it.
+                    speech_runtime.interrupt()
                 await ws.send_json(event)
     except WebSocketDisconnect:
         pass
@@ -1227,6 +1253,48 @@ def _ensure_idle_inspector() -> None:
             _idle_inspector_task = loop.create_task(_idle_inspector_loop())
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Speech engine readiness (MARK's real voice)
+# ---------------------------------------------------------------------------
+
+_speech_engine_check_task: asyncio.Task | None = None
+
+
+def _ensure_speech_engine_checked() -> None:
+    global _speech_engine_check_task
+    try:
+        loop = asyncio.get_event_loop()
+        if _speech_engine_check_task is None or _speech_engine_check_task.done():
+            _speech_engine_check_task = loop.create_task(_speech_engine_check())
+    except Exception:
+        pass
+
+
+async def _speech_engine_check() -> None:
+    """Real check, once per process — may download real model weights on
+    first run. If the real engine can't initialize, tell every connected
+    client explicitly so the frontend can fall back to the browser's
+    speechSynthesis as the documented emergency-only path, instead of
+    silently having no voice at all."""
+    try:
+        available = await asyncio.to_thread(tts_engine.is_available)
+        if not available:
+            await connection_manager.broadcast({
+                "type":      "event",
+                "name":      ServerEvents.SPEECH_ENGINE_UNAVAILABLE,
+                "payload":   {"reason": tts_engine.unavailable_reason() or "unknown"},
+                "timestamp": _now_iso(),
+            })
+            logger.warning(
+                "MARK STATE speech-engine  unavailable  reason=%r",
+                tts_engine.unavailable_reason(),
+            )
+        else:
+            logger.info("MARK STATE speech-engine  ready  voice=%s", tts_engine.MARK_VOICE)
+    except Exception as exc:
+        logger.warning("speech engine check failed: %s", exc)
 
 
 async def _idle_inspector_loop() -> None:

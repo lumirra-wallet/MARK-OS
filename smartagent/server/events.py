@@ -76,6 +76,14 @@ class ServerEvents:
     # Streaming
     STREAMING_TOKEN = "StreamingToken"
 
+    # MARK's real spoken voice (speech_runtime.py) — binary audio frames on
+    # the same /ws connection are bracketed by these so the frontend knows
+    # when a spoken reply begins/ends without guessing from audio alone.
+    SPEECH_START               = "SpeechStart"
+    SPEECH_END                 = "SpeechEnd"
+    SPEECH_INTERRUPTED         = "SpeechInterrupted"
+    SPEECH_ENGINE_UNAVAILABLE  = "SpeechEngineUnavailable"
+
     # MARK speaking outside of a run (e.g. the proactive opening message)
     MARK_OPENING = "MarkOpening"
 

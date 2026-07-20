@@ -2,19 +2,40 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMarkStore } from '@/store/markStore';
 
 /**
- * Real voice I/O for MARK — browser-native Web Speech API (SpeechRecognition
- * for listening, speechSynthesis for speaking). No cloud STT/TTS provider:
- * that requires an account and an API key only the owner can provision
- * (smartagent/voice/speech_to_text.py and text_to_speech.py are still
- * genuinely unbuilt server-side — confirmed in the Brain Ownership audit).
- * This is real microphone capture and real synthesized speech today, not a
- * placeholder — just running client-side instead of through a paid backend.
+ * Real voice I/O for MARK — backend-owned, not a frontend feature.
  *
- * Pipeline: mic → SpeechRecognition transcript → the SAME sendUserMessage()
- * the typed chat box already uses (no parallel path) → MARK's real reply
- * streams back over the existing WebSocket → speechSynthesis speaks it.
- * Listening pauses while MARK is speaking, to avoid the mic picking up his
- * own voice as if it were the owner talking.
+ * Input:  the browser streams raw mic PCM16 (resampled to 16kHz) to the
+ *         backend's /ws/voice, which runs it through a real local Silero
+ *         VAD + Faster-Whisper pipeline (smartagent/server/voice_pipeline.py)
+ *         and sends back {type:"speech_start"}, {type:"partial",text},
+ *         {type:"final",text}. No browser SpeechRecognition — transcription
+ *         happens in MARK's own runtime.
+ * Output: MARK's replies are spoken by a real local Kokoro TTS engine in
+ *         the backend (smartagent/server/{tts_engine,speech_runtime}.py),
+ *         streamed as binary audio frames over the main /ws connection and
+ *         played by markStore's SpeechPlayer (see lib/speechPlayer.ts). No
+ *         browser speechSynthesis on this path.
+ *
+ * The mic stays open continuously — including while MARK is speaking —
+ * because that's what makes real interruption possible: the backend's VAD
+ * needs to see the owner start talking in order to detect it at all.
+ * getUserMedia's echoCancellation is requested so MARK's own voice
+ * shouldn't normally trigger a false interruption, but browser echo
+ * cancellation isn't perfect for a self-referential playback+capture loop
+ * — an occasional false barge-in is a known, disclosed limitation, not a
+ * silently swept-under-the-rug one.
+ *
+ * The instant /ws/voice reports speech_start, this hook calls
+ * stopMarkSpeech() directly — that's the fast path, a local call with no
+ * network round trip. The backend also learns about the same interruption
+ * (voice_websocket calls speech_runtime.interrupt()) and confirms it via a
+ * SpeechInterrupted event on the main socket, which markStore handles too;
+ * this hook's direct call just doesn't wait for that confirmation.
+ *
+ * window.speechSynthesis is kept ONLY as the explicit emergency fallback
+ * for when the backend's real TTS engine couldn't initialize at all (see
+ * speechEngineUnavailable in markStore, set from a real
+ * SpeechEngineUnavailable event) — never used on the primary path.
  *
  * Opt-in by design, not auto-started: browsers require a user gesture
  * before granting microphone access, and starting to listen without one
@@ -22,53 +43,54 @@ import { useMarkStore } from '@/store/markStore';
  * also technically blocked.
  */
 
-// Web Speech API isn't in TypeScript's standard DOM lib — minimal shims for
-// exactly what's used here.
-interface SpeechRecognitionResultLike {
-  isFinal: boolean;
-  0: { transcript: string };
-}
-interface SpeechRecognitionEventLike extends Event {
-  resultIndex: number;
-  results: ArrayLike<SpeechRecognitionResultLike>;
-}
-interface SpeechRecognitionLike extends EventTarget {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start(): void;
-  stop(): void;
-  onresult: ((e: SpeechRecognitionEventLike) => void) | null;
-  onend: (() => void) | null;
-  onerror: ((e: Event) => void) | null;
+const VOICE_SAMPLE_RATE = 16000; // must match smartagent/server/voice_pipeline.py's SAMPLE_RATE
+const PROCESSOR_BUFFER_SIZE = 4096;
+
+function resampleTo16k(input: Float32Array, inputRate: number): Float32Array {
+  if (inputRate === VOICE_SAMPLE_RATE) return input;
+  const ratio = inputRate / VOICE_SAMPLE_RATE;
+  const outLength = Math.floor(input.length / ratio);
+  const out = new Float32Array(outLength);
+  for (let i = 0; i < outLength; i++) {
+    const srcIdx = i * ratio;
+    const lo = Math.floor(srcIdx);
+    const hi = Math.min(lo + 1, input.length - 1);
+    const frac = srcIdx - lo;
+    out[i] = input[lo] * (1 - frac) + input[hi] * frac;
+  }
+  return out;
 }
 
-function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
-  const w = window as any;
-  return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+function floatTo16BitPCM(input: Float32Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(input.length * 2);
+  const view = new DataView(buffer);
+  for (let i = 0; i < input.length; i++) {
+    const s = Math.max(-1, Math.min(1, input[i]));
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buffer;
 }
 
 export function useVoice() {
-  const { workspace, sendUserMessage, messages } = useMarkStore();
+  const { workspace, sendUserMessage, serverUrl, isMarkSpeaking, speechEngineUnavailable, stopMarkSpeech } = useMarkStore();
 
-  const [supported] = useState(() => getSpeechRecognitionCtor() !== null && 'speechSynthesis' in window);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [micLevel, setMicLevel] = useState(0); // 0-1, real amplitude — not decorative
   const [interimTranscript, setInterimTranscript] = useState('');
+  const [supported] = useState(() =>
+    typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof WebSocket !== 'undefined'
+  );
 
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceWsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef(0);
   const enabledRef = useRef(false);
-  const speakingRef = useRef(false);
-  const lastSpokenMsgId = useRef<string | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Real mic amplitude, sampled every animation frame from the actual
-  // audio buffer — not a fake pulse, a live FFT read of the microphone. ──
   const pollLevel = useCallback(() => {
     const analyser = analyserRef.current;
     if (analyser) {
@@ -80,133 +102,156 @@ export function useVoice() {
     rafRef.current = requestAnimationFrame(pollLevel);
   }, []);
 
-  const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-    setIsListening(false);
+  const teardownAudio = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
+    processorRef.current?.disconnect();
+    processorRef.current = null;
+    analyserRef.current = null;
     micStreamRef.current?.getTracks().forEach(t => t.stop());
     micStreamRef.current = null;
-    analyserRef.current = null;
+    if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+      void audioCtxRef.current.close();
+    }
+    audioCtxRef.current = null;
     setMicLevel(0);
+    setIsListening(false);
   }, []);
 
-  const startListening = useCallback(async () => {
-    if (!enabledRef.current || speakingRef.current) return;
-    const Ctor = getSpeechRecognitionCtor();
-    if (!Ctor) return;
+  const stopVoiceConnection = useCallback(() => {
+    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = null;
+    voiceWsRef.current?.close();
+    voiceWsRef.current = null;
+    teardownAudio();
+  }, [teardownAudio]);
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-      });
-      micStreamRef.current = stream;
-      const ctx = audioCtxRef.current ?? new AudioContext();
-      audioCtxRef.current = ctx;
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-      rafRef.current = requestAnimationFrame(pollLevel);
-    } catch {
-      // Mic permission denied or unavailable — recognition below still
-      // works without amplitude visualization; MARK just won't get the
-      // live "listening" pulse.
-    }
+  // ── /ws/voice: real mic streaming + real transcription + interruption ──
+  const connectVoiceSocket = useCallback(() => {
+    if (!enabledRef.current) return;
+    const wsUrl = serverUrl.replace(/^http/, 'ws') + '/ws/voice';
+    const socket = new WebSocket(wsUrl);
+    voiceWsRef.current = socket;
 
-    const recognition = new Ctor();
-    recognition.continuous = false; // one utterance at a time — restarted below
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    socket.onopen = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
+        if (!enabledRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
+        micStreamRef.current = stream;
 
-    recognition.onresult = (e) => {
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i];
-        if (r.isFinal) {
-          const transcript = r[0].transcript.trim();
-          if (transcript) {
-            sendUserMessage(transcript, workspace);
-          }
+        const ctx = new AudioContext({ sampleRate: VOICE_SAMPLE_RATE });
+        audioCtxRef.current = ctx;
+        const source = ctx.createMediaStreamSource(stream);
+
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        analyserRef.current = analyser;
+        rafRef.current = requestAnimationFrame(pollLevel);
+
+        // ScriptProcessorNode: deprecated but universally supported and
+        // sufficient for this — capturing mic audio isn't a hot path, and
+        // it avoids the extra build complexity of a separate AudioWorklet
+        // module file for a workspace already this large.
+        const processor = ctx.createScriptProcessor(PROCESSOR_BUFFER_SIZE, 1, 1);
+        processor.onaudioprocess = (e) => {
+          if (socket.readyState !== WebSocket.OPEN) return;
+          const raw = e.inputBuffer.getChannelData(0);
+          const resampled = resampleTo16k(raw, ctx.sampleRate);
+          socket.send(floatTo16BitPCM(resampled));
+        };
+        source.connect(processor);
+        // A ScriptProcessorNode must be connected to a destination to run
+        // in some browsers, even though its output is silent/unused here.
+        processor.connect(ctx.destination);
+        processorRef.current = processor;
+
+        setIsListening(true);
+      } catch (err) {
+        console.warn('MARK voice: microphone unavailable', err);
+        setIsListening(false);
+      }
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data as string);
+        if (msg.type === 'speech_start') {
+          // Fastest possible stop — local call, no round trip. The backend
+          // reaches the same conclusion independently (VAD → interrupt()
+          // → SpeechInterrupted), this just doesn't wait for it.
+          stopMarkSpeech();
+        } else if (msg.type === 'partial') {
+          setInterimTranscript(msg.text || '');
+        } else if (msg.type === 'final') {
           setInterimTranscript('');
-        } else {
-          interim += r[0].transcript;
+          if (msg.text) sendUserMessage(msg.text, workspace);
         }
-      }
-      if (interim) setInterimTranscript(interim);
-    };
-
-    recognition.onerror = () => { /* transient — onend still fires and restarts */ };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      // Continuous experience: pick listening back up automatically, as
-      // long as voice mode is still on and MARK isn't talking right now.
-      if (enabledRef.current && !speakingRef.current) {
-        window.setTimeout(() => startListening(), 250);
+      } catch {
+        /* ignore malformed frame */
       }
     };
 
-    recognitionRef.current = recognition;
-    recognition.start();
-    setIsListening(true);
-  }, [pollLevel, sendUserMessage, workspace]);
-
-  const speak = useCallback((text: string) => {
-    if (!('speechSynthesis' in window) || !text.trim()) return;
-    // Never listen to ourselves — pause recognition while MARK talks.
-    speakingRef.current = true;
-    stopListening();
-    setIsSpeaking(true);
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.onend = utterance.onerror = () => {
-      speakingRef.current = false;
-      setIsSpeaking(false);
-      if (enabledRef.current) startListening();
+    socket.onclose = () => {
+      teardownAudio();
+      if (enabledRef.current) {
+        reconnectTimerRef.current = setTimeout(connectVoiceSocket, 2000);
+      }
     };
-    window.speechSynthesis.cancel(); // don't queue over a previous reply
-    window.speechSynthesis.speak(utterance);
-  }, [startListening, stopListening]);
+    socket.onerror = () => { /* handled by close */ };
+  }, [serverUrl, pollLevel, sendUserMessage, stopMarkSpeech, teardownAudio, workspace]);
 
   const toggleVoice = useCallback(() => {
     setVoiceEnabled(v => {
       const next = !v;
       enabledRef.current = next;
       if (next) {
-        startListening();
+        connectVoiceSocket();
       } else {
-        stopListening();
-        window.speechSynthesis.cancel();
-        speakingRef.current = false;
-        setIsSpeaking(false);
+        stopVoiceConnection();
+        stopMarkSpeech();
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
       }
       return next;
     });
-  }, [startListening, stopListening]);
+  }, [connectVoiceSocket, stopVoiceConnection, stopMarkSpeech]);
 
-  // Speak MARK's real replies aloud once they finish streaming — the same
-  // finalized message the chat transcript shows, nothing separately
-  // generated for voice.
+  // ── Emergency-only fallback: the real backend engine could not start ──
+  // (a genuine SpeechEngineUnavailable event, not a guess). Speaks MARK's
+  // finished replies with the browser's own voice so he's never silent,
+  // but this is explicitly the last resort the owner asked to keep, not
+  // the primary path.
+  const messages = useMarkStore(s => s.messages);
+  const lastSpokenFallbackId = useRef<string | null>(null);
   useEffect(() => {
-    if (!voiceEnabled) return;
+    if (!voiceEnabled || !speechEngineUnavailable || !('speechSynthesis' in window)) return;
     const last = messages[messages.length - 1];
     if (!last || last.role !== 'mark' || last.isActive) return;
-    if (last.id === lastSpokenMsgId.current) return;
+    if (last.id === lastSpokenFallbackId.current) return;
     const text = last.blocks
       .filter(b => b.type === 'text' || b.type === 'summary')
       .map(b => (b as any).text as string)
       .join(' ')
       .trim();
     if (!text) return;
-    lastSpokenMsgId.current = last.id;
-    speak(text);
-  }, [messages, voiceEnabled, speak]);
+    lastSpokenFallbackId.current = last.id;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  }, [messages, voiceEnabled, speechEngineUnavailable]);
 
   useEffect(() => () => {
-    stopListening();
-    window.speechSynthesis.cancel();
-  }, [stopListening]);
+    stopVoiceConnection();
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  }, [stopVoiceConnection]);
 
-  return { supported, voiceEnabled, isListening, isSpeaking, micLevel, interimTranscript, toggleVoice };
+  return {
+    supported,
+    voiceEnabled,
+    isListening,
+    isSpeaking: isMarkSpeaking,
+    micLevel,
+    interimTranscript,
+    toggleVoice,
+  };
 }
