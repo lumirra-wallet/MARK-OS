@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { markApi, PermissionInfo, SelfState } from '@/lib/markApi';
-import { SpeechPlayer } from '@/lib/speechPlayer';
+// SpeechPlayer removed — audio now delivered via LiveKit RemoteAudioTrack
 
 // ── Chat message model ────────────────────────────────────────────────────────
 
@@ -323,10 +323,8 @@ let reconnectAttempts = 0;
 const RECONNECT_BASE_MS = 250;
 const RECONNECT_MAX_MS  = 30_000;  // back off to 30 s max — never gives up
 let liveRecoveryListenersInstalled = false;
-// MARK's real voice player — receives binary PCM16 frames on the same /ws
-// connection (see connectWebSocket's onmessage). Lazily constructed at
-// 24000Hz (Kokoro's native rate — see smartagent/server/tts_engine.py).
-let speechPlayer: SpeechPlayer | null = null;
+// Audio now delivered via LiveKit RemoteAudioTrack (see use-livekit-room.ts).
+// speechPlayer removed — binary /ws frames are no longer sent for TTS audio.
 
 // ── Store ─────────────────────────────────────────────────────────────────────
 
@@ -516,7 +514,7 @@ export const useMarkStore = create<MarkState>((set, get) => {
     memoryActivity:   [],
     knowledgeGrowth:  0,
     stopMarkSpeech: () => {
-      speechPlayer?.stop();
+      // Audio comes via LiveKit; no speechPlayer to stop — just reset state.
       set({ isMarkSpeaking: false });
     },
 
@@ -634,14 +632,11 @@ export const useMarkStore = create<MarkState>((set, get) => {
         ws.onerror = () => { /* handled by close */ };
 
         ws.onmessage = (event) => {
-          // Binary frame = real synthesized speech audio (PCM16 mono,
-          // 24kHz) from speech_runtime.py — never JSON, routed straight to
-          // the player rather than through the event switch below.
+          // Binary frames: in the LiveKit architecture, TTS audio is delivered
+          // via the LiveKit RemoteAudioTrack, NOT over this WebSocket.
+          // If a binary frame arrives (e.g. legacy fallback when LiveKit is
+          // not configured), discard it — SpeechPlayer has been removed.
           if (event.data instanceof ArrayBuffer) {
-            if (!speechPlayer) {
-              speechPlayer = new SpeechPlayer(24000, speaking => set({ isMarkSpeaking: speaking }));
-            }
-            speechPlayer.enqueue(event.data);
             return;
           }
           try {
@@ -712,14 +707,15 @@ export const useMarkStore = create<MarkState>((set, get) => {
                 break;
               }
 
-              // MARK's real voice — SpeechStart/SpeechEnd just bracket the
-              // binary audio frames handled above (isMarkSpeaking itself
-              // reflects the player's actual state, not these events).
-              // SpeechInterrupted is the backend-confirmed stop; the
-              // frontend usually already stopped playback faster, directly
-              // from /ws/voice's own speech_start — see use-voice.ts.
+              // MARK's voice state — SpeechStart/SpeechEnd drive isMarkSpeaking
+              // directly now that SpeechPlayer is gone.  The LiveKit hook also
+              // mirrors this via data-channel speech_start events for < 200ms
+              // barge-in, but the authoritative state comes from speech_runtime.
               case 'SpeechStart':
+                set({ isMarkSpeaking: true });
+                break;
               case 'SpeechEnd':
+                set({ isMarkSpeaking: false });
                 break;
 
               case 'SpeechInterrupted': {

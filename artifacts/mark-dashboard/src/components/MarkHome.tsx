@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ArrowRight, MessageCircle, ChevronDown, ChevronUp, Mic, MicOff, Volume2 } from 'lucide-react';
 import { useMarkStore } from '@/store/markStore';
 import { useSelfState } from '@/hooks/use-self-state';
-import { useVoice } from '@/hooks/use-voice';
+import { useLiveKitRoom } from '@/hooks/use-livekit-room';
 import { PresenceEngine } from './PresenceEngine';
 import { ChatView } from './ChatView';
 import { ApprovalsSidebar } from './ApprovalsSidebar';
@@ -71,7 +71,7 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
   const knowledgeGrowth    = useMarkStore(s => s.knowledgeGrowth ?? 0);
   const memoryActivity     = useMarkStore(s => s.memoryActivity ?? []);
   const { selfState, modeLabel, activity } = useSelfState();
-  const voice = useVoice();
+  const voice = useLiveKitRoom();
   const [chatOpen, setChatOpen] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(true);
 
