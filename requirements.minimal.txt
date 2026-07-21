@@ -4,6 +4,10 @@ faster-whisper
 silero-vad
 kokoro-onnx
 
+# LiveKit voice transport
+livekit-agents>=1.6.0
+livekit-plugins-silero>=1.6.0
+
 # Core server
 fastapi
 uvicorn[standard]

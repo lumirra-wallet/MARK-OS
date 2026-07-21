@@ -1,7 +1,7 @@
 """
 MARK's Brain Runtime owns his voice.  This module bridges "MARK is generating
 a reply" (StreamingToken events on the EventBus) with "the owner hears MARK's
-real voice" (binary PCM16 audio frames on /ws).
+real voice" (audio frames on the LiveKit audio track).
 
 Key design decisions
 --------------------
@@ -9,16 +9,13 @@ Key design decisions
 - Buffers text until a complete sentence forms, then hands THAT SENTENCE to a
   dedicated background worker thread for synthesis+broadcast.  Decoupling from
   the LLM token loop means slow Kokoro synthesis never stalls MARK's text stream.
-- Proactive mic mute: the moment the worker is about to send the FIRST audio
-  byte of a new reply, it calls voice_pipeline.mute_active_session().  This
-  happens BEFORE any audio reaches the browser, so MARK's speaker output is
-  never captured by the mic.  No round-trip through the browser is needed.
-- Post-speech holdoff: after the last audio byte, unmute_active_session() is
-  called.  VoiceSession's own holdoff (900ms, sample-accurate) absorbs room
-  reverb + AEC settling before transcription re-opens.
-- Real interruption: voice_websocket() calls interrupt() the instant VAD fires
-  speech_start; the worker discards any further synthesis and signals the
-  voice pipeline to return to LISTENING immediately.
+- LiveKit audio: once livekit_agent registers an AudioSource via
+  set_livekit_audio_source(), all synthesized PCM16 is pushed there instead of
+  being broadcast as binary WebSocket frames.  The browser plays MARK's voice
+  via the subscribed RemoteAudioTrack — no custom WebSocket for audio.
+- Barge-in: the voice agent calls interrupt() + audio_source.clear_queue() the
+  instant VAD detects speech onset.  The worker stops synthesis and clears the
+  currently_speaking flag immediately.
 """
 
 from __future__ import annotations
@@ -47,6 +44,25 @@ _SENTENCE_END_RE = re.compile(r'([.!?]+["\')\]]*(?:\s+|$))')
 _SOFT_FLUSH_LEN = 160
 
 _END_OF_REPLY = object()   # sentinel in the worker queue
+
+# ── LiveKit audio source (set by livekit_agent.start()) ───────────────────────
+# When set, synthesized PCM16 is pushed here instead of broadcast over /ws.
+_livekit_audio_source: Any = None      # rtc.AudioSource | None
+_livekit_loop: asyncio.AbstractEventLoop | None = None
+
+
+def set_livekit_audio_source(
+    source: Any, loop: asyncio.AbstractEventLoop
+) -> None:
+    """
+    Called by MARKLiveKitVoiceAgent.start() to register the AudioSource that
+    backs the LiveKit LocalAudioTrack.  After this call all TTS audio goes to
+    LiveKit instead of /ws binary frames.
+    """
+    global _livekit_audio_source, _livekit_loop
+    _livekit_audio_source = source
+    _livekit_loop = loop
+    logger.info("speech_runtime: LiveKit AudioSource registered — TTS via LiveKit")
 
 
 def _split_complete_sentences(buffer: str) -> tuple[list[str], str]:
@@ -89,6 +105,8 @@ class SpeechRuntime:
         self._buffer = ""
         self._interrupted = threading.Event()
         self._spoke_anything = False
+        # True while MARK is actively pushing audio (checked by voice agent for barge-in).
+        self._currently_speaking = False
         self._queue: "queue.SimpleQueue[str | object]" = queue.SimpleQueue()
         self._worker_lock = threading.Lock()
         self._worker_started = False
@@ -120,10 +138,18 @@ class SpeechRuntime:
             ).start()
 
     def interrupt(self) -> None:
-        """Call the instant the owner starts speaking (VAD speech_start)."""
+        """Call the instant the user starts speaking (VAD speech_start).
+        Stops synthesis and clears the currently_speaking flag immediately."""
         if not self._interrupted.is_set():
             self._interrupted.set()
+            self._currently_speaking = False
             self._broadcast_event(ServerEvents.SPEECH_INTERRUPTED, {})
+
+    @property
+    def currently_speaking(self) -> bool:
+        """True while MARK is actively producing TTS audio.
+        Read by the voice agent to decide whether to barge-in."""
+        return self._currently_speaking
 
     def on_token(self, event: "Event") -> None:
         """EventBus subscriber for StreamingToken.  Enqueues only — never
@@ -156,11 +182,9 @@ class SpeechRuntime:
                 if self._spoke_anything:
                     if not self._interrupted.is_set():
                         self._broadcast_event(ServerEvents.SPEECH_END, {})
-                    # Unmute the active voice session.  VoiceSession's own
-                    # POST_SPEECH holdoff (900ms, sample-accurate) handles
-                    # the echo cool-down — we don't need to sleep here.
                     self._unmute_mic()
                 self._spoke_anything = False
+                self._currently_speaking = False
                 continue
             self._speak_sentence(item)  # type: ignore[arg-type]
 
@@ -176,10 +200,7 @@ class SpeechRuntime:
             return   # discarded — never send audio for text MARK was cut off on
         if not self._spoke_anything:
             self._spoke_anything = True
-            # ── Proactive mute: silence the mic BEFORE the first audio byte ──
-            # This is the key fix for the self-echo loop.  By muting here, we
-            # guarantee MARK's speaker output is never processed by the VAD,
-            # regardless of browser AEC latency or round-trip timing.
+            self._currently_speaking = True
             self._mute_mic()
             self._broadcast_event(ServerEvents.SPEECH_START, {})
         self._broadcast_bytes(pcm)
@@ -189,22 +210,18 @@ class SpeechRuntime:
     def _mute_mic(self) -> None:
         try:
             from smartagent.server.voice_pipeline import mute_active_session, set_tts_active
-            # Mark TTS as active BEFORE muting so any session that registers
-            # mid-sentence (reconnect race) sees the flag and hard-mutes itself.
             set_tts_active(True)
             mute_active_session()
         except Exception as exc:
-            logger.debug("speech_runtime: mute_active_session failed: %s", exc)
+            logger.debug("speech_runtime: mute_active_session failed (expected in LiveKit mode): %s", exc)
 
     def _unmute_mic(self) -> None:
         try:
             from smartagent.server.voice_pipeline import unmute_active_session, set_tts_active
             unmute_active_session()
-            # Clear the flag AFTER unmuting so the POST_SPEECH holdoff in
-            # VoiceSession — not the flag — is the authoritative gate.
             set_tts_active(False)
         except Exception as exc:
-            logger.debug("speech_runtime: unmute_active_session failed: %s", exc)
+            logger.debug("speech_runtime: unmute_active_session failed (expected in LiveKit mode): %s", exc)
 
     # ── Broadcast helpers ─────────────────────────────────────────────────────
 
@@ -221,6 +238,34 @@ class SpeechRuntime:
             pass
 
     def _broadcast_bytes(self, data: bytes) -> None:
+        """Push synthesized PCM16 audio.
+
+        Priority 1 (new): LiveKit AudioSource — audio published via LocalAudioTrack.
+        Priority 2 (legacy fallback): broadcast binary frames over /ws.
+        """
+        src = _livekit_audio_source
+        loop = _livekit_loop
+
+        if src is not None and loop is not None and not loop.is_closed():
+            # Push via LiveKit AudioSource (24 kHz mono; Kokoro output rate).
+            try:
+                from livekit import rtc  # type: ignore[import-untyped]
+                num_samples = len(data) // 2  # int16 = 2 bytes per sample
+                if num_samples > 0:
+                    frame = rtc.AudioFrame(
+                        data=data,
+                        sample_rate=24000,
+                        num_channels=1,
+                        samples_per_channel=num_samples,
+                    )
+                    asyncio.run_coroutine_threadsafe(
+                        src.capture_frame(frame), loop
+                    )
+            except Exception as exc:
+                logger.debug("speech_runtime: LiveKit capture_frame failed: %s", exc)
+            return
+
+        # Legacy path: binary frames on main /ws (used when LiveKit is not configured).
         if self._manager is None or self._loop is None or self._loop.is_closed():
             return
         try:

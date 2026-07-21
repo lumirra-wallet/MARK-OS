@@ -1,0 +1,19 @@
+Layout was forced before the page was fully loaded. If stylesheets are not yet loaded this may cause a flash of unstyled content. node.js:417:1
+Loading failed for the <script> with source “https://9824b110-9f3e-42bb-b990-c96fb6478eb1-00-vhwqoenkcaum.worf.replit.dev/@replit/vite-plugin-dev-banner/banner-script.js”. mark-dashboard:183:114
+Download the React DevTools for a better development experience: https://react.dev/link/react-devtools react-dom-client.development.js:24868:17
+THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. three.core.js:2001:12
+Firefox can’t establish a connection to the server at wss://9824b110-9f3e-42bb-b990-c96fb6478eb1-00-vhwqoenkcaum.worf.replit.dev/mark-api/ws. 2 markStore.ts:603:14
+The connection to wss://9824b110-9f3e-42bb-b990-c96fb6478eb1-00-vhwqoenkcaum.worf.replit.dev/mark-api/ws was interrupted while the page was loading. markStore.ts:603:14
+Firefox can’t establish a connection to the server at wss://9824b110-9f3e-42bb-b990-c96fb6478eb1-00-vhwqoenkcaum.worf.replit.dev/mark-api/ws. markStore.ts:603:14
+The connection to wss://9824b110-9f3e-42bb-b990-c96fb6478eb1-00-vhwqoenkcaum.worf.replit.dev/mark-api/ws was interrupted while the page was loading. markStore.ts:603:14
+Firefox can’t establish a connection to the server at wss://9824b110-9f3e-42bb-b990-c96fb6478eb1-00-vhwqoenkcaum.worf.replit.dev/mark-api/ws. markStore.ts:603:14
+The connection to wss://9824b110-9f3e-42bb-b990-c96fb6478eb1-00-vhwqoenkcaum.worf.replit.dev/mark-api/ws was interrupted while the page was loading. markStore.ts:603:14
+Firefox can’t establish a connection to the server at wss://9824b110-9f3e-42bb-b990-c96fb6478eb1-00-vhwqoenkcaum.worf.replit.dev/mark-api/ws. markStore.ts:603:14
+The connection to wss://9824b110-9f3e-42bb-b990-c96fb6478eb1-00-vhwqoenkcaum.worf.replit.dev/mark-api/ws was interrupted while the page was loading. markStore.ts:603:14
+THREE.Clock: This module has been deprecated. Please use THREE.Timer instead. three.core.js:2001:12
+sendUserMessage failed: Network response was not ok markStore.ts:1182:17
+This site appears to use a scroll-linked positioning effect. This may not work well with asynchronous panning; see https://firefox-source-docs.mozilla.org/performance/scroll-linked_effects.html for further details and to join the discussion on related tools and features! mark-dashboard
+Error in parsing value for ‘-webkit-text-size-adjust’.  Declaration dropped. mark-dashboard:108:31
+Error in parsing value for ‘width’.  Declaration dropped. mark-dashboard:1254:12
+Error in parsing value for ‘height’.  Declaration dropped. mark-dashboard:1255:13
+Error in parsing value for ‘height’.  Declaration dropped.

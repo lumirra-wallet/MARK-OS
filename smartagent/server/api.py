@@ -284,6 +284,24 @@ _current_inference_task: "asyncio.Task[Any] | None" = None
 # guard inside _voice_chat_response.  A list (not a tuple) so the function can
 # mutate it without a `global` declaration.
 _voice_last_text: list = ["", 0.0]
+# Mutex that makes the "check running → set running" transition in
+# _voice_chat_response atomic.  Without this, two concurrent coroutines
+# (one from a second rapid POST, one from a WS reconnect) can both see
+# _state.running = False before either sets it to True, causing the same
+# utterance to be processed twice.
+_voice_chat_lock: "asyncio.Lock | None" = None
+
+
+def _get_voice_chat_lock() -> "asyncio.Lock":
+    """Return (creating on first call) the per-event-loop voice chat lock.
+
+    asyncio.Lock must be created in the same event loop it is used from.
+    Lazy creation here avoids issues with import-time event-loop state.
+    """
+    global _voice_chat_lock  # noqa: PLW0603
+    if _voice_chat_lock is None:
+        _voice_chat_lock = asyncio.Lock()
+    return _voice_chat_lock
 
 
 async def _set_conv_state(new_state: str) -> None:
@@ -1727,6 +1745,8 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
         "notes in the description",
         "in the description below",
     )
+    logger.info("voice_chat: received transcript %r (len=%d)", text[:80], len(text))
+
     _text_lower = text.lower().strip()
     if any(_text_lower.startswith(p) or p in _text_lower for p in _LOOP_PHRASES):
         logger.warning(
@@ -1743,23 +1763,29 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
         _voice_last_text[0] == _text_lower
         and _now_mono - _voice_last_text[1] < 5.0
     ):
-        logger.debug("voice_chat: duplicate transcript within 5 s — dropping: %r", text[:60])
+        logger.info("voice_chat: duplicate transcript within 5 s — dropping: %r", text[:60])
         return
     _voice_last_text[0] = _text_lower
     _voice_last_text[1] = _now_mono
 
-    # Wait for any interrupted run to fully clean up before we start
-    for _ in range(30):
-        if not _state.running:
-            break
-        await asyncio.sleep(0.1)
-    if _state.running:
-        logger.debug("voice_chat: run still active after 3 s — skipping response")
-        return
+    # Wait for any interrupted run to fully clean up before we start, then
+    # claim the lock atomically so a second concurrent coroutine can't slip
+    # through the TOCTOU window between "see running=False" and "set running=True".
+    _lock = _get_voice_chat_lock()
+    async with _lock:
+        for _ in range(30):
+            if not _state.running:
+                break
+            await asyncio.sleep(0.1)
+        if _state.running:
+            logger.info("voice_chat: run still active after 3 s — skipping response for %r", text[:60])
+            return
+        # Claim the run slot immediately while still holding the lock.
+        _state.running = True
+        logger.info("voice_chat: starting response for %r", text[:80])
 
     ws = workspace or _state.workspace or ""
     loop = asyncio.get_event_loop()
-    _state.running     = True
     _state.goal        = text
     _state.workspace   = ws
     _state.start_time  = time.monotonic()
@@ -1847,124 +1873,6 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
             pass
     finally:
         _state.running = False
-
-
-@router.websocket("/ws/voice")
-async def voice_websocket(ws: WebSocket) -> None:
-    """
-    Real-time voice I/O WebSocket.
-
-    Inbound (browser → server):
-      Binary frames  — raw PCM16 mic audio → VoiceSession (VAD + Whisper)
-      Text frames    — control messages:
-                         {"type": "tts_start"}    secondary mute signal (safety net)
-                         {"type": "tts_end"}      secondary unmute signal (safety net)
-                         {"type": "workspace", "path": "..."}
-
-    Outbound (server → browser):
-      {"type": "speech_start"}           barge-in detected — stop TTS playback
-      {"type": "partial", "text": "..."}  interim transcript
-      {"type": "final",   "text": "..."}  utterance finished → browser will POST /voice/message
-
-    Turn-taking is managed by the server-side state machine in VoiceSession
-    (voice_pipeline.py).  speech_runtime proactively mutes the session before
-    sending the first audio byte — the browser's tts_start/tts_end frames are
-    a secondary safety net, not the primary mute signal.
-    """
-    from smartagent.server.voice_pipeline import (
-        VoiceSession, register_session, unregister_session,
-    )
-
-    await ws.accept()
-    workspace: str = ws.query_params.get("workspace", "") or _state.workspace or ""
-    logger.info("MARK STATE voice-ws  connected  workspace=%r", workspace)
-
-    try:
-        session = await asyncio.to_thread(VoiceSession)
-    except Exception as exc:
-        logger.warning("voice_websocket: failed to start VoiceSession: %s", exc)
-        await ws.close(code=1011, reason="voice pipeline unavailable")
-        return
-
-    # Register so speech_runtime can call mute/unmute directly — no round-trip.
-    register_session(session)
-
-    try:
-        while True:
-            # receive() handles both binary audio and text control frames.
-            raw = await ws.receive()
-
-            if raw.get("bytes"):
-                # ── Binary frame: mic audio PCM16 ─────────────────────────────
-                events = await asyncio.to_thread(session.feed, raw["bytes"])
-                for event in events:
-                    etype = event.get("type")
-                    if etype == "speech_start":
-                        # User started talking — cancel any in-flight generation.
-                        speech_runtime.interrupt()
-                        if _current_inference_task is not None and not _current_inference_task.done():
-                            _current_inference_task.cancel()
-                        if _brain is not None:
-                            await _brain.voice_interrupted()
-                    try:
-                        await ws.send_json(event)
-                    except Exception:
-                        break   # WS already closed; outer receive() raises next
-
-            elif raw.get("text"):
-                # ── Text frame: browser control messages ──────────────────────
-                try:
-                    msg  = json.loads(raw["text"])
-                    ctrl = msg.get("type", "")
-                    if ctrl == "tts_start":
-                        # Secondary mute — speech_runtime already called mute()
-                        # proactively, but accept this as a safety-net signal too.
-                        session.mute()
-                    elif ctrl == "tts_end":
-                        # Secondary unmute — speech_runtime already called unmute()
-                        # which started VoiceSession's own sample-accurate holdoff.
-                        # Accept as a safety net only; no extra sleep needed here.
-                        session.unmute()
-                    elif ctrl == "workspace":
-                        workspace = msg.get("path", workspace)
-                except Exception:
-                    pass   # ignore malformed control frames
-
-    except WebSocketDisconnect:
-        pass
-    except Exception as exc:
-        logger.warning("voice_websocket: %s", exc)
-    finally:
-        unregister_session(session)
-        session.reset()
-        logger.info("MARK STATE voice-ws  disconnected")
-
-
-@router.post("/voice/message", status_code=202)
-async def voice_message_endpoint(request: Request) -> dict:
-    """Accept a voice transcript and trigger a fast voice-chat LLM response.
-
-    The browser calls this after receiving a 'final' transcript from
-    /ws/voice — passing the recognised text and current workspace.
-    Returns 202 immediately (non-blocking); the actual response streams
-    back via the main /ws event bus (RunStarted → StreamingToken →
-    RunCompleted).
-
-    This replaces the old path of calling POST /execute from voice, which
-    ran the heavy SmartAgent planning+worker pipeline and could block for
-    several minutes on a complex request.  Voice is always conversational:
-    direct LLM → sentence-streaming TTS → first audio frame in 1–3 s.
-    """
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    text      = str(body.get("text", "")).strip()
-    workspace = str(body.get("workspace", "")).strip()
-    if not text:
-        raise HTTPException(400, "text is required")
-    asyncio.create_task(_voice_chat_response(text, workspace))
-    return {"status": "accepted", "text": text}
 
 
 # ---------------------------------------------------------------------------
@@ -2179,8 +2087,14 @@ async def _idle_inspector_loop() -> None:
                             "payload":   sug,
                             "timestamp": _now_iso(),
                         })
-                    await _broadcast_idle_chat_message(ws_path, new_suggestions)
-                    # Record that these were reported — won't show again for 24 h
+                    # Record that these were reported — won't show again for 24 h.
+                    # NOTE: _broadcast_idle_chat_message is intentionally NOT called
+                    # here.  Unsolicited LLM-generated chat messages appearing in the
+                    # conversation thread while the user hasn't said anything feel like
+                    # ghost traffic and break voice sessions (echo → transcript →
+                    # another LLM call).  Suggestions are surfaced only in the passive
+                    # Idle Suggestions panel (IDLE_SUGGESTION events above), never as
+                    # a MARK_PROACTIVE message that interrupts the conversation.
                     conversation_store.mark_suggestions_reported(ws_path, new_suggestions)
                     _last_notified = _t.time()
                 else:

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ArrowRight, MessageCircle, ChevronDown, ChevronUp, Mic, MicOff, Volume2 } from 'lucide-react';
 import { useMarkStore } from '@/store/markStore';
 import { useSelfState } from '@/hooks/use-self-state';
-import { useVoice } from '@/hooks/use-voice';
+import { useLiveKitRoom } from '@/hooks/use-livekit-room';
 import { PresenceEngine } from './PresenceEngine';
 import { ChatView } from './ChatView';
 import { ApprovalsSidebar } from './ApprovalsSidebar';
@@ -71,7 +71,7 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
   const knowledgeGrowth    = useMarkStore(s => s.knowledgeGrowth ?? 0);
   const memoryActivity     = useMarkStore(s => s.memoryActivity ?? []);
   const { selfState, modeLabel, activity } = useSelfState();
-  const voice = useVoice();
+  const voice = useLiveKitRoom();
   const [chatOpen, setChatOpen] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(true);
 
@@ -171,29 +171,33 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
       </div>
 
       {/* ── Voice ─────────────────────────────────────────────────────────── */}
+      {/* MARK is always listening — no enable/disable, just mute/unmute.
+          The status line and pulse ring are visible whenever the mic is live. */}
       <div className="absolute bottom-24 inset-x-0 z-10 flex flex-col items-center gap-2 pointer-events-none">
 
-        {/* Live transcript / status line */}
-        {voice.voiceEnabled && (
-          <div className="flex items-center gap-1.5 min-h-[1.25em] max-w-md text-center px-4">
-            {voice.isListening && !voice.isSpeaking && (
-              /* Pulsing dot — amplitude-driven via opacity so it feels live */
-              <span
-                className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0 transition-opacity duration-75"
-                style={{ opacity: 0.35 + voice.micLevel * 0.65 }}
-              />
-            )}
-            <p className="text-xs text-muted-foreground truncate">
-              {voice.isSpeaking
+        {/* Live transcript / status line — always shown while connected */}
+        <div className="flex items-center gap-1.5 min-h-[1.25em] max-w-md text-center px-4">
+          {voice.isListening && voice.voiceEnabled && !voice.isSpeaking && (
+            /* Pulsing dot — amplitude-driven via opacity so it feels live */
+            <span
+              className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0 transition-opacity duration-75"
+              style={{ opacity: 0.35 + voice.micLevel * 0.65 }}
+            />
+          )}
+          <p className="text-xs text-muted-foreground truncate">
+            {!voice.supported
+              ? 'Voice not supported in this browser'
+              : voice.isSpeaking
                 ? 'Speaking…'
                 : voice.interimTranscript
                   ? voice.interimTranscript
-                  : voice.isListening
-                    ? 'Listening…'
-                    : ''}
-            </p>
-          </div>
-        )}
+                  : !voice.voiceEnabled
+                    ? 'Mic muted — click to unmute'
+                    : voice.isListening
+                      ? 'Listening…'
+                      : 'Connecting…'}
+          </p>
+        </div>
 
         {/* Mic button with amplitude ring */}
         <div className="relative pointer-events-auto">
@@ -213,19 +217,21 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
             className={`flex items-center justify-center w-14 h-14 rounded-full border transition-all ${
               voice.voiceEnabled
                 ? 'bg-accent/20 border-accent text-accent shadow-lg shadow-accent/20'
-                : 'bg-card/50 border-border/40 text-muted-foreground hover:text-foreground hover:border-border'
+                : 'bg-card/50 border-border/50 text-muted-foreground hover:text-foreground hover:border-border'
             } ${!voice.supported ? 'opacity-40 cursor-not-allowed' : ''}`}
             title={
               !voice.supported
                 ? "This browser doesn't support live speech recognition"
                 : voice.voiceEnabled
-                  ? 'Turn off voice'
-                  : 'Talk to MARK'
+                  ? 'Mute mic'
+                  : 'Unmute mic'
             }
           >
-            {voice.voiceEnabled
-              ? (voice.isSpeaking ? <Volume2 className="w-5 h-5" /> : <Mic className="w-5 h-5" />)
-              : <MicOff className="w-5 h-5" />}
+            {voice.isSpeaking
+              ? <Volume2 className="w-5 h-5" />
+              : voice.voiceEnabled
+                ? <Mic className="w-5 h-5" />
+                : <MicOff className="w-5 h-5" />}
           </button>
         </div>
       </div>
