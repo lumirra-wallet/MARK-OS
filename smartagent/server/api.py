@@ -1745,6 +1745,8 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
         "notes in the description",
         "in the description below",
     )
+    logger.info("voice_chat: received transcript %r (len=%d)", text[:80], len(text))
+
     _text_lower = text.lower().strip()
     if any(_text_lower.startswith(p) or p in _text_lower for p in _LOOP_PHRASES):
         logger.warning(
@@ -1761,7 +1763,7 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
         _voice_last_text[0] == _text_lower
         and _now_mono - _voice_last_text[1] < 5.0
     ):
-        logger.debug("voice_chat: duplicate transcript within 5 s — dropping: %r", text[:60])
+        logger.info("voice_chat: duplicate transcript within 5 s — dropping: %r", text[:60])
         return
     _voice_last_text[0] = _text_lower
     _voice_last_text[1] = _now_mono
@@ -1776,10 +1778,11 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
                 break
             await asyncio.sleep(0.1)
         if _state.running:
-            logger.debug("voice_chat: run still active after 3 s — skipping response")
+            logger.info("voice_chat: run still active after 3 s — skipping response for %r", text[:60])
             return
         # Claim the run slot immediately while still holding the lock.
         _state.running = True
+        logger.info("voice_chat: starting response for %r", text[:80])
 
     ws = workspace or _state.workspace or ""
     loop = asyncio.get_event_loop()
@@ -1944,10 +1947,28 @@ async def voice_websocket(ws: WebSocket) -> None:
                         # proactively, but accept this as a safety-net signal too.
                         session.mute()
                     elif ctrl == "tts_end":
-                        # Secondary unmute — speech_runtime already called unmute()
-                        # which started VoiceSession's own sample-accurate holdoff.
-                        # Accept as a safety net only; no extra sleep needed here.
-                        session.unmute()
+                        # The browser sends tts_end when its AudioContext finishes
+                        # PLAYING the last chunk (not when the server sent the last
+                        # byte — those differ by up to 3s for long TTS replies).
+                        # speech_runtime already called unmute_active_session() when
+                        # the last byte was sent, starting the 900ms holdoff from
+                        # the wrong baseline.  Correct it here: if we're still in
+                        # POST_SPEECH, restart the countdown from NOW so the full
+                        # holdoff covers actual playback end rather than server
+                        # transmission end.
+                        from smartagent.server.voice_pipeline import (
+                            _POST_SPEECH_HOLDOFF_SAMPLES, _STATE_POST_SPEECH,
+                        )
+                        if session._state == _STATE_POST_SPEECH:
+                            session._post_holdoff_remaining = _POST_SPEECH_HOLDOFF_SAMPLES
+                            logger.debug(
+                                "voice_websocket: tts_end — restarting holdoff from "
+                                "actual playback completion"
+                            )
+                        else:
+                            # Not in POST_SPEECH (e.g. barge-in already moved us to
+                            # LISTENING, or TTS was skipped); safe no-op unmute call.
+                            session.unmute()
                     elif ctrl == "workspace":
                         workspace = msg.get("path", workspace)
                 except Exception:

@@ -49,14 +49,22 @@ SAMPLE_RATE = 16000
 VAD_CHUNK_SAMPLES = 512          # Silero VAD's required chunk at 16 kHz
 
 # Barge-in: energy a chunk must exceed for a speech_start to be emitted while
-# MARK is speaking.  Set above typical speaker-echo levels (~0.01–0.02 RMS on
-# a closed-back mic) while well below normal voice (~0.08+).
-_BARGE_IN_THRESHOLD = 0.045
+# MARK is speaking.  Room echo through a typical laptop/desk speaker measures
+# ~0.02–0.05 RMS at the mic; genuine voice at conversational distance is
+# typically ≥0.08.  Setting the threshold at 0.065 sits comfortably above
+# echo while still responding to a real barge-in within one chunk (~32ms).
+_BARGE_IN_THRESHOLD = 0.065
 
 # POST_SPEECH cool-down: number of 16kHz samples to discard transcripts for.
 # 900ms × 16000 samples/s = 14400 samples.  Slightly longer than the TTS
 # audio system's own 800ms holdoff so there is always overlap — no gap.
 _POST_SPEECH_HOLDOFF_SAMPLES = int(0.90 * SAMPLE_RATE)  # 900 ms
+
+# Barge-in echo holdoff: after a barge-in, apply a short POST_SPEECH holdoff
+# (200ms) before opening the VAD for transcription.  The chunk that tripped the
+# barge-in threshold was already discarded; this absorbs the tail of the echo
+# burst so Whisper never sees MARK's own voice as "user speech".
+_BARGE_IN_ECHO_HOLDOFF_SAMPLES = int(0.20 * SAMPLE_RATE)  # 200 ms
 
 _whisper_model: Any = None
 _vad_model: Any = None
@@ -131,7 +139,11 @@ class VoiceSession:
         self._vad = VADIterator(
             _get_vad_model(), sampling_rate=SAMPLE_RATE,
             threshold=0.5,
-            min_silence_duration_ms=650,
+            # 1 000 ms silence required before VAD fires "end".
+            # This prevents the most common false-double-send: a natural
+            # mid-sentence pause of ~700 ms splitting one utterance into two
+            # separate "final" events and two separate LLM calls.
+            min_silence_duration_ms=1000,
         )
         self._pending  = np.array([], dtype=np.float32)
         self._utterance: list[np.ndarray] = []
@@ -198,14 +210,27 @@ class VoiceSession:
         )
 
     def barge_in(self) -> None:
-        """User clearly interrupted MARK — transition immediately to LISTENING
-        so the next words are captured cleanly, without waiting for the holdoff.
-        Called from feed() when a high-energy speech_start fires during TTS_ACTIVE.
+        """User clearly interrupted MARK — stop TTS and prepare to transcribe.
+
+        We apply a short POST_SPEECH holdoff (200ms) rather than jumping
+        directly to LISTENING.  The chunk that exceeded _BARGE_IN_THRESHOLD
+        was already discarded by feed(); the holdoff absorbs the trailing edge
+        of the echo burst so Whisper never sees MARK's own speaker audio as a
+        user utterance.  After 200ms of received PCM the session transitions
+        to LISTENING automatically and the user's real voice is captured.
         """
-        self._state = _STATE_LISTENING
-        self._post_holdoff_remaining = 0
-        self._holdoff_done.set()
-        logger.debug("voice_pipeline: barge-in → LISTENING")
+        self._state = _STATE_POST_SPEECH
+        self._post_holdoff_remaining = _BARGE_IN_ECHO_HOLDOFF_SAMPLES
+        # Reset VAD state so the trailing echo doesn't prime a false speech-start
+        self._pending   = np.array([], dtype=np.float32)
+        self._utterance = []
+        self.speech_active = False
+        try:
+            self._vad.reset_states()
+        except Exception:
+            pass
+        self._holdoff_done.clear()
+        logger.debug("voice_pipeline: barge-in → 200ms echo holdoff → LISTENING")
 
     def reset(self) -> None:
         """Full reset — called on disconnect / reconnect."""
