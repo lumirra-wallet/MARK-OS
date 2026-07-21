@@ -553,6 +553,14 @@ class OllamaProvider(BaseModel):
             "messages": messages,
             "stream": True,
             "options": options,
+            # Without this, Ollama unloads the model 5 minutes after the
+            # last request (its server-side default). MARK is meant to stay
+            # resident indefinitely (LiveKit voice agent connects at server
+            # startup and never disconnects — see livekit_agent.py) so any
+            # conversational gap over 5 minutes was paying a full weight-load
+            # penalty on the next turn: several seconds to tens of seconds on
+            # CPU-only hardware, felt as random multi-second-to-20s+ stalls.
+            "keep_alive": "30m",
         }
         url = f"{self._base_url}/api/chat"
         body = json.dumps(payload).encode("utf-8")
@@ -623,7 +631,12 @@ class OllamaProvider(BaseModel):
             "messages": messages,
             "tools": tools,
             "stream": False,
-            "options": {"num_predict": max_tokens},
+            # num_ctx: see _build_options — without it Ollama loads the model
+            # at its full advertised context window (131072 for llama3.2),
+            # which measured as a ~17GB KV-cache allocation and 100% CPU for
+            # over a minute before any output. keep_alive: see chat_stream.
+            "options": {"num_predict": max_tokens, "num_ctx": 8192},
+            "keep_alive": "30m",
         }
         try:
             data = self._post("/api/chat", payload)
@@ -665,7 +678,8 @@ class OllamaProvider(BaseModel):
                 "model": self._model_name,
                 "messages": [{"role": "user", "content": "Hello"}],
                 "stream": False,
-                "options": {"num_predict": 1},
+                "options": {"num_predict": 1, "num_ctx": 8192},
+                "keep_alive": "30m",
             }
             self._post("/api/chat", payload)
             logger.info("OllamaProvider: warmup complete for %s", self._model_name)

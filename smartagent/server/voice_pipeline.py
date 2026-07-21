@@ -119,9 +119,14 @@ def transcribe(audio: np.ndarray, *, partial: bool = False) -> str:
     Very short results (< 3 chars) are also rejected as noise."""
     if audio.size == 0:
         return ""
+    # beam_size=5 (faster-whisper's default) roughly 3-5x's the CPU time of
+    # beam_size=2 for a marginal accuracy gain — on CPU-only hardware that
+    # was a real, measurable slice of the "few seconds before MARK responds"
+    # latency users felt on every single turn. 2 keeps most of the accuracy
+    # while cutting that cost substantially; partials stay at 1 (display-only).
     model = _get_whisper_model()
     segments, _ = model.transcribe(
-        audio, language="en", beam_size=1 if partial else 5, vad_filter=False,
+        audio, language="en", beam_size=1 if partial else 2, vad_filter=False,
     )
     texts: list[str] = []
     for seg in segments:
