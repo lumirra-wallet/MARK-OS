@@ -484,10 +484,10 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
 
     // ── Real lights. A tight, bright key light is what produces the sharp ──
     // glossy highlight glass needs; a soft fill keeps the far side legible.
-    const ambientLight = new THREE.AmbientLight(0x081410, 0.18);
+    const ambientLight = new THREE.AmbientLight(0x040a08, 0.1);
     const keyLight = new THREE.PointLight(0xf3fff5, 12, 9, 2);
     keyLight.position.set(-2.8, 3.4, 4.2);
-    const fillLight = new THREE.PointLight(0x1c4a34, 0.5, 20, 1.8);
+    const fillLight = new THREE.PointLight(0x123424, 0.28, 20, 1.8);
     fillLight.position.set(2.6, -1.2, 2.6);
     const backLight = new THREE.DirectionalLight(0x3ba86a, 0.35);
     backLight.position.set(-1, -1, -3);
@@ -730,7 +730,7 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     // the same curl-noise current field bubbles use.
     const FOG_COUNT = 9;
     const fogTexture = createFogSprite();
-    type FogWisp = { sprite: THREE.Sprite; pos: THREE.Vector3; opacityPhase: number };
+    type FogWisp = { sprite: THREE.Sprite; pos: THREE.Vector3; opacityPhase: number; escapes: boolean };
     const fogWisps: FogWisp[] = [];
     for (let i = 0; i < FOG_COUNT; i++) {
       const mat = new THREE.SpriteMaterial({
@@ -749,7 +749,7 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       const scale = 0.55 + Math.random() * 1.0;
       sprite.scale.set(scale, scale, 1);
       orbGroup.add(sprite);
-      fogWisps.push({ sprite, pos, opacityPhase: Math.random() * Math.PI * 2 });
+      fogWisps.push({ sprite, pos, opacityPhase: Math.random() * Math.PI * 2, escapes: i < 3 });
     }
 
     // ── MILESTONE 6 — an emergent presence, not a modeled creature. ──
@@ -829,7 +829,9 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       const introScale = reduceMotion ? 1 : 0.85 + 0.15 * (1 - Math.pow(1 - introT, 3));
       orbGroup.scale.setScalar(introScale * (1 + surge * 0.012)); // a faint outward "pressure" during a surge
 
-      const color = new THREE.Color().setHSL(hue, 0.85, 0.42 + energy * 0.1);
+      // Calibrated against the reference photo: a deep, saturated jewel-
+      // tone emerald with real dark pockets, not a pale uniform mint.
+      const color = new THREE.Color().setHSL(hue, 0.92, 0.24 + energy * 0.09);
       liquidMat.color.copy(color);
       liquidMat.emissive.copy(color);
       liquidMat.emissiveIntensity = 0.08 + energy * 0.16 + ripple * 0.2 + surge * 0.14;
@@ -838,10 +840,12 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       fillLight.color.copy(color).lerp(new THREE.Color(0x0a1512), 0.3);
       rimMat.uniforms.uColor.value.copy(color).lerp(new THREE.Color(0xffffff), 0.5);
       rimMat.uniforms.uOpacity.value = 0.35 + energy * 0.25 + surge * 0.15;
-      shellMat.uniforms.uTintColor.value.copy(color).lerp(new THREE.Color(0xffffff), 0.35);
+      // Reference glass reads as near-colorless thick crystal, not a
+      // pale-green wash — most of the tint lives in the liquid, not the shell.
+      shellMat.uniforms.uTintColor.value.copy(color).lerp(new THREE.Color(0xffffff), 0.72);
       volumeMat.uniforms.uTime.value = t;
       volumeMat.uniforms.uColor.value.copy(color);
-      volumeMat.uniforms.uDensity.value = 0.55 + energy * 0.3 + surge * 0.25;
+      volumeMat.uniforms.uDensity.value = 0.85 + energy * 0.35 + surge * 0.3;
       bloomPass.strength = 0.42 + energy * 0.32 + surge * 0.28;
 
       // ── Liquid surface: fBm heightfield (4 octaves) plus a real local ──
@@ -899,11 +903,14 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
         if (rad > 0.4) { il.light.position.x *= 0.99; il.light.position.z *= 0.99; }
         il.light.position.y = Math.min(topY - 0.08, Math.max(bottomY + 0.1, il.light.position.y));
         il.glow.position.copy(il.light.position);
+        // Reference photo: a few crisp, distinct bright points against a
+        // genuinely dark liquid, not a soft even glow — pushed brighter and
+        // more saturated so they read as real embedded light sources.
         const pulse = 0.6 + 0.4 * Math.sin(t * 1.3 + il.phase);
-        il.light.intensity = (0.4 + energy * 0.5 + surge * 0.6) * pulse;
-        il.light.color.copy(color).lerp(new THREE.Color(0xffffff), 0.4);
-        (il.glow.material as THREE.SpriteMaterial).opacity = 0.35 + pulse * 0.35 + surge * 0.2;
-        (il.glow.material as THREE.SpriteMaterial).color.copy(color).lerp(new THREE.Color(0xffffff), 0.5);
+        il.light.intensity = (0.7 + energy * 0.7 + surge * 0.9) * pulse;
+        il.light.color.copy(color).lerp(new THREE.Color(0xccffe4), 0.55);
+        (il.glow.material as THREE.SpriteMaterial).opacity = 0.5 + pulse * 0.4 + surge * 0.25;
+        (il.glow.material as THREE.SpriteMaterial).color.copy(color).lerp(new THREE.Color(0xccffe4), 0.6);
         il.light.getWorldPosition(lightWorldScratch);
         volumeMat.uniforms.uLightPos.value[i].copy(lightWorldScratch);
         volumeMat.uniforms.uLightColor.value[i].copy(il.light.color).multiplyScalar(il.light.intensity * 0.5);
@@ -923,11 +930,18 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
           w.pos.x -= (w.pos.x / rad) * pull * dt;
           w.pos.z -= (w.pos.z / rad) * pull * dt;
         }
-        w.pos.y = Math.min(topY - 0.03, Math.max(bottomY + 0.05, w.pos.y));
+        // A few wisps are allowed to drift up past the surface into the
+        // clear glass air-pocket and dissipate there — the reference
+        // photo shows smoke tendrils curling above the liquid line, not
+        // fog strictly confined to the fluid.
+        const ceiling = w.escapes ? ORB_RADIUS * 0.75 : topY - 0.03;
+        w.pos.y = Math.min(ceiling, Math.max(bottomY + 0.05, w.pos.y));
+        if (w.escapes && w.pos.y > topY + 0.5) w.pos.y = bottomY + 0.1; // dissipated — recycle back into the liquid
         w.sprite.position.copy(w.pos);
         const breathe = 0.5 + 0.5 * Math.sin(t * 0.3 + w.opacityPhase);
+        const aboveSurfaceFade = w.pos.y > topY ? Math.max(0, 1 - (w.pos.y - topY) / 0.6) : 1;
         const mat = w.sprite.material as THREE.SpriteMaterial;
-        mat.opacity = (0.06 + energy * 0.12 + surge * 0.07) * (0.4 + breathe * 0.7);
+        mat.opacity = (0.06 + energy * 0.12 + surge * 0.07) * (0.4 + breathe * 0.7) * aboveSurfaceFade;
         mat.color.copy(color).lerp(new THREE.Color(0x020e08), 0.55);
       }
 
@@ -943,7 +957,7 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       const tRad = Math.hypot(torsoCenter.x, torsoCenter.z);
       if (tRad > 0.2) { torsoCenter.x *= 0.998; torsoCenter.z *= 0.998; }
       torsoCenter.y = Math.min(topY - 0.35, Math.max(bottomY + 0.35, torsoCenter.y));
-      const coalesce = 0.35 + surge * 0.65;
+      const coalesce = 0.55 + surge * 0.45; // reference photo's form reads fairly clearly even at rest
       for (const blob of creatureBlobs) {
         curl(torsoCenter.x + blob.base.x, torsoCenter.y + blob.base.y, torsoCenter.z + blob.base.z, t * 0.7 + blob.jitterPhase.x, curlScratch);
         const jitterAmt = 0.018 * (1 - coalesce * 0.5);
@@ -953,7 +967,7 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
           torsoCenter.z + blob.base.z * coalesce + curlScratch.z * jitterAmt,
         );
         const bmat = blob.sprite.material as THREE.SpriteMaterial;
-        bmat.opacity = 0.045 + surge * 0.15 + energy * 0.04;
+        bmat.opacity = 0.09 + surge * 0.16 + energy * 0.05;
         bmat.color.copy(color).lerp(new THREE.Color(0x010805), 0.3);
         blob.sprite.scale.setScalar(blob.baseScale * (0.88 + coalesce * 0.28));
       }
@@ -1100,7 +1114,7 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       className={`w-full h-full ${className}`}
       role="img"
       aria-label="MARK's live cognitive state — a glass orb of glowing green liquid reflecting his current mode and confidence"
-      style={{ background: 'radial-gradient(circle at 50% 42%, rgba(40,150,95,0.75) 0%, rgba(10,45,30,0.9) 38%, rgba(4,14,10,0.96) 62%, #000000 100%)' }}
+      style={{ background: 'radial-gradient(circle at 50% 42%, rgba(20,60,42,0.55) 0%, rgba(6,20,15,0.85) 32%, rgba(2,7,5,0.97) 58%, #000000 100%)' }}
     />
   );
 }
