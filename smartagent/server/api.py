@@ -284,6 +284,24 @@ _current_inference_task: "asyncio.Task[Any] | None" = None
 # guard inside _voice_chat_response.  A list (not a tuple) so the function can
 # mutate it without a `global` declaration.
 _voice_last_text: list = ["", 0.0]
+# Mutex that makes the "check running → set running" transition in
+# _voice_chat_response atomic.  Without this, two concurrent coroutines
+# (one from a second rapid POST, one from a WS reconnect) can both see
+# _state.running = False before either sets it to True, causing the same
+# utterance to be processed twice.
+_voice_chat_lock: "asyncio.Lock | None" = None
+
+
+def _get_voice_chat_lock() -> "asyncio.Lock":
+    """Return (creating on first call) the per-event-loop voice chat lock.
+
+    asyncio.Lock must be created in the same event loop it is used from.
+    Lazy creation here avoids issues with import-time event-loop state.
+    """
+    global _voice_chat_lock  # noqa: PLW0603
+    if _voice_chat_lock is None:
+        _voice_chat_lock = asyncio.Lock()
+    return _voice_chat_lock
 
 
 async def _set_conv_state(new_state: str) -> None:
@@ -1748,18 +1766,23 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
     _voice_last_text[0] = _text_lower
     _voice_last_text[1] = _now_mono
 
-    # Wait for any interrupted run to fully clean up before we start
-    for _ in range(30):
-        if not _state.running:
-            break
-        await asyncio.sleep(0.1)
-    if _state.running:
-        logger.debug("voice_chat: run still active after 3 s — skipping response")
-        return
+    # Wait for any interrupted run to fully clean up before we start, then
+    # claim the lock atomically so a second concurrent coroutine can't slip
+    # through the TOCTOU window between "see running=False" and "set running=True".
+    _lock = _get_voice_chat_lock()
+    async with _lock:
+        for _ in range(30):
+            if not _state.running:
+                break
+            await asyncio.sleep(0.1)
+        if _state.running:
+            logger.debug("voice_chat: run still active after 3 s — skipping response")
+            return
+        # Claim the run slot immediately while still holding the lock.
+        _state.running = True
 
     ws = workspace or _state.workspace or ""
     loop = asyncio.get_event_loop()
-    _state.running     = True
     _state.goal        = text
     _state.workspace   = ws
     _state.start_time  = time.monotonic()

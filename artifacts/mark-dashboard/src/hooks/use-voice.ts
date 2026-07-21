@@ -302,7 +302,11 @@ export function useVoice() {
               // MARK is running a task — queue; flush when run completes.
               pendingMsgRef.current = msg.text;
             } else {
-              // Fast path: POST /voice/message → direct LLM → TTS
+              // Lock immediately — do NOT wait for the useEffect that syncs
+              // isRunningRef.current.  That effect runs after the next render,
+              // which means a second 'final' event arriving in the same tick
+              // would still see isRunningRef.current = false and also send.
+              isRunningRef.current = true;
               void sendVoiceMessage(msg.text, workspace);
             }
           }
@@ -361,6 +365,11 @@ export function useVoice() {
     if (!isRunning && pendingMsgRef.current && enabledRef.current) {
       const queued = pendingMsgRef.current;
       pendingMsgRef.current = null;
+      // Lock immediately — same reason as in the 'final' handler above.
+      // If workspace changes right after isRunning flips, the effect re-runs.
+      // Without this guard a second send could fire before the first run's
+      // RunStarted event updates isRunningRef via its own useEffect.
+      isRunningRef.current = true;
       void sendVoiceMessage(queued, workspace);
     }
   }, [isRunning, sendVoiceMessage, workspace]);
