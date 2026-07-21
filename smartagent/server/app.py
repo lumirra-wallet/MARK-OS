@@ -17,9 +17,27 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
+
+# On Windows, Python's stdout/stderr default to the console's legacy code
+# page (commonly cp1252) unless UTF-8 mode is explicitly enabled system-wide
+# — which most Windows installs don't have on by default. Any print/log
+# containing a non-ASCII character (e.g. the arrows a few lines below) then
+# raises UnicodeEncodeError and kills the process before it ever binds a
+# port, which looks exactly like "the server won't start" with no useful
+# error surfaced to whoever's running it. Reconfigured this early, before
+# any other import gets a chance to print/log anything during its own
+# import-time side effects. Safe no-op on platforms where stdout is already
+# UTF-8 (Linux/macOS, or Windows with UTF-8 mode already on).
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass  # best-effort — never let a console-encoding tweak block startup
 
 # Load .env (GITHUB_TOKEN, OPENAI_API_KEY, ACTIVE_PROVIDER, etc.) into the real
 # process environment before anything below reads os.environ — a .env file at
