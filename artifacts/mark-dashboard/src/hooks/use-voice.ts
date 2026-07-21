@@ -117,6 +117,15 @@ export function useVoice() {
   const reconnectTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef  = useRef(1000);
 
+  // ── Utterance accumulator (frontend safety net) ───────────────────────────
+  // The server already stitches fragments with a 2-second window, but if the
+  // server fires multiple rapid "final" events (edge case), the frontend
+  // debounce here ensures they collapse into one LLM call.
+  // accumulatedRef  — transcript text collected since last send
+  // stitchTimerRef  — 1.5 s debounce timer; fires the actual sendVoiceMessage
+  const accumulatedRef  = useRef<string>('');
+  const stitchTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Mirror zustand scalars into refs so closures stay current without stale captures
   const isRunning = useMarkStore(s => s.running);
   useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
@@ -289,6 +298,12 @@ export function useVoice() {
           // via the isMarkSpeaking → false path in the Zustand subscribe above.
           stopMarkSpeech();
           setInterimTranscript('');
+          // Cancel any pending debounce — user is still talking.
+          // We keep accumulatedRef so the next "final" can append to it.
+          if (stitchTimerRef.current) {
+            clearTimeout(stitchTimerRef.current);
+            stitchTimerRef.current = null;
+          }
           break;
 
         case 'partial':
@@ -298,17 +313,31 @@ export function useVoice() {
         case 'final':
           setInterimTranscript('');
           if (msg.text) {
-            if (isRunningRef.current) {
-              // MARK is running a task — queue; flush when run completes.
-              pendingMsgRef.current = msg.text;
-            } else {
-              // Lock immediately — do NOT wait for the useEffect that syncs
-              // isRunningRef.current.  That effect runs after the next render,
-              // which means a second 'final' event arriving in the same tick
-              // would still see isRunningRef.current = false and also send.
-              isRunningRef.current = true;
-              void sendVoiceMessage(msg.text, workspace);
-            }
+            // Accumulate into the stitch buffer — the server already stitches
+            // fragments with a 2-second window, but handle edge cases here too.
+            accumulatedRef.current = accumulatedRef.current
+              ? accumulatedRef.current + ' ' + msg.text
+              : msg.text;
+
+            // Reset the debounce timer every time a new fragment arrives.
+            if (stitchTimerRef.current) clearTimeout(stitchTimerRef.current);
+            stitchTimerRef.current = setTimeout(() => {
+              stitchTimerRef.current = null;
+              const fullText = accumulatedRef.current.trim();
+              accumulatedRef.current = '';
+              if (!fullText) return;
+              if (isRunningRef.current) {
+                // MARK is running a task — queue; flush when run completes.
+                pendingMsgRef.current = fullText;
+              } else {
+                // Lock immediately — do NOT wait for the useEffect that syncs
+                // isRunningRef.current.  That effect runs after the next render,
+                // which means a second 'final' arriving in the same tick would
+                // still see isRunningRef.current = false and also send.
+                isRunningRef.current = true;
+                void sendVoiceMessage(fullText, workspace);
+              }
+            }, 1500);   // 1.5 s: collapses any rapid server-side finals
           }
           break;
       }
@@ -338,6 +367,12 @@ export function useVoice() {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
+    // Discard any pending stitch buffer — we're disconnecting, don't send it
+    if (stitchTimerRef.current) {
+      clearTimeout(stitchTimerRef.current);
+      stitchTimerRef.current = null;
+    }
+    accumulatedRef.current = '';
     wsRef.current?.close();
     wsRef.current = null;
     stopMic();
@@ -365,10 +400,14 @@ export function useVoice() {
     if (!isRunning && pendingMsgRef.current && enabledRef.current) {
       const queued = pendingMsgRef.current;
       pendingMsgRef.current = null;
+      // Also cancel any stitch timer — the run completing is a clean boundary;
+      // the queued message is the authoritative text to send.
+      if (stitchTimerRef.current) {
+        clearTimeout(stitchTimerRef.current);
+        stitchTimerRef.current = null;
+        accumulatedRef.current = '';
+      }
       // Lock immediately — same reason as in the 'final' handler above.
-      // If workspace changes right after isRunning flips, the effect re-runs.
-      // Without this guard a second send could fire before the first run's
-      // RunStarted event updates isRunningRef via its own useEffect.
       isRunningRef.current = true;
       void sendVoiceMessage(queued, workspace);
     }

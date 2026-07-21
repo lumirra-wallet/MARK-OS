@@ -8,6 +8,7 @@ no API key, no per-request cost.
 Audio pipeline:
     Microphone (browser) → binary PCM16 frames over /ws/voice
         → Silero VAD (speech start/end detection, ~30ms latency)
+        → Utterance stitching buffer (up to 2 s inter-sentence gap)
         → Faster-Whisper (partial + final transcription)
         → transcript events streamed back over the same connection
 
@@ -24,6 +25,15 @@ Transitions:
   TTS_ACTIVE  → POST_SPEECH : unmute() called by speech_runtime after last audio byte
   POST_SPEECH → LISTENING   : _post_tts_remaining hits zero
   TTS_ACTIVE  → LISTENING   : high-energy barge-in detected (interrupt)
+
+Phone-call feel — utterance stitching
+--------------------------------------
+After VAD fires "end", we do NOT immediately emit "final".  Instead we open a
+_STITCH_WINDOW_SAMPLES window.  If the user starts speaking again before the
+window expires (natural mid-thought pause), the new speech is appended at the
+text level to the previous fragment.  The combined "final" is only emitted once
+the stitch window expires with no new speech — giving MARK the full thought
+rather than multiple fragments.
 
 speech_start is the interrupt signal:
   In TTS_ACTIVE  : only emitted when RMS ≥ _BARGE_IN_THRESHOLD (real voice)
@@ -65,6 +75,14 @@ _POST_SPEECH_HOLDOFF_SAMPLES = int(0.90 * SAMPLE_RATE)  # 900 ms
 # barge-in threshold was already discarded; this absorbs the tail of the echo
 # burst so Whisper never sees MARK's own voice as "user speech".
 _BARGE_IN_ECHO_HOLDOFF_SAMPLES = int(0.20 * SAMPLE_RATE)  # 200 ms
+
+# Utterance stitch window: after VAD fires "end" we wait this many samples
+# before emitting "final".  If the user starts speaking again within the window,
+# the new fragment is merged (at the text level) with the previous one so MARK
+# receives the complete thought, not a series of fragments.
+# 2 000 ms is long enough to cover most mid-sentence thinking pauses while still
+# feeling responsive.
+_STITCH_WINDOW_SAMPLES = int(2.0 * SAMPLE_RATE)   # 2 000 ms
 
 _whisper_model: Any = None
 _vad_model: Any = None
@@ -132,6 +150,15 @@ class VoiceSession:
         mute()         — MARK started speaking (called by speech_runtime)
         unmute()       — MARK finished speaking (called by speech_runtime)
         reset()        — clean slate (called on disconnect / reconnect)
+
+    Phone-call stitching
+    --------------------
+    VAD fires "end" after 2 000 ms of silence within a single utterance.
+    On "end" we start _stitch_remaining counting down.  If the user speaks
+    again before it reaches zero, the new speech is appended to
+    _pending_final (text level) and _stitch_remaining resets.  Only when
+    _stitch_remaining hits zero (2 s of genuine silence after the last
+    fragment) do we emit {"type": "final", "text": <full_thought>}.
     """
 
     def __init__(self) -> None:
@@ -139,16 +166,24 @@ class VoiceSession:
         self._vad = VADIterator(
             _get_vad_model(), sampling_rate=SAMPLE_RATE,
             threshold=0.5,
-            # 1 000 ms silence required before VAD fires "end".
-            # This prevents the most common false-double-send: a natural
-            # mid-sentence pause of ~700 ms splitting one utterance into two
-            # separate "final" events and two separate LLM calls.
-            min_silence_duration_ms=1000,
+            # 2 000 ms silence required before VAD fires "end" within one chunk.
+            # Natural conversational speech can have thinking pauses of 1–1.5 s;
+            # 2 000 ms ensures we don't cut off mid-sentence.  The stitch window
+            # (below) handles pauses between sentences.
+            min_silence_duration_ms=2000,
         )
         self._pending  = np.array([], dtype=np.float32)
         self._utterance: list[np.ndarray] = []
         self.speech_active = False
         self.samples_since_partial = 0
+
+        # Utterance stitching state
+        # After VAD fires "end" we buffer the transcript here and count down
+        # _stitch_remaining.  If speech starts again before the window expires
+        # the new fragment is appended; when the window expires the whole
+        # thing is emitted as one "final".
+        self._pending_final: str | None = None
+        self._stitch_remaining: int = 0   # samples; counts down when not speaking
 
         # Turn-taking state machine
         self._state = _STATE_LISTENING
@@ -175,6 +210,8 @@ class VoiceSession:
         self._utterance = []
         self.speech_active = False
         self.samples_since_partial = 0
+        self._pending_final = None
+        self._stitch_remaining = 0
         try:
             self._vad.reset_states()
         except Exception:
@@ -199,6 +236,8 @@ class VoiceSession:
         self._pending   = np.array([], dtype=np.float32)
         self._utterance = []
         self.speech_active = False
+        self._pending_final = None
+        self._stitch_remaining = 0
         try:
             self._vad.reset_states()
         except Exception:
@@ -225,6 +264,8 @@ class VoiceSession:
         self._pending   = np.array([], dtype=np.float32)
         self._utterance = []
         self.speech_active = False
+        self._pending_final = None
+        self._stitch_remaining = 0
         try:
             self._vad.reset_states()
         except Exception:
@@ -243,6 +284,8 @@ class VoiceSession:
         self._utterance = []
         self.speech_active = False
         self.samples_since_partial = 0
+        self._pending_final = None
+        self._stitch_remaining = 0
         self._post_holdoff_remaining = 0
         self._holdoff_done.set()
 
@@ -252,13 +295,14 @@ class VoiceSession:
         """
         Feed raw PCM16 bytes from the browser.  Returns zero or more events:
           {"type": "speech_start"}           — barge-in / user started talking
-          {"type": "partial", "text": "..."} — interim transcript
-          {"type": "final",   "text": "..."} — utterance finished
+          {"type": "partial", "text": "..."} — interim transcript (including any
+                                               stitched prefix from earlier frags)
+          {"type": "final",   "text": "..."} — full thought (stitched), ready for LLM
 
         State-machine behaviour:
           TTS_ACTIVE   → audio consumed, NO events (except high-energy barge-in)
           POST_SPEECH  → audio consumed, holdoff counter decremented, NO transcripts
-          LISTENING    → full VAD + transcription pipeline
+          LISTENING    → full VAD + transcription + stitching pipeline
         """
         events: list[dict] = []
         samples = pcm16_to_float32(raw_pcm)
@@ -268,7 +312,7 @@ class VoiceSession:
             # Check chunk energy for barge-in detection
             rms = float(np.sqrt(np.mean(samples ** 2)))
             if rms >= _BARGE_IN_THRESHOLD:
-                logger.info(
+                logger.warning(
                     "voice_pipeline: barge-in detected (rms=%.4f ≥ %.4f) — interrupting",
                     rms, _BARGE_IN_THRESHOLD,
                 )
@@ -288,7 +332,7 @@ class VoiceSession:
             # Discard audio during holdoff — don't feed VAD
             return events
 
-        # ── LISTENING: full VAD + transcription pipeline ───────────────────────
+        # ── LISTENING: full VAD + transcription + stitching pipeline ──────────
         self._pending = np.concatenate([self._pending, samples])
 
         while len(self._pending) >= VAD_CHUNK_SAMPLES:
@@ -301,26 +345,62 @@ class VoiceSession:
                 self.samples_since_partial += VAD_CHUNK_SAMPLES
 
             if result and "start" in result:
+                # ── Speech started (or resumed within stitch window) ──────────
                 self.speech_active = True
                 self._utterance = [chunk]
                 self.samples_since_partial = 0
                 events.append({"type": "speech_start"})
+                # _pending_final is intentionally kept — it will be prepended
+                # to the next transcription fragment at "end" time.
+                # _stitch_remaining resets when "end" fires (below).
 
             elif result and "end" in result:
+                # ── Speech ended — transcribe, stitch, restart window ─────────
                 self.speech_active = False
                 if self._utterance:
                     audio = np.concatenate(self._utterance)
-                    text = transcribe(audio, partial=False)
+                    text  = transcribe(audio, partial=False)
                     if text:
-                        events.append({"type": "final", "text": text})
+                        # Append to any existing pending fragment
+                        if self._pending_final:
+                            self._pending_final = self._pending_final + " " + text
+                        else:
+                            self._pending_final = text
+                        # (Re)start the stitch window countdown
+                        self._stitch_remaining = _STITCH_WINDOW_SAMPLES
+                        logger.warning(
+                            "voice_pipeline: fragment captured %r — stitch window open (2 s)",
+                            self._pending_final[:60],
+                        )
                 self._utterance = []
 
             elif self.speech_active and self.samples_since_partial >= SAMPLE_RATE:
+                # ── Partial transcript (display only, every ~1 s of speech) ───
                 self.samples_since_partial = 0
                 audio = np.concatenate(self._utterance)
-                text = transcribe(audio, partial=True)
+                text  = transcribe(audio, partial=True)
                 if text:
-                    events.append({"type": "partial", "text": text})
+                    # Show full context: already-stitched prefix + current fragment
+                    if self._pending_final:
+                        display = (self._pending_final + " " + text).strip()
+                    else:
+                        display = text
+                    events.append({"type": "partial", "text": display})
+
+            # ── Stitch-window countdown ───────────────────────────────────────
+            # Tick down every chunk while not currently speaking.
+            # When it reaches zero we have 2 s of genuine silence — emit final.
+            if self._pending_final and not self.speech_active:
+                self._stitch_remaining -= VAD_CHUNK_SAMPLES
+                if self._stitch_remaining <= 0:
+                    text_out = self._pending_final.strip()
+                    self._pending_final   = None
+                    self._stitch_remaining = 0
+                    if text_out:
+                        logger.warning(
+                            "voice_pipeline: FINAL emitted %r", text_out[:80]
+                        )
+                        events.append({"type": "final", "text": text_out})
 
         return events
 
