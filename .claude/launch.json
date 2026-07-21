@@ -6,6 +6,33 @@
       "runtimeExecutable": "C:\\Program Files\\Git\\bin\\bash.exe",
       "runtimeArgs": ["-c", "cd \"C:/Users/Mr smart/MARK-OS\" && pnpm run dev"],
       "port": 18949
+    },
+    {
+      "name": "livekit-server",
+      "runtimeExecutable": "C:\\Program Files\\Git\\bin\\bash.exe",
+      "runtimeArgs": [
+        "-c",
+        "cd \"C:/Users/Mr smart/MARK-OS/.tools\" && ./livekit-server.exe --dev"
+      ],
+      "port": 7880
+    },
+    {
+      "name": "mark-backend",
+      "runtimeExecutable": "C:\\Program Files\\Git\\bin\\bash.exe",
+      "runtimeArgs": [
+        "-c",
+        "cd \"C:/Users/Mr smart/MARK-OS\" && python -u -m uvicorn smartagent.server.app:app --port 8000"
+      ],
+      "port": 8000
+    },
+    {
+      "name": "mark-dashboard",
+      "runtimeExecutable": "C:\\Program Files\\Git\\bin\\bash.exe",
+      "runtimeArgs": [
+        "-c",
+        "cd \"C:/Users/Mr smart/MARK-OS/artifacts/mark-dashboard\" && MSYS2_ENV_CONV_EXCL=BASE_PATH PORT=5175 BASE_PATH=/ VITE_API_URL=http://localhost:8000 pnpm run dev"
+      ],
+      "port": 5175
     }
   ]
 }

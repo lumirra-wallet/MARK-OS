@@ -3,6 +3,9 @@
 # compiled output
 dist
 tmp
+
+# local dev tooling binaries (downloaded, not source — e.g. self-hosted LiveKit server)
+.tools/
 out-tsc
 *.tsbuildinfo
 .expo
