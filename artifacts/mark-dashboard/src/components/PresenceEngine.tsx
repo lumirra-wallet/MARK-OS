@@ -4,42 +4,32 @@ import { useMarkStore } from '@/store/markStore';
 import { useSelfState } from '@/hooks/use-self-state';
 
 /**
- * PresenceEngine — MARK's neural core, in 3D.
+ * PresenceEngine — MARK's living core: a glass sphere half-filled with
+ * glowing green liquid, bubbles rising through it, a bright glossy
+ * highlight, and a soft green radial glow behind it — modeled directly on
+ * a reference "liquid glass orb" photo the owner supplied.
  *
- * Not a literal anatomical brain mesh (that would need a licensed 3D
- * asset this project doesn't have) — a procedurally-shaped brain silhouette
- * built from a subdivided icosahedron whose vertices are displaced, once at
- * startup, into recognizable landmarks: two hemispheres split by a
- * longitudinal fissure, temporal-lobe bulges on the sides, and a
- * cerebellum + brainstem stub at the back-bottom. That static shape is what
- * makes it read as "a brain" rather than "a glowing ball" — a symmetric
- * sphere looks identical from every angle even while correctly lit and
- * rotating, so no amount of shading fixes that on its own. The surface is
- * then lit with real THREE.js lights (not baked/decorative — genuine
- * per-pixel Lambertian + specular shading, so turning the shape reveals real
- * depth) plus an additive Fresnel rim shell for the "holographic" glow, and
- * a dense static point-cloud (26k dots, same brain shape, baked once) for
- * the fine stippled "hologram scan" texture — the hull underneath is kept
- * deliberately subtle so the dots and wireframe read as the dominant
- * surface language, not a solid mesh.
+ * Three real layers:
+ *   - An outer glass shell (MeshPhysicalMaterial with transmission — real
+ *     refraction, not a fake transparent sprite).
+ *   - An inner liquid body: a sphere clipped at a fill line into a bowl
+ *     shape with a flat, gently rippling top surface (built by hand —
+ *     THREE has no "clipped sphere" primitive).
+ *   - A field of small rising bubble meshes.
  *
  * Every real-time value driving it is genuine:
- *
- *   - Core ripple, glow intensity, pulse speed, particle motion →
- *     agent.mind's actual mode + confidence (useSelfState).
- *   - Synapse firing → real WebSocket events from the store's `timeline`
- *     (worker started, files changed, tests run, tokens streamed — the
- *     same feed Mission Control's own Timeline view reads), not a fake
- *     "activity" clock.
- *   - Instability/jitter → agent.mind's actual health score.
- *   - The inward-pulling "listening" field → real microphone amplitude
- *     (micLevel), sampled live from an AnalyserNode — see use-voice.ts.
- *   - The outward "speaking" bursts → real StreamingToken arrivals and
- *     real speech-synthesis playback, not a decorative pulse.
- *
- * The render loop (renderer.setAnimationLoop) is rendering machinery — it
- * interpolates smoothly toward real target values every frame. It never
- * invents state. There is no setInterval/setTimeout anywhere in this file.
+ *   - Liquid color/glow → agent.mind's actual mode (error → red, else
+ *     MARK's green) and confidence (useSelfState).
+ *   - Surface ripple amplitude → real energy (mode/confidence) plus real
+ *     microphone amplitude while listening.
+ *   - Bubble rise speed → real energy — MARK looks more "alive" while
+ *     actually executing something, not on a decorative clock.
+ *   - A real WebSocket timeline event (worker started, tokens streamed,
+ *     etc.) sends one real ripple pulse across the surface and resets a
+ *     few bubbles to rise again — activity visibly disturbs the liquid.
+ * The render loop (renderer.setAnimationLoop) only interpolates toward
+ * these real targets and integrates real elapsed time; it never invents
+ * state. No setInterval/setTimeout anywhere in this file.
  */
 interface PresenceEngineProps {
   className?: string;
@@ -50,7 +40,8 @@ interface PresenceEngineProps {
 
 const BASE_HUE = 144 / 360; // MARK's own accent (index.css --accent, a green), as a 0-1 hue
 const ERROR_HUE = 6 / 360;
-const BRAIN_RADIUS = 1.5;
+const ORB_RADIUS = 1.5;
+const FILL_PHI = 1.42; // polar angle (rad) of the liquid surface — ~ just above the equator
 
 const MODE_ENERGY: Record<string, number> = {
   idle: 0.16, listening: 0.3, waiting: 0.12, sleeping: 0.05,
@@ -60,85 +51,56 @@ const MODE_ENERGY: Record<string, number> = {
 };
 
 /**
- * Displaces a unit-sphere direction into a point on the brain's static
- * "rest" surface: layered gyri/sulci folds, a longitudinal fissure along
- * the midline, temporal-lobe bulges on the sides, and a cerebellum bulge
- * at the back-bottom. Called once per vertex at startup to bake the shape
- * — the per-frame animation loop only ripples on top of this, it never
- * re-derives it, so the anatomical landmarks never wash out.
+ * Builds the liquid body: a spherical "bowl" from the fill line down to
+ * the bottom pole, capped with a flat disc at the fill line. Standard
+ * spherical parametrization (phi = polar angle from the top pole) means
+ * the cap disc's radius naturally matches the bowl's true cross-section at
+ * the fill line — no seam. The disc's vertices (including its rim, which
+ * is literally the same vertices as the bowl's top ring) are the ones the
+ * render loop perturbs each frame for the surface ripple; everything below
+ * stays static, like still water under a moving surface.
  */
-function shapeBrainPoint(nx: number, ny: number, nz: number, radius: number, out: THREE.Vector3): THREE.Vector3 {
-  let fold = 0;
-  fold += Math.sin(nx * 4.1 + nz * 3.3) * Math.cos(ny * 3.7) * 0.5;
-  fold += Math.sin(nx * 8.6 - ny * 7.2 + nz * 6.1) * 0.28;
-  fold += Math.sin(nx * 15.0 + ny * 13.0 - nz * 11.0) * 0.13;
-  const foldMul = 1 + fold * 0.045;
+function buildLiquidGeometry(radius: number, fillPhi: number, latSegments: number, lonSegments: number) {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const ringStart: number[] = [];
 
-  // Longitudinal fissure — a groove along the x=0 midline, strongest on
-  // the dorsal (top) surface, fading out toward the base.
-  const topWeight = Math.max(0, Math.min(1, ny + 0.35));
-  const fissure = Math.exp(-(nx * nx) / 0.012) * topWeight * 0.13;
-
-  // Temporal lobes — bulges low on each side.
-  const temporal = Math.exp(-((Math.abs(nx) - 0.72) ** 2) / 0.032) *
-                    Math.exp(-((ny - 0.02) ** 2) / 0.09) * 0.14;
-
-  const radialMul = foldMul * (1 - fissure) * (1 + temporal);
-
-  let x = nx * radius * 1.05 * radialMul;
-  let y = ny * radius * 0.92 * radialMul;
-  let z = nz * radius * 1.2 * radialMul;
-
-  // Cerebellum — a bulge at the back-bottom, the landmark that makes the
-  // silhouette read as "brain" rather than "folded egg" from any angle.
-  const cx = 0, cy = -radius * 0.6, cz = -radius * 0.82;
-  const dx = x - cx, dy = y - cy, dz = z - cz;
-  const spread = radius * 0.4;
-  const cerebBump = Math.exp(-(dx * dx + dy * dy + dz * dz) / (2 * spread * spread)) * radius * 0.24;
-  if (cerebBump > 0.0005) {
-    const len = Math.sqrt(x * x + y * y + z * z) || 1;
-    x += (x / len) * cerebBump;
-    y += (y / len) * cerebBump * 0.5;
-    z += (z / len) * cerebBump;
+  for (let i = 0; i <= latSegments; i++) {
+    const phi = fillPhi + (Math.PI - fillPhi) * (i / latSegments);
+    ringStart.push(positions.length / 3);
+    for (let j = 0; j <= lonSegments; j++) {
+      const theta = (j / lonSegments) * Math.PI * 2;
+      positions.push(
+        radius * Math.sin(phi) * Math.cos(theta),
+        radius * Math.cos(phi),
+        radius * Math.sin(phi) * Math.sin(theta),
+      );
+    }
+  }
+  for (let i = 0; i < latSegments; i++) {
+    for (let j = 0; j < lonSegments; j++) {
+      const a = ringStart[i] + j, b = ringStart[i] + j + 1;
+      const c = ringStart[i + 1] + j, d = ringStart[i + 1] + j + 1;
+      indices.push(a, b, c, b, d, c);
+    }
   }
 
-  return out.set(x, y, z);
-}
-
-/**
- * A small soft round glow sprite, generated once at runtime (no external
- * asset) — used for every point-cloud layer so dots render as glowing
- * circles instead of Three.js's default hard-edged squares.
- */
-function createDotTexture(): THREE.Texture {
-  const size = 64;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  gradient.addColorStop(0, 'rgba(255,255,255,1)');
-  gradient.addColorStop(0.4, 'rgba(255,255,255,0.7)');
-  gradient.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, size, size);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  return tex;
-}
-
-/** Bakes shapeBrainPoint into every vertex of `geo` (a unit icosahedron). */
-function bakeBrainGeometry(geo: THREE.BufferGeometry, radius: number): Float32Array {
-  const posAttr = geo.attributes.position;
-  const tmp = new THREE.Vector3();
-  const shaped = new THREE.Vector3();
-  for (let i = 0; i < posAttr.count; i++) {
-    tmp.fromBufferAttribute(posAttr, i).normalize();
-    shapeBrainPoint(tmp.x, tmp.y, tmp.z, radius, shaped);
-    posAttr.setXYZ(i, shaped.x, shaped.y, shaped.z);
+  // Cap: a center point + fan to the bowl's top ring (shared vertices — no seam).
+  const capRingStart = ringStart[0];
+  const capVertexIndices = [];
+  const centerIndex = positions.length / 3;
+  positions.push(0, radius * Math.cos(fillPhi), 0);
+  capVertexIndices.push(centerIndex);
+  for (let j = 0; j <= lonSegments; j++) capVertexIndices.push(capRingStart + j);
+  for (let j = 0; j < lonSegments; j++) {
+    indices.push(centerIndex, capRingStart + j + 1, capRingStart + j);
   }
-  posAttr.needsUpdate = true;
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geo.setIndex(indices);
   geo.computeVertexNormals();
-  return (posAttr.array as Float32Array).slice();
+  return { geo, capVertexIndices, basePositions: (geo.attributes.position.array as Float32Array).slice() };
 }
 
 const FRESNEL_VERTEX = `
@@ -172,7 +134,6 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
   const stateRef = useRef({ selfState, isTextSpeaking, tokenTimestamps, micLevel, isListening, isVoiceSpeaking });
   stateRef.current = { selfState, isTextSpeaking, tokenTimestamps, micLevel, isListening, isVoiceSpeaking };
 
-  // Real event ids seen so far, so a synapse only fires once per real event.
   const seenEventsRef = useRef<Set<string>>(new Set());
   const timelineRef = useRef(timeline);
   timelineRef.current = timeline;
@@ -181,13 +142,19 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     const container = containerRef.current;
     if (!container) return;
 
+    // Pre-existing timeline history shouldn't all fire as "new" the instant
+    // this mounts — only events that arrive after mount should ripple/pulse it.
+    for (const ev of timelineRef.current) seenEventsRef.current.add(ev.id);
+
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-    camera.position.set(0, -0.1, 6.6);
-    camera.lookAt(0, -0.3, 0);
+    const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+    camera.position.set(0, 0.15, 7.2);
+    camera.lookAt(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
     container.appendChild(renderer.domElement);
 
     const resize = () => {
@@ -201,222 +168,157 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     const ro = new ResizeObserver(resize);
     ro.observe(container);
     window.addEventListener('resize', resize);
-    // Defensive: some layouts settle a tick after mount, before the first
-    // ResizeObserver callback fires — retry briefly so the canvas is never
-    // stuck at the browser's 300x150 default if that first read raced layout.
     const retryTimers = [50, 200, 500, 1000].map(ms => window.setTimeout(resize, ms));
 
-    const initialColor = new THREE.Color().setHSL(BASE_HUE, 1, 0.55);
+    const initialColor = new THREE.Color().setHSL(BASE_HUE, 1, 0.5);
 
-    // ── Real lights — genuine Lambertian + specular shading, the single ──
-    // strongest cue that this is a 3D object and not a flat sprite.
-    const ambientLight = new THREE.AmbientLight(0x1c2a33, 0.55);
-    const keyLight = new THREE.DirectionalLight(0xffffff, 0.85);
-    keyLight.position.set(2.5, 3, 4);
-    const rimLight = new THREE.PointLight(initialColor.getHex(), 1.3, 14, 2);
-    rimLight.position.set(-2.2, 1.4, 3.2);
-    scene.add(ambientLight, keyLight, rimLight);
+    // ── Real lights. A tight, bright key light is what produces the sharp ──
+    // glossy highlight glass needs; a soft fill keeps the far side legible.
+    const ambientLight = new THREE.AmbientLight(0x081410, 0.18);
+    const keyLight = new THREE.PointLight(0xf3fff5, 12, 9, 2);
+    keyLight.position.set(-2.8, 3.4, 4.2);
+    const fillLight = new THREE.PointLight(0x1c4a34, 0.5, 20, 1.8);
+    fillLight.position.set(2.6, -1.2, 2.6);
+    const backLight = new THREE.DirectionalLight(0x3ba86a, 0.35);
+    backLight.position.set(-1, -1, -3);
+    // Sits inside the liquid volume so bubbles rising through the lower,
+    // darker part of the orb still catch a visible glint instead of
+    // vanishing into shadow.
+    const interiorLight = new THREE.PointLight(0xbfffe0, 1.4, 3.2, 1.6);
+    interiorLight.position.set(0, -0.5, 0.9);
+    scene.add(ambientLight, keyLight, fillLight, backLight);
 
-    const brainGroup = new THREE.Group();
-    scene.add(brainGroup);
+    const orbGroup = new THREE.Group();
+    scene.add(orbGroup);
+    orbGroup.add(interiorLight); // rotates with the liquid, always lighting it from within
 
-    // ── Hull: the brain surface itself, lit and semi-translucent ────────
-    const coreGeo = new THREE.IcosahedronGeometry(1, 5);
-    const basePositions = bakeBrainGeometry(coreGeo, BRAIN_RADIUS);
-    const hullMat = new THREE.MeshPhysicalMaterial({
-      color: initialColor,
+    // ── Outer glass shell. `transmission` was tried first for real ──
+    // refraction, but three.js's transmission background-capture only
+    // reliably grabs *opaque* geometry — the liquid and bubbles behind it
+    // (both alpha-blended) came out invisible through it, just a blank
+    // pale dome. Standard alpha blending composites nested transparent
+    // objects correctly (three.js sorts the transparent queue back-to-
+    // front every frame), so the shell uses that instead: a thin, mostly
+    // clear glassy layer over the liquid, not true GPU refraction.
+    const shellGeo = new THREE.SphereGeometry(ORB_RADIUS, 64, 48);
+    const shellMat = new THREE.MeshPhysicalMaterial({
+      color: 0xeafff2,
       transparent: true,
-      opacity: 0.22,
-      roughness: 0.35,
-      metalness: 0.05,
-      clearcoat: 0.4,
-      clearcoatRoughness: 0.3,
-      emissive: initialColor,
-      emissiveIntensity: 0.3,
-      side: THREE.FrontSide,
-    });
-    const hull = new THREE.Mesh(coreGeo, hullMat);
-    brainGroup.add(hull);
-
-    // ── Surface dots: a dense stippled point-cloud over the same brain ──
-    // shape — the fine "hologram scan" texture, sitting just above the
-    // hull. Positions are static (baked once, like the hull's rest shape)
-    // so this costs nothing extra per frame beyond a rotation update, even
-    // at tens of thousands of points — only the ripple-driven hull/wire
-    // layers need per-frame CPU vertex work.
-    const dotTexture = createDotTexture();
-    const SURFACE_DOT_COUNT = 26000;
-    const dotGeo = new THREE.BufferGeometry();
-    const dotPos = new Float32Array(SURFACE_DOT_COUNT * 3);
-    {
-      const dir = new THREE.Vector3();
-      const shaped = new THREE.Vector3();
-      for (let i = 0; i < SURFACE_DOT_COUNT; i++) {
-        const y = 1 - (i / (SURFACE_DOT_COUNT - 1)) * 2;
-        const r = Math.sqrt(Math.max(0, 1 - y * y));
-        const theta = Math.PI * (1 + Math.sqrt(5)) * i;
-        dir.set(Math.cos(theta) * r, y, Math.sin(theta) * r);
-        shapeBrainPoint(dir.x, dir.y, dir.z, BRAIN_RADIUS * 1.012, shaped);
-        dotPos[i * 3] = shaped.x; dotPos[i * 3 + 1] = shaped.y; dotPos[i * 3 + 2] = shaped.z;
-      }
-    }
-    dotGeo.setAttribute('position', new THREE.BufferAttribute(dotPos, 3));
-    const dotMat = new THREE.PointsMaterial({
-      color: initialColor,
-      size: 0.026,
-      map: dotTexture,
-      transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      sizeAttenuation: true,
-    });
-    const surfaceDots = new THREE.Points(dotGeo, dotMat);
-    brainGroup.add(surfaceDots);
-
-    // ── Circuit overlay: the same (animated, low-poly) surface, kept ────
-    // faint — its job is the energy-driven ripple catching the light, not
-    // carrying the visible mesh texture (that's fineWire below, which is
-    // static and much higher-detail so it doesn't cost a per-frame CPU pass).
-    const wireMat = new THREE.MeshBasicMaterial({
-      color: initialColor,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.12,
-      blending: THREE.AdditiveBlending,
+      opacity: 0.16,
+      roughness: 0.04,
+      metalness: 0,
+      clearcoat: 1,
+      clearcoatRoughness: 0.04,
       depthWrite: false,
     });
-    const wireMesh = new THREE.Mesh(coreGeo, wireMat);
-    wireMesh.scale.setScalar(1.008);
-    brainGroup.add(wireMesh);
+    const shell = new THREE.Mesh(shellGeo, shellMat);
+    orbGroup.add(shell);
 
-    // ── Fine static wireframe: the visible "circuit mesh" texture — much ──
-    // higher subdivision than the animated hull, baked once (never
-    // re-rippled per frame) so the fine grid stays cheap regardless of
-    // detail level. This is what makes the surface read as a dense
-    // hologram scan rather than a handful of big flat triangles.
-    const fineWireGeo = new THREE.IcosahedronGeometry(1, 6);
-    bakeBrainGeometry(fineWireGeo, BRAIN_RADIUS * 1.006);
-    const fineWireMat = new THREE.MeshBasicMaterial({
-      color: initialColor,
-      wireframe: true,
+    // ── Inner liquid — a bowl clipped at the fill line with a rippling top.
+    const LAT_SEGMENTS = 22, LON_SEGMENTS = 48;
+    const { geo: liquidGeo, capVertexIndices, basePositions: liquidBase } =
+      buildLiquidGeometry(ORB_RADIUS * 0.965, FILL_PHI, LAT_SEGMENTS, LON_SEGMENTS);
+    const liquidMat = new THREE.MeshPhysicalMaterial({
+      color: initialColor.clone(),
       transparent: true,
-      opacity: 0.22,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
+      opacity: 0.86,
+      roughness: 0.1,
+      metalness: 0,
+      clearcoat: 0.6,
+      clearcoatRoughness: 0.2,
+      emissive: initialColor.clone(),
+      emissiveIntensity: 0.22,
+      side: THREE.DoubleSide,
     });
-    const fineWire = new THREE.Mesh(fineWireGeo, fineWireMat);
-    brainGroup.add(fineWire);
+    const liquid = new THREE.Mesh(liquidGeo, liquidMat);
+    orbGroup.add(liquid);
 
-    // ── Fresnel glow shell: additive rim-light for the holographic edge ──
-    const glowGeo = new THREE.IcosahedronGeometry(1, 6);
-    bakeBrainGeometry(glowGeo, BRAIN_RADIUS * 1.18);
-    const glowMat = new THREE.ShaderMaterial({
+    // ── A thin brighter film right at the surface line — sells "this is ──
+    // a liquid surface", not just a colored solid.
+    const filmGeo = new THREE.CircleGeometry(ORB_RADIUS * 0.965 * Math.sin(FILL_PHI) * 1.01, LON_SEGMENTS);
+    const filmBase = (filmGeo.attributes.position.array as Float32Array).slice();
+    const filmMat = new THREE.MeshPhysicalMaterial({
+      color: 0xdcffe9,
+      transparent: true,
+      opacity: 0.28,
+      roughness: 0.05,
+      clearcoat: 1,
+      side: THREE.DoubleSide,
+    });
+    const film = new THREE.Mesh(filmGeo, filmMat);
+    film.rotation.x = -Math.PI / 2;
+    film.position.y = ORB_RADIUS * 0.965 * Math.cos(FILL_PHI);
+    orbGroup.add(film);
+
+    // ── Fresnel edge glint — the bright rim real glass shows at grazing ──
+    // angles (total internal reflection), matching the reference photo.
+    const rimGeo = new THREE.SphereGeometry(ORB_RADIUS * 1.01, 48, 32);
+    const rimMat = new THREE.ShaderMaterial({
       uniforms: {
-        uColor: { value: initialColor.clone() },
+        uColor: { value: new THREE.Color(0xeaffef) },
         uOpacity: { value: 0.55 },
-        uPower: { value: 2.1 },
+        uPower: { value: 3.6 },
       },
       vertexShader: FRESNEL_VERTEX,
       fragmentShader: FRESNEL_FRAGMENT,
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      side: THREE.FrontSide,
     });
-    const glowShell = new THREE.Mesh(glowGeo, glowMat);
-    brainGroup.add(glowShell);
+    const rimGlow = new THREE.Mesh(rimGeo, rimMat);
+    orbGroup.add(rimGlow);
 
-    // ── Brainstem: a tapered stub under the cerebellum bulge ────────────
-    const stemGeo = new THREE.CylinderGeometry(BRAIN_RADIUS * 0.16, BRAIN_RADIUS * 0.24, BRAIN_RADIUS * 0.6, 12);
-    const stem = new THREE.Mesh(stemGeo, hullMat);
-    stem.position.set(0, -BRAIN_RADIUS * 1.02, -BRAIN_RADIUS * 0.5);
-    stem.rotation.x = 0.4;
-    brainGroup.add(stem);
-
-    // ── Synapse network: nodes on the brain's own surface, connected to ──
-    // their nearest neighbours. Each line's brightness = ambient (energy)
-    // + a real firing pulse triggered by a genuine timeline event.
-    const NODE_COUNT = 80;
-    const nodePositions: THREE.Vector3[] = [];
-    const tmpDir = new THREE.Vector3();
-    for (let i = 0; i < NODE_COUNT; i++) {
-      // Fibonacci sphere distribution — even angular coverage, no RNG needed.
-      const y = 1 - (i / (NODE_COUNT - 1)) * 2;
-      const r = Math.sqrt(1 - y * y);
-      const theta = Math.PI * (1 + Math.sqrt(5)) * i;
-      tmpDir.set(Math.cos(theta) * r, y, Math.sin(theta) * r).normalize();
-      const shaped = new THREE.Vector3();
-      shapeBrainPoint(tmpDir.x, tmpDir.y, tmpDir.z, BRAIN_RADIUS * 1.05, shaped);
-      nodePositions.push(shaped);
-    }
-    type Synapse = { a: THREE.Vector3; b: THREE.Vector3; fire: number };
-    const synapses: Synapse[] = [];
-    for (let i = 0; i < NODE_COUNT; i++) {
-      let nearest: number[] = [];
-      for (let j = 0; j < NODE_COUNT; j++) {
-        if (i === j) continue;
-        nearest.push(j);
-      }
-      nearest.sort((a, b) => nodePositions[i].distanceTo(nodePositions[a]) - nodePositions[i].distanceTo(nodePositions[b]));
-      for (const j of nearest.slice(0, 2)) {
-        if (i < j) synapses.push({ a: nodePositions[i], b: nodePositions[j], fire: 0 });
-      }
-    }
-    const synapseGeo = new THREE.BufferGeometry();
-    const synapsePos = new Float32Array(synapses.length * 6);
-    synapses.forEach((s, i) => {
-      synapsePos.set([s.a.x, s.a.y, s.a.z, s.b.x, s.b.y, s.b.z], i * 6);
-    });
-    synapseGeo.setAttribute('position', new THREE.BufferAttribute(synapsePos, 3));
-    const synapseColors = new Float32Array(synapses.length * 6);
-    synapseGeo.setAttribute('color', new THREE.BufferAttribute(synapseColors, 3));
-    const synapseMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.6 });
-    const synapseLines = new THREE.LineSegments(synapseGeo, synapseMat);
-    scene.add(synapseLines);
-
-    // ── Particle field — an ellipsoid halo echoing the brain's own ──────
-    // proportions, orbit speed tied to real energy. Individual particles
-    // burst outward on a real timeline event (never a fake timer) for a
-    // visible "something just happened" pulse, then relax back.
-    const PARTICLE_COUNT = 480;
-    const particleGeo = new THREE.BufferGeometry();
-    const particlePos = new Float32Array(PARTICLE_COUNT * 3);
-    const particleAngles: { theta: number; phi: number; baseR: number; speed: number; boost: number }[] = [];
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      const baseR = 2.5 + Math.random() * 1.5;
-      particleAngles.push({ theta, phi, baseR, speed: (Math.random() < 0.5 ? -1 : 1) * (0.05 + Math.random() * 0.2), boost: 0 });
-    }
-    particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
-    const particleMat = new THREE.PointsMaterial({
-      color: new THREE.Color().setHSL(BASE_HUE, 1, 0.75),
-      size: 0.045,
-      map: dotTexture,
+    // ── Bubbles: real meshes rising through the liquid on real elapsed ──
+    // time, looping from the bottom. Rate/speed driven by real energy.
+    const BUBBLE_COUNT = 38;
+    const bubbleGeo = new THREE.SphereGeometry(1, 10, 8);
+    const bubbleMat = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
       transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      sizeAttenuation: true,
+      opacity: 0.9,
+      roughness: 0.02,
+      clearcoat: 1,
+      clearcoatRoughness: 0.02,
+      emissive: 0xd8fff0,
+      emissiveIntensity: 0.4,
     });
-    const particles = new THREE.Points(particleGeo, particleMat);
-    scene.add(particles);
+    const bottomY = ORB_RADIUS * 0.965 * Math.cos(Math.PI - 0.35);
+    const topY = ORB_RADIUS * 0.965 * Math.cos(FILL_PHI) - 0.03;
+    type Bubble = { mesh: THREE.Mesh; speed: number; wobble: number; phase: number };
+    const bubbles: Bubble[] = [];
+    function resetBubble(b: Bubble, startAtBottom: boolean) {
+      const r = 0.05 + Math.random() * Math.random() * 0.5; // bias toward center, but with real spread
+      const size = 0.04 + Math.random() * 0.13;
+      const theta = Math.random() * Math.PI * 2;
+      b.mesh.position.set(Math.cos(theta) * r, startAtBottom ? bottomY + Math.random() * 0.15 : bottomY + Math.random() * (topY - bottomY), Math.sin(theta) * r);
+      b.mesh.scale.setScalar(size);
+      b.speed = 0.12 + Math.random() * 0.22;
+      b.wobble = 0.15 + Math.random() * 0.3;
+      b.phase = Math.random() * Math.PI * 2;
+    }
+    for (let i = 0; i < BUBBLE_COUNT; i++) {
+      const mesh = new THREE.Mesh(bubbleGeo, bubbleMat);
+      const b: Bubble = { mesh, speed: 0.15, wobble: 0.2, phase: 0 };
+      resetBubble(b, false);
+      bubbles.push(b);
+      orbGroup.add(mesh);
+    }
 
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let energy = 0.2;
     let hue = BASE_HUE;
+    let ripple = 0; // event-triggered pulse, decays
     const clock = new THREE.Clock();
+    let introT = 0; // one-shot gentle scale-in on mount
 
     renderer.setAnimationLoop(() => {
       const { selfState, isTextSpeaking, tokenTimestamps, micLevel, isListening, isVoiceSpeaking } = stateRef.current;
       const t = clock.getElapsedTime();
+      const dt = Math.min(clock.getDelta(), 0.05);
 
-      // ── Real signals → targets ─────────────────────────────────────
       const mode = selfState?.mode ?? 'idle';
       const modeEnergy = MODE_ENERGY[mode] ?? 0.2;
       const confidence = selfState?.confidence ?? 0.5;
-      const health = selfState?.health ?? 1;
       const isErrorMode = mode === 'error' || mode === 'recovering';
 
       const now = Date.now();
@@ -429,104 +331,74 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       const targetHue = isErrorMode ? ERROR_HUE : BASE_HUE;
       energy += (targetEnergy - energy) * (reduceMotion ? 0.02 : 0.06);
       hue += (targetHue - hue) * 0.05;
+      ripple = Math.max(0, ripple - dt * 0.8);
 
-      const jitterAmt = health < 0.5 ? (1 - health) * 0.08 : 0.008;
-      const spin = reduceMotion ? 0 : 0.06 + energy * 0.12;
+      // Gentle one-shot scale-in on mount — a real elapsed-time ease, not a
+      // physics fling.
+      introT = Math.min(1, introT + dt / 0.7);
+      const introScale = reduceMotion ? 1 : 0.85 + 0.15 * (1 - Math.pow(1 - introT, 3));
+      orbGroup.scale.setScalar(introScale);
 
-      // Core ripple — a small perturbation layered on top of the baked
-      // brain shape (never replaces it), phased by elapsed time for
-      // organic motion. Amplitude is entirely energy/jitter-driven; time
-      // only decides *where in the wave* to sample.
-      const posAttr = coreGeo.attributes.position;
-      for (let i = 0; i < posAttr.count; i++) {
-        const ix = i * 3;
-        const bx = basePositions[ix], by = basePositions[ix + 1], bz = basePositions[ix + 2];
-        const n = Math.sin(bx * 3.0 + t * (0.5 + energy)) * Math.cos(by * 2.6 + t * 0.35) * Math.sin(bz * 3.2 - t * 0.45);
-        const rippleMul = 1 + n * (0.05 + energy * 0.11) + (Math.random() - 0.5) * jitterAmt;
-        posAttr.setXYZ(i, bx * rippleMul, by * rippleMul, bz * rippleMul);
+      const color = new THREE.Color().setHSL(hue, 0.85, 0.42 + energy * 0.1);
+      liquidMat.color.copy(color);
+      liquidMat.emissive.copy(color);
+      liquidMat.emissiveIntensity = 0.08 + energy * 0.16 + ripple * 0.2;
+      filmMat.color.copy(color).lerp(new THREE.Color(0xffffff), 0.55);
+      keyLight.intensity = 15 + energy * 4;
+      fillLight.color.copy(color).lerp(new THREE.Color(0x0a1512), 0.3);
+      rimMat.uniforms.uColor.value.copy(color).lerp(new THREE.Color(0xffffff), 0.5);
+      rimMat.uniforms.uOpacity.value = 0.35 + energy * 0.25;
+
+      // ── Liquid surface ripple — a real perturbation on the cap vertices ──
+      // only (still water underneath); amplitude from real energy + real
+      // mic amplitude while listening + a decaying pulse from real events.
+      const rippleAmp = 0.012 + energy * 0.02 + (isListening ? micLevel * 0.05 : 0) + ripple * 0.06;
+      const posAttr = liquidGeo.attributes.position;
+      for (const idx of capVertexIndices) {
+        const ix = idx * 3;
+        const bx = liquidBase[ix], by = liquidBase[ix + 1], bz = liquidBase[ix + 2];
+        const wave = Math.sin(bx * 2.6 + t * 1.3) * Math.cos(bz * 2.3 + t * 0.9) * rippleAmp;
+        posAttr.setXYZ(idx, bx, by + wave, bz);
       }
       posAttr.needsUpdate = true;
-      coreGeo.computeVertexNormals();
+      liquidGeo.computeVertexNormals();
 
-      const color = new THREE.Color().setHSL(hue, 1, 0.5 + energy * 0.15);
-      hullMat.color.copy(color);
-      hullMat.emissive.copy(color);
-      hullMat.emissiveIntensity = 0.25 + energy * 0.35;
-      hullMat.opacity = 0.06 + energy * 0.08;
-      wireMat.color.copy(color);
-      wireMat.opacity = 0.03 + energy * 0.04;
-      fineWireMat.color.copy(color);
-      fineWireMat.opacity = 0.05 + energy * 0.05;
-      dotMat.color.copy(color);
-      dotMat.opacity = 0.7 + energy * 0.25;
-      glowMat.uniforms.uColor.value.copy(color);
-      glowMat.uniforms.uOpacity.value = 0.05 + energy * 0.1;
-      rimLight.color.copy(color);
-      rimLight.intensity = 0.9 + energy * 1.1;
-      particleMat.color.copy(color);
+      // The surface film disc rides the same ripple so it doesn't look like
+      // a rigid plate floating above the moving liquid.
+      const filmAttr = filmGeo.attributes.position;
+      for (let i = 0; i < filmAttr.count; i++) {
+        const ix = i * 3;
+        const fx = filmBase[ix], fy = filmBase[ix + 1];
+        // CircleGeometry lies in local XY before the mesh's own -90° X
+        // rotation; ripple its local Y (which becomes world-space "outward
+        // from center" after that rotation) using the same wave field.
+        const wave = Math.sin(fx * 2.6 + t * 1.3) * Math.cos(fy * 2.3 + t * 0.9) * rippleAmp;
+        filmAttr.setXYZ(i, fx, fy, wave / 0.965);
+      }
+      filmAttr.needsUpdate = true;
+      filmGeo.computeVertexNormals();
 
-      // Continuous rotation + a slow bob — deliberately fast enough to be
-      // clearly perceptible at rest, not just a near-static drift; this is
-      // machinery (always-on), not a real-signal target, same as the rest
-      // of the render loop's "time picks the phase, state picks the size".
-      brainGroup.rotation.y += (reduceMotion ? 0.0012 : 0.004) + energy * 0.002;
-      brainGroup.rotation.x = Math.sin(t * 0.15) * 0.06;
-      brainGroup.position.y = Math.sin(t * 0.35) * 0.06;
-      surfaceDots.rotation.y += reduceMotion ? 0 : 0.0006; // slight independent drift for parallax
-      synapseLines.rotation.y = brainGroup.rotation.y;
-      synapseLines.rotation.x = brainGroup.rotation.x;
-      particles.rotation.y += spin * 0.0028;
-      particles.rotation.x = Math.sin(t * 0.1) * 0.1;
+      // ── Bubbles rise on real elapsed time; rate/speed track real energy ──
+      for (const b of bubbles) {
+        b.mesh.position.y += b.speed * (0.4 + energy * 1.4) * dt;
+        b.mesh.position.x += Math.sin(t * 1.4 + b.phase) * b.wobble * dt * 0.3;
+        b.mesh.position.z += Math.cos(t * 1.1 + b.phase) * b.wobble * dt * 0.3;
+        if (b.mesh.position.y > topY) resetBubble(b, true);
+      }
 
-      // ── Synapse firing — driven by real timeline events, not a clock ──
+      orbGroup.rotation.y += (reduceMotion ? 0.0008 : 0.0022) + energy * 0.001;
+
+      // ── Real timeline events → one ripple pulse + a few fresh bubbles ──
+      // (never a fake timer).
       const currentTimeline = timelineRef.current;
       for (let i = 0; i < Math.min(currentTimeline.length, 6); i++) {
         const ev = currentTimeline[i];
         if (!seenEventsRef.current.has(ev.id)) {
           seenEventsRef.current.add(ev.id);
-          // Fire a handful of random synapses for this real event.
-          for (let k = 0; k < 4; k++) {
-            const idx = Math.floor(Math.random() * synapses.length);
-            synapses[idx].fire = 1;
-          }
-          // Send a burst of ambient particles outward — a visible "something
-          // just happened" pulse, triggered only by this real event.
-          for (let k = 0; k < 24; k++) {
-            const idx = Math.floor(Math.random() * PARTICLE_COUNT);
-            particleAngles[idx].boost = 1;
-          }
+          ripple = 1;
+          for (let k = 0; k < 3; k++) resetBubble(bubbles[Math.floor(Math.random() * bubbles.length)], true);
         }
       }
-      const colorAttr = synapseGeo.attributes.color;
-      for (let i = 0; i < synapses.length; i++) {
-        const s = synapses[i];
-        if (s.fire > 0) s.fire = Math.max(0, s.fire - 0.035);
-        const ambient = 0.12 + energy * 0.35;
-        const bright = Math.min(1, ambient + s.fire);
-        const c = new THREE.Color().setHSL(hue, 1, 0.4 + bright * 0.4);
-        colorAttr.setXYZ(i * 2, c.r, c.g, c.b);
-        colorAttr.setXYZ(i * 2 + 1, c.r, c.g, c.b);
-      }
-      colorAttr.needsUpdate = true;
-      synapseMat.opacity = 0.35 + energy * 0.35;
-
-      // Particles: orbit speed from energy; ellipsoid shape echoes the
-      // brain's own proportions; when listening, drift inward toward the
-      // core in proportion to real mic amplitude; boost (event-triggered
-      // above) pushes a particle outward then relaxes it back.
-      const posArr = particleGeo.attributes.position.array as Float32Array;
-      for (let i = 0; i < PARTICLE_COUNT; i++) {
-        const p = particleAngles[i];
-        if (!reduceMotion) p.theta += p.speed * 0.012 * (0.3 + energy * 1.3);
-        if (p.boost > 0) p.boost = Math.max(0, p.boost - 0.015);
-        const inward = isListening ? micLevel * 0.9 : 0;
-        const r = p.baseR * (1 - inward * 0.35) + p.boost * 1.6;
-        const ix = i * 3;
-        posArr[ix]     = Math.sin(p.phi) * Math.cos(p.theta) * r * 1.05;
-        posArr[ix + 1] = Math.cos(p.phi) * r * 0.9;
-        posArr[ix + 2] = Math.sin(p.phi) * Math.sin(p.theta) * r * 1.15;
-      }
-      particleGeo.attributes.position.needsUpdate = true;
 
       renderer.render(scene, camera);
     });
@@ -537,21 +409,16 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       window.removeEventListener('resize', resize);
       retryTimers.forEach(id => window.clearTimeout(id));
       renderer.dispose();
-      coreGeo.dispose();
-      hullMat.dispose();
-      wireMat.dispose();
-      fineWireGeo.dispose();
-      fineWireMat.dispose();
-      glowGeo.dispose();
-      glowMat.dispose();
-      stemGeo.dispose();
-      dotGeo.dispose();
-      dotMat.dispose();
-      dotTexture.dispose();
-      synapseGeo.dispose();
-      synapseMat.dispose();
-      particleGeo.dispose();
-      particleMat.dispose();
+      shellGeo.dispose();
+      shellMat.dispose();
+      liquidGeo.dispose();
+      liquidMat.dispose();
+      filmGeo.dispose();
+      filmMat.dispose();
+      rimGeo.dispose();
+      rimMat.dispose();
+      bubbleGeo.dispose();
+      bubbleMat.dispose();
       if (renderer.domElement.parentNode === container) {
         container.removeChild(renderer.domElement);
       }
@@ -563,7 +430,8 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       ref={containerRef}
       className={`w-full h-full ${className}`}
       role="img"
-      aria-label="MARK's live cognitive state — a 3D visualization of his current mode, confidence, and health"
+      aria-label="MARK's live cognitive state — a glass orb of glowing green liquid reflecting his current mode and confidence"
+      style={{ background: 'radial-gradient(circle at 50% 42%, rgba(40,150,95,0.75) 0%, rgba(10,45,30,0.9) 38%, rgba(4,14,10,0.96) 62%, #000000 100%)' }}
     />
   );
 }
