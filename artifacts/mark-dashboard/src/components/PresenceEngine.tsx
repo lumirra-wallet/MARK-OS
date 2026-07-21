@@ -107,6 +107,25 @@ function buildLiquidGeometry(radius: number, fillPhi: number, latSegments: numbe
   return { geo, capVertexIndices, basePositions: (geo.attributes.position.array as Float32Array).slice() };
 }
 
+/** A large, very soft-edged round gradient — the billboard used for the
+ * murky drifting fog wisps inside the liquid (deliberately softer/bigger
+ * than a bubble highlight sprite, so it reads as haze, not a glow point). */
+function createFogSprite(): THREE.Texture {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0, 'rgba(255,255,255,0.9)');
+  gradient.addColorStop(0.45, 'rgba(255,255,255,0.35)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
 const FRESNEL_VERTEX = `
   varying vec3 vNormalView;
   varying vec3 vViewDir;
@@ -288,7 +307,13 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     });
     const bottomY = ORB_RADIUS * 0.965 * Math.cos(Math.PI - 0.35);
     const topY = ORB_RADIUS * 0.965 * Math.cos(FILL_PHI) - 0.03;
-    type Bubble = { mesh: THREE.Mesh; speed: number; wobble: number; phase: number };
+    // Each bubble carries its own "agitation" rhythm (agitationRate/Phase) so
+    // it periodically surges — a sharp squash/stretch + a burst of sideways
+    // jitter + a brief rise-stall, like something straining against the
+    // liquid trying to get free — rather than rising in a perfectly smooth
+    // line. Real elapsed time drives the rhythm; nothing is randomized
+    // per-frame in a way that isn't reproducible from t.
+    type Bubble = { mesh: THREE.Mesh; speed: number; wobble: number; phase: number; size: number; agitationRate: number; agitationPhase: number };
     const bubbles: Bubble[] = [];
     function resetBubble(b: Bubble, startAtBottom: boolean) {
       const r = 0.05 + Math.random() * Math.random() * 0.5; // bias toward center, but with real spread
@@ -296,16 +321,52 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       const theta = Math.random() * Math.PI * 2;
       b.mesh.position.set(Math.cos(theta) * r, startAtBottom ? bottomY + Math.random() * 0.15 : bottomY + Math.random() * (topY - bottomY), Math.sin(theta) * r);
       b.mesh.scale.setScalar(size);
+      b.size = size;
       b.speed = 0.12 + Math.random() * 0.22;
       b.wobble = 0.15 + Math.random() * 0.3;
       b.phase = Math.random() * Math.PI * 2;
+      b.agitationRate = 0.5 + Math.random() * 1.3;
+      b.agitationPhase = Math.random() * Math.PI * 2;
     }
     for (let i = 0; i < BUBBLE_COUNT; i++) {
       const mesh = new THREE.Mesh(bubbleGeo, bubbleMat);
-      const b: Bubble = { mesh, speed: 0.15, wobble: 0.2, phase: 0 };
+      const b: Bubble = { mesh, speed: 0.15, wobble: 0.2, phase: 0, size: 0.06, agitationRate: 1, agitationPhase: 0 };
       resetBubble(b, false);
       bubbles.push(b);
       orbGroup.add(mesh);
+    }
+
+    // ── Internal fog/murk: soft drifting haze inside the liquid so the ──
+    // fluid itself reads as a heavy, turbulent chemical rather than flat
+    // colored glass. Each wisp drifts on its own slow real-time path around
+    // a fixed base point and breathes in/out — genuine continuous motion,
+    // not a static decal, but never leaves the liquid's own bounds.
+    const FOG_COUNT = 14;
+    const fogTexture = createFogSprite();
+    type FogWisp = { sprite: THREE.Sprite; basePos: THREE.Vector3; driftPhase: THREE.Vector3; opacityPhase: number };
+    const fogWisps: FogWisp[] = [];
+    for (let i = 0; i < FOG_COUNT; i++) {
+      const mat = new THREE.SpriteMaterial({
+        map: fogTexture,
+        transparent: true,
+        opacity: 0.14,
+        color: new THREE.Color().setHSL(BASE_HUE, 0.6, 0.16),
+        depthWrite: false,
+      });
+      const sprite = new THREE.Sprite(mat);
+      const r = 0.08 + Math.random() * 0.42;
+      const theta = Math.random() * Math.PI * 2;
+      const y = bottomY + 0.06 + Math.random() * (topY - bottomY - 0.12);
+      sprite.position.set(Math.cos(theta) * r, y, Math.sin(theta) * r);
+      const scale = 0.55 + Math.random() * 1.0;
+      sprite.scale.set(scale, scale, 1);
+      orbGroup.add(sprite);
+      fogWisps.push({
+        sprite,
+        basePos: sprite.position.clone(),
+        driftPhase: new THREE.Vector3(Math.random() * 100, Math.random() * 100, Math.random() * 100),
+        opacityPhase: Math.random() * Math.PI * 2,
+      });
     }
 
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -356,12 +417,15 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       // ── Liquid surface ripple — a real perturbation on the cap vertices ──
       // only (still water underneath); amplitude from real energy + real
       // mic amplitude while listening + a decaying pulse from real events.
-      const rippleAmp = 0.012 + energy * 0.02 + (isListening ? micLevel * 0.05 : 0) + ripple * 0.06;
+      // Slow, broad, low-frequency roll (not choppy little ripples) so the
+      // fluid reads as heavy/viscous rather than thin water.
+      const rippleAmp = 0.014 + energy * 0.024 + (isListening ? micLevel * 0.055 : 0) + ripple * 0.075;
       const posAttr = liquidGeo.attributes.position;
       for (const idx of capVertexIndices) {
         const ix = idx * 3;
         const bx = liquidBase[ix], by = liquidBase[ix + 1], bz = liquidBase[ix + 2];
-        const wave = Math.sin(bx * 2.6 + t * 1.3) * Math.cos(bz * 2.3 + t * 0.9) * rippleAmp;
+        const wave = Math.sin(bx * 1.7 + t * 0.75) * Math.cos(bz * 1.5 + t * 0.5) * rippleAmp
+          + Math.sin(bx * 3.4 - t * 1.1 + bz * 2.1) * rippleAmp * 0.35;
         posAttr.setXYZ(idx, bx, by + wave, bz);
       }
       posAttr.needsUpdate = true;
@@ -376,17 +440,45 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
         // CircleGeometry lies in local XY before the mesh's own -90° X
         // rotation; ripple its local Y (which becomes world-space "outward
         // from center" after that rotation) using the same wave field.
-        const wave = Math.sin(fx * 2.6 + t * 1.3) * Math.cos(fy * 2.3 + t * 0.9) * rippleAmp;
+        const wave = Math.sin(fx * 1.7 + t * 0.75) * Math.cos(fy * 1.5 + t * 0.5) * rippleAmp
+          + Math.sin(fx * 3.4 - t * 1.1 + fy * 2.1) * rippleAmp * 0.35;
         filmAttr.setXYZ(i, fx, fy, wave / 0.965);
       }
       filmAttr.needsUpdate = true;
       filmGeo.computeVertexNormals();
 
-      // ── Bubbles rise on real elapsed time; rate/speed track real energy ──
+      // ── Fog wisps: slow drift + a breathing opacity, real energy makes ──
+      // the haze thicker/more restless when MARK is more active.
+      for (const w of fogWisps) {
+        const dx = Math.sin(t * 0.15 + w.driftPhase.x) * 0.12;
+        const dy = Math.sin(t * 0.11 + w.driftPhase.y) * 0.08;
+        const dz = Math.sin(t * 0.13 + w.driftPhase.z) * 0.12;
+        const y = Math.min(topY - 0.02, Math.max(bottomY + 0.04, w.basePos.y + dy));
+        w.sprite.position.set(w.basePos.x + dx, y, w.basePos.z + dz);
+        const breathe = 0.5 + 0.5 * Math.sin(t * 0.3 + w.opacityPhase);
+        const mat = w.sprite.material as THREE.SpriteMaterial;
+        mat.opacity = (0.07 + energy * 0.14) * (0.4 + breathe * 0.7);
+        mat.color.copy(color).lerp(new THREE.Color(0x020e08), 0.55);
+      }
+
+      // ── Bubbles: rise on real elapsed time, rate from real energy, plus ──
+      // a periodic "struggle" — a sharp squash/stretch, a burst of sideways
+      // jitter, and a brief rise-stall — like something alive straining
+      // against the liquid to break free, not a bubble on rails. Struggle
+      // intensity also tracks real energy (more activity → more restless).
+      const struggleAmp = 0.5 + energy * 0.9;
       for (const b of bubbles) {
-        b.mesh.position.y += b.speed * (0.4 + energy * 1.4) * dt;
-        b.mesh.position.x += Math.sin(t * 1.4 + b.phase) * b.wobble * dt * 0.3;
-        b.mesh.position.z += Math.cos(t * 1.1 + b.phase) * b.wobble * dt * 0.3;
+        const rawPulse = Math.sin(t * b.agitationRate + b.phase) * Math.sin(t * b.agitationRate * 2.7 + b.agitationPhase);
+        const struggle = Math.max(0, rawPulse) ** 3; // mostly calm, occasional sharp peaks
+        const stall = 1 - struggle * 0.55;
+        b.mesh.position.y += b.speed * (0.4 + energy * 1.4) * stall * dt;
+        const jx = Math.sin(t * 1.4 + b.phase) * b.wobble * 0.3 + Math.sin(t * 9.3 + b.phase * 3) * struggle * struggleAmp * 0.5;
+        const jz = Math.cos(t * 1.1 + b.phase) * b.wobble * 0.3 + Math.cos(t * 8.7 + b.phase * 2) * struggle * struggleAmp * 0.5;
+        b.mesh.position.x += jx * dt;
+        b.mesh.position.z += jz * dt;
+        const squash = struggle * struggleAmp;
+        const microPulse = Math.sin(t * 5 + b.phase) * 0.03;
+        b.mesh.scale.set(b.size * (1 + squash * 0.32 + microPulse), b.size * (1 - squash * 0.4 - microPulse), b.size * (1 + squash * 0.32 - microPulse));
         if (b.mesh.position.y > topY) resetBubble(b, true);
       }
 
@@ -423,6 +515,8 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       rimMat.dispose();
       bubbleGeo.dispose();
       bubbleMat.dispose();
+      fogTexture.dispose();
+      fogWisps.forEach(w => (w.sprite.material as THREE.SpriteMaterial).dispose());
       if (renderer.domElement.parentNode === container) {
         container.removeChild(renderer.domElement);
       }
