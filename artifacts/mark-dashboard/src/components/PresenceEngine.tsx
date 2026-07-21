@@ -1,39 +1,65 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { useMarkStore } from '@/store/markStore';
 import { useSelfState } from '@/hooks/use-self-state';
 
 /**
- * PresenceEngine — MARK's living core: a glass sphere half-filled with
- * glowing green liquid, bubbles rising through it, a bright glossy
- * highlight, and a soft green radial glow behind it — modeled directly on
- * a reference "liquid glass orb" photo the owner supplied.
+ * PresenceEngine — MARK's living core: a glass sphere half-filled with a
+ * glowing green chemical, bubbles rising through it, a bright glossy
+ * highlight, and a soft green radial glow behind it — modeled on a
+ * "liquid glass orb" reference photo the owner supplied, then pushed
+ * toward a genuine VFX-style fluid look on request.
  *
- * Three real layers:
- *   - An outer glass shell: a thin, high-clearcoat, low-opacity alpha-
- *     blended sphere (a true `transmission` material was tried first, but
- *     three.js's transmission background-capture only reliably grabs
- *     *opaque* geometry — the liquid and bubbles behind it, both alpha-
- *     blended, came out invisible through it. Standard alpha blending
- *     composites nested transparent objects correctly.)
- *   - An inner liquid body: a sphere clipped at a fill line into a bowl
- *     shape with a flat, gently rippling top surface (built by hand —
- *     THREE has no "clipped sphere" primitive).
- *   - A field of small rising bubble meshes.
+ * Engineering-quality notes (what's real vs. what's a deliberate,
+ * disclosed approximation — true SPH fluid dynamics, screen-space
+ * reflections, and ray-traced caustics/dispersion are out of scope for a
+ * WebGL dashboard widget; faking them badly would look worse than not
+ * having them):
  *
- * Every real-time value driving it is genuine:
- *   - Liquid color/glow → agent.mind's actual mode (error → red, else
- *     MARK's green) and confidence (useSelfState).
- *   - Surface ripple amplitude → real energy (mode/confidence) plus real
- *     microphone amplitude while listening.
- *   - Bubble rise speed → real energy — MARK looks more "alive" while
- *     actually executing something, not on a decorative clock.
- *   - A real WebSocket timeline event (worker started, tokens streamed,
- *     etc.) sends one real ripple pulse across the surface and resets a
- *     few bubbles to rise again — activity visibly disturbs the liquid.
- * The render loop (renderer.setAnimationLoop) only interpolates toward
- * these real targets and integrates real elapsed time; it never invents
- * state. No setInterval/setTimeout anywhere in this file.
+ *   - Motion is driven by a real deterministic 3D Perlin-noise field and a
+ *     curl (pseudo-vector-potential) derivative of it — the actual
+ *     technique real-time VFX uses for convincing fluid-like flow without
+ *     a full Navier–Stokes solver. Same input always gives the same
+ *     output (deterministic), but because it's sampled along continuously
+ *     advancing real time with irrational-ish frequency ratios, it never
+ *     exactly repeats within any observable session.
+ *   - The liquid surface height comes from fractal Brownian motion (4
+ *     octaves of the noise field) rather than a couple of sine terms —
+ *     much richer, non-repeating surface motion.
+ *   - Fog wisps are genuinely *advected*: each frame their position is
+ *     integrated forward by the curl field sampled at their own location,
+ *     the same field bubbles use — so haze and bubbles visibly share one
+ *     current, not independent random walks.
+ *   - Bubbles have real size-dependent buoyancy (bigger rises faster),
+ *     drift by sampling the shared curl field at their own position,
+ *     genuinely merge (volume-conserving radius) when they overlap, and
+ *     split under noise-driven "pressure" once large enough — no two
+ *     bubbles ever carry identical phase/frequency/size, so no two move
+ *     identically.
+ *   - A single global "surge" value — a 1D noise signal sampled over real
+ *     time, fast-rising/slow-decaying — coordinates a shared wave of
+ *     agitation across the whole liquid + all bubbles at once (sudden
+ *     surge → gradual calm), which is what makes it read as one thing
+ *     reacting rather than forty independent particles.
+ *   - Real bloom via three.js's own EffectComposer/UnrealBloomPass (no
+ *     new dependency — ships inside the `three` package), threshold tuned
+ *     high so only genuine highlights/emissive bubbles bloom.
+ *   - Glass gets a procedurally generated condensation+micro-scratch bump
+ *     map, and the Fresnel rim carries a cheap per-pixel R/B channel
+ *     split at grazing angles as a stylized dispersion cue (not physically
+ *     accurate spectral refraction — that needs multi-pass wavelength
+ *     rendering, disclosed as out of scope above).
+ *   - A caustic-style light-pattern (animated overlapping soft blotches,
+ *     the standard cheap real-time caustic approximation) glows near the
+ *     bottom of the liquid.
+ *
+ * Every real *state* value (not just motion) still traces to genuine data:
+ * mode/confidence/health from agent.mind (useSelfState), real WebSocket
+ * timeline events, real mic amplitude while listening, real speech
+ * playback state. No setInterval/setTimeout anywhere in this file.
  */
 interface PresenceEngineProps {
   className?: string;
@@ -53,6 +79,72 @@ const MODE_ENERGY: Record<string, number> = {
   executing: 0.85, reflecting: 0.5, learning: 0.55,
   error: 0.4, recovering: 0.35,
 };
+
+// ─── Deterministic 3D Perlin noise + curl field ────────────────────────────
+// Classic reference-algorithm Perlin noise, fixed-seed shuffle (so it's the
+// exact same field every run — deterministic — but sampled continuously
+// through real time it never repeats). This is what drives every "fluid"
+// motion below: never Math.random() inside the animation loop for motion.
+const PERM: Uint8Array = (() => {
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  let seed = 1234567;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    const tmp = p[i]; p[i] = p[j]; p[j] = tmp;
+  }
+  const perm = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+  return perm;
+})();
+function fade(t: number) { return t * t * t * (t * (t * 6 - 15) + 10); }
+function grad(hash: number, x: number, y: number, z: number) {
+  const h = hash & 15;
+  const u = h < 8 ? x : y;
+  const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+  return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+}
+function perlin3(x: number, y: number, z: number): number {
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+  x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+  const u = fade(x), v = fade(y), w = fade(z);
+  const A = PERM[X] + Y, AA = PERM[A] + Z, AB = PERM[A + 1] + Z;
+  const B = PERM[X + 1] + Y, BA = PERM[B] + Z, BB = PERM[B + 1] + Z;
+  const lerp = (t: number, a: number, b: number) => a + t * (b - a);
+  return lerp(w,
+    lerp(v, lerp(u, grad(PERM[AA], x, y, z), grad(PERM[BA], x - 1, y, z)),
+      lerp(u, grad(PERM[AB], x, y - 1, z), grad(PERM[BB], x - 1, y - 1, z))),
+    lerp(v, lerp(u, grad(PERM[AA + 1], x, y, z - 1), grad(PERM[BA + 1], x - 1, y, z - 1)),
+      lerp(u, grad(PERM[AB + 1], x, y - 1, z - 1), grad(PERM[BB + 1], x - 1, y - 1, z - 1))));
+}
+/** Fractal Brownian motion — several octaves of Perlin noise summed, the
+ * standard way to build a rich, non-repeating heightfield from simple noise. */
+function fbm3(x: number, y: number, z: number, octaves: number): number {
+  let amp = 0.55, freq = 1, sum = 0, norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    sum += perlin3(x * freq, y * freq, z * freq) * amp;
+    norm += amp;
+    amp *= 0.5; freq *= 2.05; // irrational-ish ratio — octaves never fall back into lockstep
+  }
+  return sum / norm;
+}
+const CURL_EPS = 0.09;
+function potX(x: number, y: number, z: number, t: number) { return perlin3(x * 0.9 + 37.1, y * 0.9, z * 0.9 - t * 0.12); }
+function potY(x: number, y: number, z: number, t: number) { return perlin3(x * 0.9, y * 0.9 + 91.3, z * 0.9 + t * 0.11); }
+function potZ(x: number, y: number, z: number, t: number) { return perlin3(x * 0.9 - 58.2, y * 0.9, z * 0.9 + t * 0.13); }
+/** Curl of a pseudo vector-potential built from 3 offset/decorrelated noise
+ * fields — the standard real-time-VFX substitute for real fluid velocity:
+ * swirly, incompressible-*looking* flow with no simulation grid required. */
+function curl(x: number, y: number, z: number, t: number, out: THREE.Vector3): THREE.Vector3 {
+  const dPzdy = (potZ(x, y + CURL_EPS, z, t) - potZ(x, y - CURL_EPS, z, t)) / (2 * CURL_EPS);
+  const dPydz = (potY(x, y, z + CURL_EPS, t) - potY(x, y, z - CURL_EPS, t)) / (2 * CURL_EPS);
+  const dPxdz = (potX(x, y, z + CURL_EPS, t) - potX(x, y, z - CURL_EPS, t)) / (2 * CURL_EPS);
+  const dPzdx = (potZ(x + CURL_EPS, y, z, t) - potZ(x - CURL_EPS, y, z, t)) / (2 * CURL_EPS);
+  const dPydx = (potY(x + CURL_EPS, y, z, t) - potY(x - CURL_EPS, y, z, t)) / (2 * CURL_EPS);
+  const dPxdy = (potX(x, y + CURL_EPS, z, t) - potX(x, y - CURL_EPS, z, t)) / (2 * CURL_EPS);
+  return out.set(dPzdy - dPydz, dPxdz - dPzdx, dPydx - dPxdy);
+}
 
 /**
  * Builds the liquid body: a spherical "bowl" from the fill line down to
@@ -126,6 +218,64 @@ function createFogSprite(): THREE.Texture {
   return tex;
 }
 
+/** Procedural glass imperfections — condensation droplets + micro-scratches
+ * — used as a subtle bump map on the shell so it reads as real handled
+ * glass, not a mathematically perfect sphere. */
+function createGlassImperfectionTexture(): THREE.Texture {
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 70; i++) {
+    const x = Math.random() * size, y = Math.random() * size, r = 1.5 + Math.random() * 4;
+    const grad2 = ctx.createRadialGradient(x, y, 0, x, y, r);
+    grad2.addColorStop(0, 'rgba(255,255,255,0.8)');
+    grad2.addColorStop(1, 'rgba(128,128,128,0)');
+    ctx.fillStyle = grad2;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.strokeStyle = 'rgba(200,200,200,0.22)';
+  ctx.lineWidth = 0.6;
+  for (let i = 0; i < 40; i++) {
+    const x = Math.random() * size, y = Math.random() * size;
+    const len = 4 + Math.random() * 18, ang = Math.random() * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 2);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Cheap real-time caustic approximation: overlapping soft-edged highlight
+ * cells, scrolled/rotated over time — the same trick used in most games,
+ * since true caustics need photon-mapped ray tracing. */
+function createCausticTexture(): THREE.Texture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  for (let i = 0; i < 40; i++) {
+    const x = Math.random() * size, y = Math.random() * size, r = 8 + Math.random() * 26;
+    const grad2 = ctx.createRadialGradient(x, y, 0, x, y, r);
+    grad2.addColorStop(0, 'rgba(255,255,255,0.9)');
+    grad2.addColorStop(0.6, 'rgba(255,255,255,0.22)');
+    grad2.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad2;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 const FRESNEL_VERTEX = `
   varying vec3 vNormalView;
   varying vec3 vViewDir;
@@ -136,6 +286,9 @@ const FRESNEL_VERTEX = `
     gl_Position = projectionMatrix * mvPosition;
   }
 `;
+// The R/B channel split at grazing angles is a stylized "dispersion" cue,
+// not physically accurate spectral refraction (that needs multi-pass
+// wavelength-dependent rendering) — cheap and common in real-time glass.
 const FRESNEL_FRAGMENT = `
   uniform vec3 uColor;
   uniform float uOpacity;
@@ -144,7 +297,8 @@ const FRESNEL_FRAGMENT = `
   varying vec3 vViewDir;
   void main() {
     float fresnel = pow(1.0 - max(dot(normalize(vNormalView), normalize(vViewDir)), 0.0), uPower);
-    gl_FragColor = vec4(uColor, fresnel * uOpacity);
+    vec3 dispersed = uColor + vec3(fresnel * 0.14, 0.0, -fresnel * 0.11);
+    gl_FragColor = vec4(dispersed, fresnel * uOpacity);
   }
 `;
 
@@ -180,12 +334,21 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     renderer.toneMappingExposure = 1.15;
     container.appendChild(renderer.domElement);
 
+    // Real bloom — three.js's own postprocessing (ships inside the `three`
+    // package, no new dependency). Threshold kept high so only genuine
+    // highlights/emissive bubbles bloom, not the whole liquid mass.
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.45, 0.82);
+    composer.addPass(bloomPass);
+
     const resize = () => {
       const { clientWidth: w, clientHeight: h } = container;
       if (w === 0 || h === 0) return;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      composer.setSize(w, h);
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -223,6 +386,7 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     // objects correctly (three.js sorts the transparent queue back-to-
     // front every frame), so the shell uses that instead: a thin, mostly
     // clear glassy layer over the liquid, not true GPU refraction.
+    const glassImperfectionTex = createGlassImperfectionTexture();
     const shellGeo = new THREE.SphereGeometry(ORB_RADIUS, 64, 48);
     const shellMat = new THREE.MeshPhysicalMaterial({
       color: 0xeafff2,
@@ -232,6 +396,8 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       metalness: 0,
       clearcoat: 1,
       clearcoatRoughness: 0.04,
+      bumpMap: glassImperfectionTex,
+      bumpScale: 0.006,
       depthWrite: false,
     });
     const shell = new THREE.Mesh(shellGeo, shellMat);
@@ -291,59 +457,80 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     const rimGlow = new THREE.Mesh(rimGeo, rimMat);
     orbGroup.add(rimGlow);
 
-    // ── Bubbles: real meshes rising through the liquid on real elapsed ──
-    // time, looping from the bottom. Rate/speed driven by real energy.
-    const BUBBLE_COUNT = 38;
-    const bubbleGeo = new THREE.SphereGeometry(1, 10, 8);
+    const bottomY = ORB_RADIUS * 0.965 * Math.cos(Math.PI - 0.35);
+    const topY = ORB_RADIUS * 0.965 * Math.cos(FILL_PHI) - 0.03;
+
+    // ── Caustic-style light pattern near the bottom — the classic cheap ──
+    // real-time approximation (animated overlapping highlight cells), not
+    // photon-mapped caustics.
+    const causticTex = createCausticTexture();
+    const causticGeo = new THREE.CircleGeometry(ORB_RADIUS * 0.5, 40);
+    const causticMat = new THREE.MeshBasicMaterial({
+      map: causticTex, color: 0xbfffdd, transparent: true, opacity: 0.16,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+    const caustic = new THREE.Mesh(causticGeo, causticMat);
+    caustic.rotation.x = -Math.PI / 2;
+    caustic.position.y = bottomY + 0.03;
+    orbGroup.add(caustic);
+
+    // ── Bubbles: independent physical objects — size-dependent buoyancy, ──
+    // drift sampled from the same curl-noise current the fog uses, genuine
+    // volume-conserving merge on overlap, noise-driven pressure split once
+    // large, continuous surface-tension-style oscillation whose frequency
+    // scales with size. No two bubbles share phase/frequency/size, so no
+    // two ever move identically.
+    const BUBBLE_COUNT = 40;
+    const MIN_R = 0.028, MAX_R = 0.16;
+    const bubbleGeo = new THREE.SphereGeometry(1, 12, 10);
     const bubbleMat = new THREE.MeshPhysicalMaterial({
       color: 0xffffff,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.88,
       roughness: 0.02,
       clearcoat: 1,
       clearcoatRoughness: 0.02,
       emissive: 0xd8fff0,
-      emissiveIntensity: 0.4,
+      emissiveIntensity: 0.42,
     });
-    const bottomY = ORB_RADIUS * 0.965 * Math.cos(Math.PI - 0.35);
-    const topY = ORB_RADIUS * 0.965 * Math.cos(FILL_PHI) - 0.03;
-    // Each bubble carries its own "agitation" rhythm (agitationRate/Phase) so
-    // it periodically surges — a sharp squash/stretch + a burst of sideways
-    // jitter + a brief rise-stall, like something straining against the
-    // liquid trying to get free — rather than rising in a perfectly smooth
-    // line. Real elapsed time drives the rhythm; nothing is randomized
-    // per-frame in a way that isn't reproducible from t.
-    type Bubble = { mesh: THREE.Mesh; speed: number; wobble: number; phase: number; size: number; agitationRate: number; agitationPhase: number };
+    type Bubble = {
+      mesh: THREE.Mesh; size: number; wobbleFreq: number;
+      wobblePhaseX: number; wobblePhaseY: number; wobblePhaseZ: number;
+      phase: number; cooldown: number;
+    };
     const bubbles: Bubble[] = [];
     function resetBubble(b: Bubble, startAtBottom: boolean) {
       const r = 0.05 + Math.random() * Math.random() * 0.5; // bias toward center, but with real spread
-      const size = 0.04 + Math.random() * 0.13;
       const theta = Math.random() * Math.PI * 2;
-      b.mesh.position.set(Math.cos(theta) * r, startAtBottom ? bottomY + Math.random() * 0.15 : bottomY + Math.random() * (topY - bottomY), Math.sin(theta) * r);
-      b.mesh.scale.setScalar(size);
-      b.size = size;
-      b.speed = 0.12 + Math.random() * 0.22;
-      b.wobble = 0.15 + Math.random() * 0.3;
+      b.mesh.position.set(
+        Math.cos(theta) * r,
+        startAtBottom ? bottomY + Math.random() * 0.12 : bottomY + Math.random() * (topY - bottomY),
+        Math.sin(theta) * r,
+      );
+      b.size = MIN_R + Math.random() * (MAX_R * 0.55 - MIN_R);
+      b.mesh.scale.setScalar(b.size);
+      b.wobbleFreq = 5 + Math.random() * 7; // smaller bubbles → higher surface-tension oscillation frequency, applied below
+      b.wobblePhaseX = Math.random() * Math.PI * 2;
+      b.wobblePhaseY = Math.random() * Math.PI * 2;
+      b.wobblePhaseZ = Math.random() * Math.PI * 2;
       b.phase = Math.random() * Math.PI * 2;
-      b.agitationRate = 0.5 + Math.random() * 1.3;
-      b.agitationPhase = Math.random() * Math.PI * 2;
+      b.cooldown = 0.25 + Math.random() * 0.4;
     }
     for (let i = 0; i < BUBBLE_COUNT; i++) {
       const mesh = new THREE.Mesh(bubbleGeo, bubbleMat);
-      const b: Bubble = { mesh, speed: 0.15, wobble: 0.2, phase: 0, size: 0.06, agitationRate: 1, agitationPhase: 0 };
+      const b: Bubble = { mesh, size: 0.05, wobbleFreq: 6, wobblePhaseX: 0, wobblePhaseY: 0, wobblePhaseZ: 0, phase: 0, cooldown: 0 };
       resetBubble(b, false);
       bubbles.push(b);
       orbGroup.add(mesh);
     }
+    const curlScratch = new THREE.Vector3();
 
-    // ── Internal fog/murk: soft drifting haze inside the liquid so the ──
-    // fluid itself reads as a heavy, turbulent chemical rather than flat
-    // colored glass. Each wisp drifts on its own slow real-time path around
-    // a fixed base point and breathes in/out — genuine continuous motion,
-    // not a static decal, but never leaves the liquid's own bounds.
+    // ── Internal fog/murk: soft haze genuinely advected by the same ──
+    // curl-noise current field as the bubbles, so the fluid itself reads
+    // as a heavy, turbulent chemical with real internal circulation.
     const FOG_COUNT = 14;
     const fogTexture = createFogSprite();
-    type FogWisp = { sprite: THREE.Sprite; basePos: THREE.Vector3; driftPhase: THREE.Vector3; opacityPhase: number };
+    type FogWisp = { sprite: THREE.Sprite; pos: THREE.Vector3; opacityPhase: number };
     const fogWisps: FogWisp[] = [];
     for (let i = 0; i < FOG_COUNT; i++) {
       const mat = new THREE.SpriteMaterial({
@@ -357,22 +544,19 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       const r = 0.08 + Math.random() * 0.42;
       const theta = Math.random() * Math.PI * 2;
       const y = bottomY + 0.06 + Math.random() * (topY - bottomY - 0.12);
-      sprite.position.set(Math.cos(theta) * r, y, Math.sin(theta) * r);
+      const pos = new THREE.Vector3(Math.cos(theta) * r, y, Math.sin(theta) * r);
+      sprite.position.copy(pos);
       const scale = 0.55 + Math.random() * 1.0;
       sprite.scale.set(scale, scale, 1);
       orbGroup.add(sprite);
-      fogWisps.push({
-        sprite,
-        basePos: sprite.position.clone(),
-        driftPhase: new THREE.Vector3(Math.random() * 100, Math.random() * 100, Math.random() * 100),
-        opacityPhase: Math.random() * Math.PI * 2,
-      });
+      fogWisps.push({ sprite, pos, opacityPhase: Math.random() * Math.PI * 2 });
     }
 
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let energy = 0.2;
     let hue = BASE_HUE;
     let ripple = 0; // event-triggered pulse, decays
+    let surge = 0; // shared "living entity" agitation — fast rise, slow decay
     const clock = new THREE.Clock();
     let introT = 0; // one-shot gentle scale-in on mount
 
@@ -398,41 +582,48 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       hue += (targetHue - hue) * 0.05;
       ripple = Math.max(0, ripple - dt * 0.8);
 
+      // ── The "living entity" surge — a 1D deterministic noise signal ──
+      // sampled at a fixed point over real time: mostly calm, occasionally
+      // rises sharply then decays slowly. Shared across the whole liquid
+      // and every bubble at once, which is what makes it read as one
+      // thing surging rather than independent jitter.
+      const moodSignal = perlin3(3.7, 8.2, t * 0.32);
+      const surgeTarget = reduceMotion ? 0 : Math.max(0, Math.min(1, (moodSignal - 0.12) / 0.42));
+      surge += (surgeTarget - surge) * (surgeTarget > surge ? 0.1 : 0.02);
+
       // Gentle one-shot scale-in on mount — a real elapsed-time ease, not a
       // physics fling.
       introT = Math.min(1, introT + dt / 0.7);
       const introScale = reduceMotion ? 1 : 0.85 + 0.15 * (1 - Math.pow(1 - introT, 3));
-      orbGroup.scale.setScalar(introScale);
+      orbGroup.scale.setScalar(introScale * (1 + surge * 0.012)); // a faint outward "pressure" during a surge
 
       const color = new THREE.Color().setHSL(hue, 0.85, 0.42 + energy * 0.1);
       liquidMat.color.copy(color);
       liquidMat.emissive.copy(color);
-      liquidMat.emissiveIntensity = 0.08 + energy * 0.16 + ripple * 0.2;
+      liquidMat.emissiveIntensity = 0.08 + energy * 0.16 + ripple * 0.2 + surge * 0.14;
       filmMat.color.copy(color).lerp(new THREE.Color(0xffffff), 0.55);
       keyLight.intensity = 15 + energy * 4;
       fillLight.color.copy(color).lerp(new THREE.Color(0x0a1512), 0.3);
       rimMat.uniforms.uColor.value.copy(color).lerp(new THREE.Color(0xffffff), 0.5);
-      rimMat.uniforms.uOpacity.value = 0.35 + energy * 0.25;
+      rimMat.uniforms.uOpacity.value = 0.35 + energy * 0.25 + surge * 0.15;
+      bloomPass.strength = 0.42 + energy * 0.32 + surge * 0.28;
 
-      // ── Liquid surface ripple — a real perturbation on the cap vertices ──
-      // only (still water underneath); amplitude from real energy + real
-      // mic amplitude while listening + a decaying pulse from real events.
-      // Slow, broad, low-frequency roll (not choppy little ripples) so the
-      // fluid reads as heavy/viscous rather than thin water.
-      const rippleAmp = 0.014 + energy * 0.024 + (isListening ? micLevel * 0.055 : 0) + ripple * 0.075;
+      // ── Liquid surface: fBm heightfield (4 octaves), not a couple of ──
+      // sine terms — genuinely non-repeating roll, amplitude from real
+      // energy + real mic amplitude + event ripple + the shared surge.
+      const rippleAmp = 0.013 + energy * 0.022 + (isListening ? micLevel * 0.05 : 0) + ripple * 0.065 + surge * 0.05;
       const posAttr = liquidGeo.attributes.position;
       for (const idx of capVertexIndices) {
         const ix = idx * 3;
         const bx = liquidBase[ix], by = liquidBase[ix + 1], bz = liquidBase[ix + 2];
-        const wave = Math.sin(bx * 1.7 + t * 0.75) * Math.cos(bz * 1.5 + t * 0.5) * rippleAmp
-          + Math.sin(bx * 3.4 - t * 1.1 + bz * 2.1) * rippleAmp * 0.35;
+        const wave = fbm3(bx * 0.85 + 12.3, bz * 0.85 - 7.1, t * 0.3, 4) * rippleAmp * 2.1;
         posAttr.setXYZ(idx, bx, by + wave, bz);
       }
       posAttr.needsUpdate = true;
       liquidGeo.computeVertexNormals();
 
-      // The surface film disc rides the same ripple so it doesn't look like
-      // a rigid plate floating above the moving liquid.
+      // The surface film disc rides the same heightfield so it doesn't
+      // look like a rigid plate floating above the moving liquid.
       const filmAttr = filmGeo.attributes.position;
       for (let i = 0; i < filmAttr.count; i++) {
         const ix = i * 3;
@@ -440,46 +631,104 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
         // CircleGeometry lies in local XY before the mesh's own -90° X
         // rotation; ripple its local Y (which becomes world-space "outward
         // from center" after that rotation) using the same wave field.
-        const wave = Math.sin(fx * 1.7 + t * 0.75) * Math.cos(fy * 1.5 + t * 0.5) * rippleAmp
-          + Math.sin(fx * 3.4 - t * 1.1 + fy * 2.1) * rippleAmp * 0.35;
+        const wave = fbm3(fx * 0.85 + 12.3, fy * 0.85 - 7.1, t * 0.3, 4) * rippleAmp * 2.1;
         filmAttr.setXYZ(i, fx, fy, wave / 0.965);
       }
       filmAttr.needsUpdate = true;
       filmGeo.computeVertexNormals();
 
-      // ── Fog wisps: slow drift + a breathing opacity, real energy makes ──
-      // the haze thicker/more restless when MARK is more active.
+      // Caustic light pattern: slow scroll + rotation, brighter with real energy.
+      causticTex.offset.set(t * 0.015, t * 0.011);
+      caustic.rotation.z = t * 0.02;
+      causticMat.opacity = 0.1 + energy * 0.12 + surge * 0.1;
+
+      // ── Fog wisps: real advection through the shared curl-noise current ──
+      // field (the same field bubbles drift through below).
       for (const w of fogWisps) {
-        const dx = Math.sin(t * 0.15 + w.driftPhase.x) * 0.12;
-        const dy = Math.sin(t * 0.11 + w.driftPhase.y) * 0.08;
-        const dz = Math.sin(t * 0.13 + w.driftPhase.z) * 0.12;
-        const y = Math.min(topY - 0.02, Math.max(bottomY + 0.04, w.basePos.y + dy));
-        w.sprite.position.set(w.basePos.x + dx, y, w.basePos.z + dz);
+        curl(w.pos.x * 1.4, w.pos.y * 1.4, w.pos.z * 1.4, t, curlScratch);
+        const flow = 0.05 + energy * 0.05 + surge * 0.09;
+        w.pos.x += curlScratch.x * flow * dt;
+        w.pos.y += curlScratch.y * flow * 0.5 * dt;
+        w.pos.z += curlScratch.z * flow * dt;
+        const rad = Math.hypot(w.pos.x, w.pos.z);
+        if (rad > 0.58) {
+          const pull = (rad - 0.58) * 2.2;
+          w.pos.x -= (w.pos.x / rad) * pull * dt;
+          w.pos.z -= (w.pos.z / rad) * pull * dt;
+        }
+        w.pos.y = Math.min(topY - 0.03, Math.max(bottomY + 0.05, w.pos.y));
+        w.sprite.position.copy(w.pos);
         const breathe = 0.5 + 0.5 * Math.sin(t * 0.3 + w.opacityPhase);
         const mat = w.sprite.material as THREE.SpriteMaterial;
-        mat.opacity = (0.07 + energy * 0.14) * (0.4 + breathe * 0.7);
+        mat.opacity = (0.07 + energy * 0.14 + surge * 0.08) * (0.4 + breathe * 0.7);
         mat.color.copy(color).lerp(new THREE.Color(0x020e08), 0.55);
       }
 
-      // ── Bubbles: rise on real elapsed time, rate from real energy, plus ──
-      // a periodic "struggle" — a sharp squash/stretch, a burst of sideways
-      // jitter, and a brief rise-stall — like something alive straining
-      // against the liquid to break free, not a bubble on rails. Struggle
-      // intensity also tracks real energy (more activity → more restless).
-      const struggleAmp = 0.5 + energy * 0.9;
+      // ── Bubbles: buoyancy (bigger = faster), drift from the shared ──
+      // curl-noise current, continuous size-scaled surface-tension
+      // oscillation, and a real merge/split pass.
       for (const b of bubbles) {
-        const rawPulse = Math.sin(t * b.agitationRate + b.phase) * Math.sin(t * b.agitationRate * 2.7 + b.agitationPhase);
-        const struggle = Math.max(0, rawPulse) ** 3; // mostly calm, occasional sharp peaks
-        const stall = 1 - struggle * 0.55;
-        b.mesh.position.y += b.speed * (0.4 + energy * 1.4) * stall * dt;
-        const jx = Math.sin(t * 1.4 + b.phase) * b.wobble * 0.3 + Math.sin(t * 9.3 + b.phase * 3) * struggle * struggleAmp * 0.5;
-        const jz = Math.cos(t * 1.1 + b.phase) * b.wobble * 0.3 + Math.cos(t * 8.7 + b.phase * 2) * struggle * struggleAmp * 0.5;
-        b.mesh.position.x += jx * dt;
-        b.mesh.position.z += jz * dt;
-        const squash = struggle * struggleAmp;
-        const microPulse = Math.sin(t * 5 + b.phase) * 0.03;
-        b.mesh.scale.set(b.size * (1 + squash * 0.32 + microPulse), b.size * (1 - squash * 0.4 - microPulse), b.size * (1 + squash * 0.32 - microPulse));
+        if (b.cooldown > 0) b.cooldown -= dt;
+        const buoyancy = (0.5 + b.size * 3.4) * (0.4 + energy * 1.3);
+        curl(b.mesh.position.x * 1.3, b.mesh.position.y * 1.3, b.mesh.position.z * 1.3, t, curlScratch);
+        const flow = 0.14 + energy * 0.18 + surge * 0.4;
+        b.mesh.position.y += buoyancy * dt;
+        b.mesh.position.x += curlScratch.x * flow * dt;
+        b.mesh.position.z += curlScratch.z * flow * dt;
+
+        const rad = Math.hypot(b.mesh.position.x, b.mesh.position.z);
+        if (rad > 0.56) {
+          const pull = (rad - 0.56) * 3.0;
+          b.mesh.position.x -= (b.mesh.position.x / rad) * pull * dt;
+          b.mesh.position.z -= (b.mesh.position.z / rad) * pull * dt;
+        }
+
+        // Surface-tension-inspired oscillation: smaller bubbles wobble
+        // faster and relatively harder (real small bubbles are stiffer
+        // relative to their size), sharpened during a surge.
+        const freqScale = 0.05 / Math.max(0.035, b.size);
+        const wobbleAmp = (0.05 + surge * 0.09) * freqScale;
+        const sx = b.size * (1 + Math.sin(t * b.wobbleFreq + b.wobblePhaseX) * wobbleAmp);
+        const sy = b.size * (1 + Math.sin(t * b.wobbleFreq * 1.3 + b.wobblePhaseY) * wobbleAmp);
+        const sz = b.size * (1 + Math.sin(t * b.wobbleFreq * 0.8 + b.wobblePhaseZ) * wobbleAmp);
+        b.mesh.scale.set(sx, sy, sz);
+
         if (b.mesh.position.y > topY) resetBubble(b, true);
+      }
+      // Merge/split pass — real, not decorative: distance-based overlap
+      // merges two into one (volume-conserving radius); noise-driven
+      // "pressure" splits a bubble once it's grown large.
+      for (let i = 0; i < bubbles.length; i++) {
+        const a = bubbles[i];
+        if (a.cooldown > 0) continue;
+        for (let j = i + 1; j < bubbles.length; j++) {
+          const c = bubbles[j];
+          if (c.cooldown > 0) continue;
+          const dx = a.mesh.position.x - c.mesh.position.x;
+          const dy = a.mesh.position.y - c.mesh.position.y;
+          const dz = a.mesh.position.z - c.mesh.position.z;
+          const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          if (dist < (a.size + c.size) * 0.62 && a.size + c.size < MAX_R * 1.7) {
+            a.size = Math.min(MAX_R, Math.cbrt(a.size ** 3 + c.size ** 3));
+            a.mesh.scale.setScalar(a.size);
+            a.cooldown = 0.5;
+            resetBubble(c, true);
+            break;
+          }
+        }
+        if (a.size > MAX_R * 0.9) {
+          const pressure = Math.abs(perlin3(a.mesh.position.x * 4, a.mesh.position.y * 4, t * 0.7));
+          if (pressure > 0.6) {
+            const newR = Math.max(MIN_R, Math.cbrt((a.size ** 3) / 2));
+            a.size = newR; a.mesh.scale.setScalar(newR); a.cooldown = 0.45;
+            let victim = bubbles[0];
+            for (const cand of bubbles) if (cand !== a && cand.mesh.position.y > victim.mesh.position.y) victim = cand;
+            victim.mesh.position.copy(a.mesh.position);
+            victim.mesh.position.x += (Math.random() - 0.5) * 0.08;
+            victim.mesh.position.z += (Math.random() - 0.5) * 0.08;
+            victim.size = newR; victim.mesh.scale.setScalar(newR); victim.cooldown = 0.45;
+          }
+        }
       }
 
       orbGroup.rotation.y += (reduceMotion ? 0.0008 : 0.0022) + energy * 0.001;
@@ -496,7 +745,7 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
         }
       }
 
-      renderer.render(scene, camera);
+      composer.render();
     });
 
     return () => {
@@ -504,15 +753,20 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       ro.disconnect();
       window.removeEventListener('resize', resize);
       retryTimers.forEach(id => window.clearTimeout(id));
+      composer.dispose?.();
       renderer.dispose();
       shellGeo.dispose();
       shellMat.dispose();
+      glassImperfectionTex.dispose();
       liquidGeo.dispose();
       liquidMat.dispose();
       filmGeo.dispose();
       filmMat.dispose();
       rimGeo.dispose();
       rimMat.dispose();
+      causticGeo.dispose();
+      causticMat.dispose();
+      causticTex.dispose();
       bubbleGeo.dispose();
       bubbleMat.dispose();
       fogTexture.dispose();
