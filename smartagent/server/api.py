@@ -1875,10 +1875,33 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
         _state.running = False
 
 
+# ---------------------------------------------------------------------------
+# Single active voice WebSocket — only one browser tab may stream audio at a
+# time.  A second /ws/voice connection (tab dup, HMR reconnect, mobile tab
+# open in background) closes the first so we never have two VAD sessions
+# simultaneously feeding transcripts to /voice/message.
+# ---------------------------------------------------------------------------
+
+_active_voice_ws_lock: asyncio.Lock | None = None
+
+def _get_voice_ws_lock() -> asyncio.Lock:
+    global _active_voice_ws_lock
+    if _active_voice_ws_lock is None:
+        _active_voice_ws_lock = asyncio.Lock()
+    return _active_voice_ws_lock
+
+_active_voice_ws: "WebSocket | None" = None
+
+
 @router.websocket("/ws/voice")
 async def voice_websocket(ws: WebSocket) -> None:
     """
     Real-time voice I/O WebSocket.
+
+    Only ONE voice WebSocket is active at a time.  When a new browser tab
+    (or reconnect) opens /ws/voice, the previous connection is closed
+    immediately so there are never two VAD sessions both streaming transcripts
+    to /voice/message simultaneously.
 
     Inbound (browser → server):
       Binary frames  — raw PCM16 mic audio → VoiceSession (VAD + Whisper)
@@ -1897,12 +1920,29 @@ async def voice_websocket(ws: WebSocket) -> None:
     sending the first audio byte — the browser's tts_start/tts_end frames are
     a secondary safety net, not the primary mute signal.
     """
+    # global declaration must appear at function scope before any use.
+    global _active_voice_ws  # noqa: PLW0603
+
     from smartagent.server.voice_pipeline import (
         VoiceSession, register_session, unregister_session,
     )
 
     await ws.accept()
     workspace: str = ws.query_params.get("workspace", "") or _state.workspace or ""
+
+    # ── Evict any existing voice session ──────────────────────────────────────
+    # Close the previous WebSocket (if any) before registering this one.
+    # This ensures only one tab is streaming audio at a time.
+    async with _get_voice_ws_lock():
+        old_ws = _active_voice_ws
+        _active_voice_ws = ws
+    if old_ws is not None and old_ws is not ws:
+        try:
+            await old_ws.close(code=1001, reason="replaced by new voice connection")
+        except Exception:
+            pass
+        logger.warning("voice-ws: evicted previous session — only one voice tab allowed")
+
     logger.info("MARK STATE voice-ws  connected  workspace=%r", workspace)
 
     try:
@@ -1981,6 +2021,10 @@ async def voice_websocket(ws: WebSocket) -> None:
     finally:
         unregister_session(session)
         session.reset()
+        # Clear the global ref only if it still points at THIS connection.
+        async with _get_voice_ws_lock():
+            if _active_voice_ws is ws:
+                _active_voice_ws = None
         logger.info("MARK STATE voice-ws  disconnected")
 
 
@@ -2223,8 +2267,14 @@ async def _idle_inspector_loop() -> None:
                             "payload":   sug,
                             "timestamp": _now_iso(),
                         })
-                    await _broadcast_idle_chat_message(ws_path, new_suggestions)
-                    # Record that these were reported — won't show again for 24 h
+                    # Record that these were reported — won't show again for 24 h.
+                    # NOTE: _broadcast_idle_chat_message is intentionally NOT called
+                    # here.  Unsolicited LLM-generated chat messages appearing in the
+                    # conversation thread while the user hasn't said anything feel like
+                    # ghost traffic and break voice sessions (echo → transcript →
+                    # another LLM call).  Suggestions are surfaced only in the passive
+                    # Idle Suggestions panel (IDLE_SUGGESTION events above), never as
+                    # a MARK_PROACTIVE message that interrupts the conversation.
                     conversation_store.mark_suggestions_reported(ws_path, new_suggestions)
                     _last_notified = _t.time()
                 else:

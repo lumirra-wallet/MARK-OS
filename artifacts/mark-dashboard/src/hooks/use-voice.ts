@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMarkStore } from '@/store/markStore';
 
 /**
- * Real voice I/O for MARK — WebSocket + ScriptProcessorNode mic transport.
+ * Real voice I/O for MARK — always active from page load.
+ *
+ * Design principle: MARK is ALWAYS listening, like a phone call that starts
+ * the moment you open the tab.  The mic connects automatically on mount
+ * (after the browser grants permission).  The toggle button mutes/unmutes
+ * rather than enabling/disabling.
  *
  * Audio pipeline
  * ──────────────
@@ -52,9 +57,15 @@ import { useMarkStore } from '@/store/markStore';
  *   4. Server POST_SPEECH holdoff (900ms, sample-accurate) — no transcripts
  *      after TTS even if residual echo sneaks through
  *   5. Backend Whisper no_speech_prob filter — rejects non-speech segments
+ *
+ * Single-connection guarantee
+ * ───────────────────────────
+ *   The server evicts any existing /ws/voice when a new one connects, so
+ *   only one tab sends audio at a time.  The frontend mirrors this: if a
+ *   connect is in flight it is aborted before opening a new one.
  */
 
-// ── PCM helpers ────────────────────────────────────────────────────────────
+// ── PCM helpers ─────────────────────────────────────────────────────────────
 
 function resampleTo16k(floatPCM: Float32Array, srcRate: number): Float32Array {
   if (srcRate === 16000) return floatPCM;
@@ -81,7 +92,7 @@ function floatTo16BitPCM(floatPCM: Float32Array): ArrayBuffer {
   return buf;
 }
 
-// ── Hook ───────────────────────────────────────────────────────────────────
+// ── Hook ────────────────────────────────────────────────────────────────────
 
 export function useVoice() {
   const {
@@ -89,7 +100,9 @@ export function useVoice() {
     isMarkSpeaking, speechEngineUnavailable, stopMarkSpeech,
   } = useMarkStore();
 
-  const [voiceEnabled,      setVoiceEnabled]     = useState(false);
+  // voiceEnabled = mic is live and transmitting (not muted by the user).
+  // Starts TRUE — MARK always listens from page load.
+  const [voiceEnabled,      setVoiceEnabled]     = useState(true);
   const [isListening,       setIsListening]       = useState(false);
   const [micLevel,          setMicLevel]          = useState(0);
   const [interimTranscript, setInterimTranscript] = useState('');
@@ -99,16 +112,19 @@ export function useVoice() {
     typeof AudioContext !== 'undefined',
   );
 
-  // ── Refs (stable across renders, no re-render cost) ───────────────────────
+  // ── Refs (stable across renders, no re-render cost) ──────────────────────
   const wsRef              = useRef<WebSocket | null>(null);
   const audioCtxRef        = useRef<AudioContext | null>(null);
   const processorRef       = useRef<ScriptProcessorNode | null>(null);
   const analyserRef        = useRef<AnalyserNode | null>(null);
   const streamRef          = useRef<MediaStream | null>(null);
   const rafRef             = useRef(0);
-  const enabledRef         = useRef(false);
 
-  // micMutedRef — true while MARK is speaking; stops PCM frames from being sent.
+  // enabledRef — mirrors voiceEnabled in a ref so closures stay current.
+  // Starts TRUE to match the initial useState(true).
+  const enabledRef         = useRef(true);
+
+  // micMutedRef — true while MARK is speaking; stops PCM frames being sent.
   // Updated synchronously via Zustand subscribe (below), never via useEffect.
   const micMutedRef        = useRef(false);
 
@@ -116,6 +132,10 @@ export function useVoice() {
   const isRunningRef       = useRef(false);
   const reconnectTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef  = useRef(1000);
+
+  // autoStartedRef — ensures we only auto-connect once on mount, even if
+  // connectVoiceSocket identity changes (e.g. workspace change).
+  const autoStartedRef     = useRef(false);
 
   // ── Utterance accumulator (frontend safety net) ───────────────────────────
   // The server already stitches fragments with a 2-second window, but if the
@@ -135,10 +155,6 @@ export function useVoice() {
   // cycle delay.  This means micMutedRef flips the moment isMarkSpeaking
   // changes, so the VERY NEXT onaudioprocess invocation (~85ms later) already
   // sees the correct value.
-  //
-  // We use the plain two-argument subscribe(listener) form (state + prevState)
-  // so we don't require the subscribeWithSelector middleware.  We compare the
-  // scalar ourselves and bail early when it hasn't changed.
   useEffect(() => {
     return useMarkStore.subscribe((state, prevState) => {
       const speaking = state.isMarkSpeaking;
@@ -149,23 +165,14 @@ export function useVoice() {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         if (speaking) {
           // Secondary/safety-net mute signal to the server.
-          // The primary mute already happened inside speech_runtime before
-          // the first audio byte — this is belt-and-suspenders.
           wsRef.current.send(JSON.stringify({ type: 'tts_start' }));
         } else {
-          // Secondary unmute signal.  Server's VoiceSession already started
-          // its 900ms sample-accurate holdoff via speech_runtime.unmute_active_session().
+          // Secondary unmute signal.
           wsRef.current.send(JSON.stringify({ type: 'tts_end' }));
         }
       }
     });
   }, []);
-
-  // NOTE: micMutedRef is intentionally NOT synced via useEffect — the
-  // synchronous Zustand subscribe above already handles it in the same tick as
-  // the store change.  A second useEffect path here would create a render-cycle
-  // race where the ref could briefly hold the wrong value between subscribe
-  // firing and the effect running, letting a PCM frame slip through.
 
   // ── Mic level polling ─────────────────────────────────────────────────────
   const pollLevel = useCallback(() => {
@@ -205,9 +212,12 @@ export function useVoice() {
     setIsListening(false);
   }, []);
 
-  // ── WebSocket voice connection ─────────────────────────────────────────────
+  // ── WebSocket voice connection ──────────────────────────────────────────
   const connectVoiceSocket = useCallback(() => {
+    // Only connect when enabled (not muted by user).
     if (!enabledRef.current) return;
+    // Don't stack connections — if one is already open or connecting, bail.
+    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) return;
 
     const url = buildWsUrl();
     const ws  = new WebSocket(url);
@@ -218,52 +228,52 @@ export function useVoice() {
       if (!enabledRef.current) { ws.close(); return; }
       reconnectDelayRef.current = 1000;   // reset backoff on successful open
       // Clear any transcript that was queued before the reconnect.
-      // If MARK was speaking when the WS dropped, the VAD may have transcribed
-      // his echo and queued it — sending it after RunCompleted would restart
-      // the loop on the next run completion.
       pendingMsgRef.current = null;
+      accumulatedRef.current = '';
 
-      // Acquire mic
+      // ── Acquire mic ────────────────────────────────────────────────────
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation:   true,
-            noiseSuppression:   true,
-            autoGainControl:    true,
-            // Hint to Chrome's AEC that this is a voice call (not music capture).
-            // Makes browser AEC more aggressive about suppressing speaker echo.
-            googEchoCancellation:      true,
-            googNoiseSuppression:      true,
-            googAutoGainControl:       true,
-            googHighpassFilter:        true,
-            googTypingNoiseDetection:  true,
+            echoCancellation:         true,
+            noiseSuppression:         true,
+            autoGainControl:          true,
+            // Chrome-specific hints for more aggressive AEC in voice-call mode
+            googEchoCancellation:     true,
+            googNoiseSuppression:     true,
+            googAutoGainControl:      true,
+            googHighpassFilter:       true,
+            googTypingNoiseDetection: true,
           } as MediaTrackConstraints,
         });
       } catch (err) {
         console.warn('[MARK voice] mic unavailable:', err);
         setIsListening(false);
+        // Connection succeeded but mic failed — don't close the WS; it will
+        // reconnect.  Mark as not listening so the UI shows the correct state.
         ws.close();
         return;
       }
       streamRef.current = stream;
 
-      // Audio graph: source → analyser → processor → silence sink
+      // ── Audio graph: source → analyser → processor → silence sink ──────
       const ctx = new AudioContext();
       audioCtxRef.current = ctx;
       const source    = ctx.createMediaStreamSource(stream);
       const analyser  = ctx.createAnalyser();
       analyser.fftSize = 256;
-      // 4096-sample buffer = ~85ms at 48kHz — fine granularity for voice
+      // 4096-sample buffer ≈ 85 ms at 48 kHz — fine granularity for voice
       const processor = ctx.createScriptProcessor(4096, 1, 1);
       const srcRate   = ctx.sampleRate;
 
       processor.onaudioprocess = (ev: AudioProcessingEvent) => {
-        // ── Client-side mic gate ─────────────────────────────────────────
-        // Stop sending PCM while MARK is speaking.  This is a secondary echo
-        // cancellation layer — the server's proactive mute is the primary one.
-        // micMutedRef is updated synchronously via Zustand subscribe above.
+        // ── Client-side mic gate ────────────────────────────────────────
+        // Stop sending PCM while MARK is speaking OR while the user has
+        // muted (enabledRef = false).  This is the secondary echo
+        // cancellation layer; the server's proactive mute is the primary.
         if (micMutedRef.current) return;
+        if (!enabledRef.current) return;
         if (ws.readyState !== WebSocket.OPEN) return;
 
         const pcm16k = resampleTo16k(ev.inputBuffer.getChannelData(0), srcRate);
@@ -294,12 +304,9 @@ export function useVoice() {
       switch (msg.type) {
         case 'speech_start':
           // User started speaking (or barged in) — stop MARK's audio NOW.
-          // The server's VAD fired this; the mic gate will open automatically
-          // via the isMarkSpeaking → false path in the Zustand subscribe above.
           stopMarkSpeech();
           setInterimTranscript('');
-          // Cancel any pending debounce — user is still talking.
-          // We keep accumulatedRef so the next "final" can append to it.
+          // Cancel any pending stitch debounce — user is still talking.
           if (stitchTimerRef.current) {
             clearTimeout(stitchTimerRef.current);
             stitchTimerRef.current = null;
@@ -313,8 +320,8 @@ export function useVoice() {
         case 'final':
           setInterimTranscript('');
           if (msg.text) {
-            // Accumulate into the stitch buffer — the server already stitches
-            // fragments with a 2-second window, but handle edge cases here too.
+            // Accumulate — the server stitches with a 2 s window, but if
+            // it sends rapid finals (edge case) we collapse them here too.
             accumulatedRef.current = accumulatedRef.current
               ? accumulatedRef.current + ' ' + msg.text
               : msg.text;
@@ -327,13 +334,11 @@ export function useVoice() {
               accumulatedRef.current = '';
               if (!fullText) return;
               if (isRunningRef.current) {
-                // MARK is running a task — queue; flush when run completes.
+                // MARK is running — queue; flush when run completes.
                 pendingMsgRef.current = fullText;
               } else {
-                // Lock immediately — do NOT wait for the useEffect that syncs
-                // isRunningRef.current.  That effect runs after the next render,
-                // which means a second 'final' arriving in the same tick would
-                // still see isRunningRef.current = false and also send.
+                // Lock immediately — do NOT wait for the useEffect that
+                // syncs isRunningRef; that runs after the next render.
                 isRunningRef.current = true;
                 void sendVoiceMessage(fullText, workspace);
               }
@@ -346,7 +351,7 @@ export function useVoice() {
     ws.onclose = () => {
       stopMic();
       if (!enabledRef.current) return;
-      // Exponential back-off reconnect (cap at 30s)
+      // Exponential back-off reconnect (cap at 30 s)
       const delay = reconnectDelayRef.current;
       reconnectDelayRef.current = Math.min(delay * 2, 30_000);
       console.log(`[MARK voice] reconnecting in ${delay}ms`);
@@ -361,13 +366,12 @@ export function useVoice() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildWsUrl, pollLevel, sendVoiceMessage, stopMarkSpeech, stopMic, workspace]);
 
-  // ── Disconnect voice ──────────────────────────────────────────────────────
+  // ── Fully stop voice (no reconnect) ──────────────────────────────────────
   const disconnectVoice = useCallback(() => {
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
-    // Discard any pending stitch buffer — we're disconnecting, don't send it
     if (stitchTimerRef.current) {
       clearTimeout(stitchTimerRef.current);
       stitchTimerRef.current = null;
@@ -379,29 +383,51 @@ export function useVoice() {
     setInterimTranscript('');
   }, [stopMic]);
 
-  // ── Toggle voice on/off ────────────────────────────────────────────────────
+  // ── Toggle: mute/unmute the mic (voice stays connected to the server) ────
+  // When the user clicks "mute", we stop sending PCM frames but keep the WS
+  // open so the server session stays warm — no VAD re-init on unmute.
   const toggleVoice = useCallback(() => {
     setVoiceEnabled(v => {
       const next = !v;
       enabledRef.current = next;
       if (next) {
+        // Re-open mic if it was closed
+        stopMarkSpeech();
         connectVoiceSocket();
       } else {
-        disconnectVoice();
+        // Muted — stop mic capture + clear stitch buffer, keep WS alive
+        if (stitchTimerRef.current) {
+          clearTimeout(stitchTimerRef.current);
+          stitchTimerRef.current = null;
+        }
+        accumulatedRef.current = '';
+        pendingMsgRef.current  = null;
+        stopMic();
         stopMarkSpeech();
         if ('speechSynthesis' in window) window.speechSynthesis.cancel();
       }
       return next;
     });
-  }, [connectVoiceSocket, disconnectVoice, stopMarkSpeech]);
+  }, [connectVoiceSocket, stopMarkSpeech, stopMic]);
+
+  // ── Auto-start on mount ───────────────────────────────────────────────────
+  // MARK is always listening from the moment the page loads.  We request mic
+  // permission automatically rather than waiting for a manual toggle click.
+  useEffect(() => {
+    if (autoStartedRef.current || !supported) return;
+    autoStartedRef.current = true;
+    // enabledRef is already true (default); just kick off the connection.
+    connectVoiceSocket();
+  // connectVoiceSocket is stable enough for this mount-once effect.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supported]);
 
   // ── Flush queued message when run completes ───────────────────────────────
   useEffect(() => {
     if (!isRunning && pendingMsgRef.current && enabledRef.current) {
       const queued = pendingMsgRef.current;
       pendingMsgRef.current = null;
-      // Also cancel any stitch timer — the run completing is a clean boundary;
-      // the queued message is the authoritative text to send.
+      // Also cancel any stitch timer — the run completing is a clean boundary.
       if (stitchTimerRef.current) {
         clearTimeout(stitchTimerRef.current);
         stitchTimerRef.current = null;
@@ -414,6 +440,8 @@ export function useVoice() {
   }, [isRunning, sendVoiceMessage, workspace]);
 
   // ── Emergency fallback: browser TTS when Kokoro unavailable ──────────────
+  // IMPORTANT: mute the mic gate before speak() so MARK's browser voice
+  // cannot be picked up by the mic and transcribed back to MARK.
   const messages       = useMarkStore(s => s.messages);
   const lastFallbackId = useRef<string | null>(null);
   useEffect(() => {
@@ -429,7 +457,17 @@ export function useVoice() {
     if (!text) return;
     lastFallbackId.current = last.id;
     window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+    const utterance = new SpeechSynthesisUtterance(text);
+    // Mute mic before browser TTS starts so the speaker output cannot loop
+    // back into the mic → Whisper → /voice/message chain.
+    micMutedRef.current = true;
+    utterance.onend = () => {
+      // Restore mic gate after playback — small extra delay matches the
+      // server-side POST_SPEECH holdoff so room reverb settles first.
+      setTimeout(() => { micMutedRef.current = false; }, 1200);
+    };
+    utterance.onerror = () => { micMutedRef.current = false; };
+    window.speechSynthesis.speak(utterance);
   }, [messages, voiceEnabled, speechEngineUnavailable]);
 
   // ── Cleanup on unmount ────────────────────────────────────────────────────

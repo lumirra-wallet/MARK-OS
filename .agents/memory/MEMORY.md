@@ -29,3 +29,4 @@
 - [LiveKit Voice Transport M0-M6](livekit-voice-transport.md) — full WebRTC voice via self-hosted LiveKit; mark_supervisor replaces watchdog; SpeechPlayer removed; /livekit-rtc proxy; binary URL format changed at v1.8+.
 - [MARK Performance & Conversation Redesign](mark-performance-redesign.md) — git-HEAD analysis cache, reconnect detection, suggestion repeat-filtering, broader fast path, personality prompt fixes.
 - [Voice Echo Loop / Double Processing](voice-echo-loop.md) — 5 root causes for same-utterance processed twice; barge-in threshold, echo holdoff, tts_end holdoff restart, VAD silence threshold, isRunningRef race.
+- [Voice Always-Active Rebuild](voice-always-active.md) — ghost messages (idle inspector LLM calls removed), auto-start on mount, single-WS enforcement, browser TTS mic mute fix; global must be at function top.
