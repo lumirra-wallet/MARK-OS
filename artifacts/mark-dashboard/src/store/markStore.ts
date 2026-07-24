@@ -437,14 +437,32 @@ export const useMarkStore = create<MarkState>((set, get) => {
     serverUrl:        (() => {
       if (localStorage.getItem('mark_server_url')) return localStorage.getItem('mark_server_url')!;
       const viteUrl = import.meta.env.VITE_API_URL as string | undefined;
-      // Default to /mark-api so the WS URL resolves correctly in Replit's
-      // proxied preview — bare origin gives wss://domain/ws which misses the
-      // path prefix and every reconnect fails silently.
-      if (!viteUrl) return window.location.origin + '/mark-api';
-      // Relative path like /mark-api → prepend origin so WebSocket URLs work
-      if (viteUrl.startsWith('/')) return window.location.origin + viteUrl;
-      // Full URL like http://localhost:8000 → use directly
-      return viteUrl;
+      // An explicit build-time API URL always wins.
+      if (viteUrl) {
+        // Relative path like /mark-api → prepend origin so WebSocket URLs work.
+        if (viteUrl.startsWith('/')) return window.location.origin + viteUrl;
+        // Full URL like http://localhost:8000 → use directly.
+        return viteUrl;
+      }
+      // No build-time URL. In combined-server mode the Python backend serves
+      // THIS dashboard from its own origin, and its API lives at the ROOT of
+      // that origin (/status, /ws, /self-state, …) — so the bare origin is
+      // correct. That's the case for localhost and LAN (private) addresses.
+      // Only Replit's reverse-proxied preview mounts the API under /mark-api,
+      // so fall back to that prefix for public/remote hosts, where a bare
+      // origin would give wss://domain/ws and miss the prefix on every
+      // reconnect.
+      const host = window.location.hostname;
+      const isLocalOrLan =
+        host === 'localhost' ||
+        host === '127.0.0.1' ||
+        host === '[::1]' ||
+        /^10\./.test(host) ||
+        /^192\.168\./.test(host) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+      return isLocalOrLan
+        ? window.location.origin
+        : window.location.origin + '/mark-api';
     })(),
     connectionStatus: 'disconnected',
     running:          false,
