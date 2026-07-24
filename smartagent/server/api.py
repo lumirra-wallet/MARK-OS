@@ -1808,44 +1808,72 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
         agent = await _get_mark_agent(ws or None)
         agent.events = event_bus
 
-        def _do_voice_chat() -> str:
-            _voice_prefix = (
-                "You are having a live voice conversation. "
-                "Your reply will be spoken aloud by a text-to-speech voice, "
-                "so write the way you would SPEAK — natural sentences, no "
-                "markdown, no bullet points, no code fences unless the user "
-                "explicitly asks for code. Be warm, direct, and concise. "
-                "Skip openers like 'Certainly!' or 'Of course!'."
-            )
-            system_prompt = f"{_voice_prefix}\n\n{_MARK_CHAT_SYSTEM}"
-            ctx = conversation_store.get_cached_workspace_context(ws)
-            if ctx:
-                system_prompt += f"\n\nCurrent project: {_workspace_preamble(ctx)}"
-            history = conversation_store.recent_turns(ws)
-            return _stream_llm_response(
-                text, system_prompt, agent.model_manager, event_bus,
-                history=history,
-            )
+        # ── Cognition-first conversation (Brain Runtime owns this) ───────────
+        # The transcript is an OBSERVATION. It enters the Brain Runtime, which
+        # retrieves memory + owner model + knowledge, reads emotional state, and
+        # reasons — producing a semantic Decision. Only then does the Speech
+        # Planner turn that Decision into spoken words. MARK's cognition never
+        # depends on generated text; the words express the Decision, they are
+        # not the Decision. See smartagent/server/brain_runtime.py.
+        from smartagent.server.brain_runtime import (
+            brain_runtime, speech_planner, Observation,
+        )
+        observation = Observation(text=text, workspace=ws, source="voice")
 
         if _brain is not None:
             await _brain.thinking_started(text)
+
+        # Stage 1 — deliberate: transcript → Decision (no speech yet).
         _current_inference_task = asyncio.ensure_future(
-            asyncio.to_thread(_do_voice_chat)
+            asyncio.to_thread(brain_runtime.deliberate, observation, agent)
         )
         try:
-            reply_text = await _current_inference_task
+            decision = await _current_inference_task
         except asyncio.CancelledError:
-            reply_text = ""
+            decision = None
         finally:
             _current_inference_task = None
+
+        reply_text = ""
+        if decision is not None:
+            # Surface MARK's actual (semantic) response to the dashboard — the
+            # Decision itself, not just the words that will express it.
+            await connection_manager.broadcast({
+                "type":      "event",
+                "name":      "MarkDecision",
+                "payload":   decision.to_event(),
+                "timestamp": _now_iso(),
+            })
+
+            # Stage 2 — speech planning: Decision → spoken words (streamed to
+            # speech_runtime as STREAMING_TOKEN/source=mark → Kokoro).
+            _current_inference_task = asyncio.ensure_future(
+                asyncio.to_thread(
+                    speech_planner.render, decision, agent, event_bus,
+                    token_event=ServerEvents.STREAMING_TOKEN,
+                )
+            )
+            try:
+                reply_text = await _current_inference_task
+            except asyncio.CancelledError:
+                reply_text = ""
+            finally:
+                _current_inference_task = None
 
         if _brain is not None:
             await _brain.thinking_finished(
                 int((time.monotonic() - _state.start_time) * 1000)
             )
         speech_runtime.flush()
+        # Transcript persistence — for memory, search, accessibility, debugging.
+        # NOT the source of truth for the conversation (the Decision was).
         conversation_store.append_turn(ws, "user", text)
         conversation_store.append_turn(ws, "assistant", reply_text)
+        if decision is not None:
+            try:
+                brain_runtime.record_turn(observation, decision, reply_text)
+            except Exception:
+                pass
 
         await connection_manager.broadcast({
             "type":      "event",
