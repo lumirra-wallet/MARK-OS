@@ -259,7 +259,7 @@ function ApprovalBlock({
         <div>
           <p className="text-sm font-semibold text-amber-400">Approval Required</p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            MARK wants to <span className="text-foreground font-medium">{block.operation}</span>{' '}
+            Elena wants to <span className="text-foreground font-medium">{block.operation}</span>{' '}
             <code className="font-mono bg-muted px-1 rounded">{block.path.split('/').pop()}</code>
           </p>
           <p className="text-[10px] text-muted-foreground/60 font-mono mt-1">{block.path}</p>
@@ -383,7 +383,7 @@ function MarkBubble({ msg }: { msg: ChatMessage }) {
     >
       <div className="flex items-center gap-2 px-1 mb-1">
         <MarkAvatar state={msg.isActive ? 'speaking' : 'idle'} size={24} />
-        <span className="text-[11px] font-semibold text-accent">MARK</span>
+        <span className="text-[11px] font-semibold text-accent">Elena</span>
         <span className="text-[10px] text-muted-foreground">
           {format(new Date(msg.timestamp), 'HH:mm')}
         </span>
@@ -443,7 +443,7 @@ function Composer({ workspace }: { workspace: string }) {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={!workspace ? 'Set a workspace above first…' : 'Type a goal for MARK — e.g. "Build a Flask API"'}
+          placeholder={!workspace ? 'Set a workspace above first…' : 'Tell Elena what you need — e.g. "Build a Flask API"'}
           rows={1}
           className="flex-1 resize-none bg-transparent text-sm placeholder:text-muted-foreground/50 focus:outline-none min-h-[36px] max-h-[120px] py-2 leading-relaxed"
         />
@@ -654,9 +654,9 @@ export function ChatView() {
                 <Zap className="w-8 h-8 text-accent" />
               </div>
               <div>
-                <h2 className="font-semibold text-lg">Connecting to MARK…</h2>
+                <h2 className="font-semibold text-lg">Connecting to Elena…</h2>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Make sure the MARK server is running on{' '}
+                  Make sure the Elena server is running on{' '}
                   <code className="font-mono text-xs bg-muted px-1 rounded">
                     {useMarkStore.getState().serverUrl}
                   </code>

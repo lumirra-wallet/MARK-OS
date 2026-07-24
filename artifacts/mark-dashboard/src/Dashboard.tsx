@@ -243,10 +243,10 @@ export default function Dashboard() {
             <button
               onClick={() => setView('home')}
               className="flex items-center gap-1.5 shrink-0 text-xs font-mono bg-muted/40 hover:bg-muted/60 px-2.5 py-1.5 rounded border border-border/40 transition-colors"
-              title="Back to MARK"
+              title="Back to Elena"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">MARK</span>
+              <span className="hidden sm:inline">Elena</span>
             </button>
           )}
           <div className="h-3.5 w-px bg-border shrink-0" />

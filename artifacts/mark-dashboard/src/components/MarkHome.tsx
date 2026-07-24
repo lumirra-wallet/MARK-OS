@@ -114,7 +114,7 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
 
       {/* MARK's name + living presence text */}
       <div className="absolute top-8 inset-x-0 z-10 flex flex-col items-center gap-1.5 pointer-events-none">
-        <h1 className="text-lg font-bold tracking-[0.2em] uppercase text-foreground/90">MARK</h1>
+        <h1 className="text-lg font-bold tracking-[0.2em] uppercase text-foreground/90">ELENA</h1>
 
         {/* Living presence text — changes with real state, never static */}
         <p className="text-sm text-muted-foreground transition-all duration-700">
@@ -306,7 +306,7 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
         <button
           onClick={() => setChatOpen(true)}
           className="absolute bottom-4 right-4 z-20 flex items-center gap-1.5 text-[11px] text-muted-foreground/50 hover:text-muted-foreground bg-transparent hover:bg-card/40 px-2 py-1.5 rounded transition-colors"
-          title="View chat with MARK"
+          title="View chat with Elena"
         >
           <MessageCircle className="w-3.5 h-3.5" />
           <span>Chat</span>

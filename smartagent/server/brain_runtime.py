@@ -191,16 +191,26 @@ class BrainRuntime:
 
     _SPEAK_SEPARATOR = "===SPEAK==="
 
+    # Module-level cache so we construct NvidiaProvider at most once per process.
+    _nvidia_provider_cache: Any = None
+
     @staticmethod
     def _voice_reasoner(agent: Any) -> Any:
         """Return the object whose .chat_stream drives the voice turn.
 
-        Prefers the fast NVIDIA voice model (NVIDIA_VOICE_MODEL — measured
-        ~2 s round-trip vs ~10 s for the 550B ultra on this account): in a
-        live call, time-to-first-token IS the felt latency. Falls back to
-        the agent's ModelManager (active model + its own fallback chain)
-        when the fast model isn't registered or fails to load.
+        Priority order:
+          1. Registered NVIDIA_VOICE_MODEL in the agent's ModelManager registry
+             (wired at startup by factory.wire_agent).
+          2. Direct NvidiaProvider constructed from NVIDIA_API_KEY — bulletproof
+             fallback when registry wiring silently failed at startup.
+          3. Active model in agent.model_manager (any other cloud/local provider).
+
+        In a live call, time-to-first-token IS the felt latency, so the fast
+        NVIDIA voice model is always preferred over the 550B ultra.
         """
+        import os as _os
+
+        # ── 1. Registry path ─────────────────────────────────────────────────
         try:
             from smartagent.llm.factory import NVIDIA_VOICE_MODEL
             registry = getattr(agent.model_manager, "registry", None)
@@ -209,9 +219,34 @@ class BrainRuntime:
                 from smartagent.models.base.base_model import ModelStatus
                 if getattr(provider, "_status", None) != ModelStatus.LOADED:
                     provider.load()
+                logger.debug("brain: voice reasoner → registry[%s]", NVIDIA_VOICE_MODEL)
                 return provider
         except Exception as exc:
-            logger.debug("brain: voice reasoner unavailable (%s) — using active model", exc)
+            logger.warning("brain: registry voice reasoner unavailable: %s", exc)
+
+        # ── 2. Direct NvidiaProvider ─────────────────────────────────────────
+        api_key = _os.environ.get("NVIDIA_API_KEY", "")
+        if api_key:
+            try:
+                from smartagent.llm.factory import NVIDIA_VOICE_MODEL
+                if BrainRuntime._nvidia_provider_cache is None:
+                    from smartagent.llm.nvidia_provider import NvidiaProvider
+                    BrainRuntime._nvidia_provider_cache = NvidiaProvider(
+                        model_name=NVIDIA_VOICE_MODEL, api_key=api_key,
+                    )
+                    logger.info(
+                        "brain: direct NvidiaProvider created for voice (model=%s)",
+                        NVIDIA_VOICE_MODEL,
+                    )
+                return BrainRuntime._nvidia_provider_cache
+            except Exception as exc:
+                logger.error("brain: direct NvidiaProvider construction failed: %s", exc)
+
+        # ── 3. ModelManager fallback ─────────────────────────────────────────
+        logger.warning(
+            "brain: no NVIDIA provider available — falling back to ModelManager "
+            "(NVIDIA_API_KEY present=%s)", bool(api_key),
+        )
         return agent.model_manager
 
     def converse(

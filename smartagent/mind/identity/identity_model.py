@@ -30,7 +30,7 @@ class Identity:
         long_term_objectives: Capabilities MARK is working toward.
     """
 
-    name: str = "MARK"
+    name: str = "Elena"
     owner: str = "Mr. Smart"
     mission: str = ""
     core_values: list[str] = field(default_factory=list)

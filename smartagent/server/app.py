@@ -165,7 +165,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(
-    title="MARK AI OS — Web API",
+    title="Elena AI OS — Web API",
     description=(
         "REST + WebSocket layer over the MARK backend.\n\n"
         "All intelligence stays in the existing Python subsystems; "

@@ -36,8 +36,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-MARK_VOICE = "af_bella"
-SPEED = 1.0
+MARK_VOICE = "af_sky"
+SPEED = 1.05
 LANG = "en-us"
 
 _MODEL_RELEASE_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"

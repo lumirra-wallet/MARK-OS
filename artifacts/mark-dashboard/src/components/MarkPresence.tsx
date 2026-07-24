@@ -15,7 +15,7 @@ export function MarkPresence() {
       <MarkAvatar state={avatarState} size={26} />
       <div className="min-w-0 leading-tight">
         <div className="flex items-center gap-1.5">
-          <span className="font-bold tracking-tight text-sm">MARK</span>
+          <span className="font-bold tracking-tight text-sm">Elena</span>
           <span className="text-[10px] font-mono text-muted-foreground">· {modeLabel}</span>
         </div>
         {activity && (

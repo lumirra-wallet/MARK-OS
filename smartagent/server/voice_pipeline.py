@@ -133,7 +133,10 @@ def _get_whisper_model() -> Any:
     global _whisper_model
     if _whisper_model is None:
         from faster_whisper import WhisperModel
-        model_size = os.environ.get("MARK_WHISPER_MODEL", "base.en")
+        # small.en gives substantially better transcription accuracy than base.en
+        # with ~2x the compute — still real-time on CPU for conversational speech.
+        # Upgrade from base.en because users were reporting missed/garbled words.
+        model_size = os.environ.get("MARK_WHISPER_MODEL", "small.en")
         _whisper_model = WhisperModel(model_size, device="cpu", compute_type="int8")
         logger.info("voice_pipeline: loaded Whisper model %r", model_size)
     return _whisper_model
@@ -167,11 +170,18 @@ def transcribe(audio: np.ndarray, *, partial: bool = False) -> str:
     # while cutting that cost substantially; partials stay at 1 (display-only).
     model = _get_whisper_model()
     segments, _ = model.transcribe(
-        audio, language="en", beam_size=1 if partial else 2, vad_filter=False,
+        audio, language="en",
+        beam_size=1 if partial else 3,   # beam_size=3 vs 2: better accuracy, still fast
+        vad_filter=False,
+        temperature=0.0,                  # greedy decoding reduces hallucination
+        word_timestamps=False,
+        condition_on_previous_text=False, # prevents context bleeding across utterances
     )
     texts: list[str] = []
     for seg in segments:
-        if getattr(seg, "no_speech_prob", 0.0) > 0.55:
+        # Raise the no-speech rejection bar: was 0.55, now 0.65 — keeps more
+        # real speech while still filtering silence/noise transcription artifacts.
+        if getattr(seg, "no_speech_prob", 0.0) > 0.65:
             continue
         t = seg.text.strip()
         if t:
