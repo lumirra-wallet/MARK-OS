@@ -419,6 +419,33 @@ export const markApi = {
     if (!res.ok) throw new Error('identity fetch failed');
     return res.json() as Promise<IdentityProfile>;
   },
+
+  // ── Voice vocabulary ────────────────────────────────────────────────────────
+  getVocabulary: async (baseUrl: string): Promise<{ words: string[]; count: number }> => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/voice/vocabulary'));
+    if (!res.ok) throw new Error('vocabulary fetch failed');
+    return res.json();
+  },
+
+  addVocabularyWord: async (baseUrl: string, word: string): Promise<{ ok: boolean; added: string[]; total: number }> => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/voice/vocabulary'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ word }),
+    });
+    if (!res.ok) throw new Error('add vocabulary failed');
+    return res.json();
+  },
+
+  removeVocabularyWord: async (baseUrl: string, word: string): Promise<{ ok: boolean }> => {
+    const res = await fetch(getMarkApiUrl(baseUrl, '/voice/vocabulary'), {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ word }),
+    });
+    if (!res.ok) throw new Error('remove vocabulary failed');
+    return res.json();
+  },
 };
 
 // ── Enhanced git types ────────────────────────────────────────────────────────

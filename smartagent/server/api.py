@@ -1969,6 +1969,55 @@ async def voice_profile() -> dict:
         return {"has_profile": False, "error": str(exc)}
 
 
+@router.get("/voice/vocabulary")
+async def get_voice_vocabulary() -> dict:
+    """Return the current user vocabulary list used for Whisper hotword boosting."""
+    from smartagent.server.vocabulary import user_vocabulary
+    return {"words": user_vocabulary.words, "count": len(user_vocabulary.words)}
+
+
+@router.post("/voice/vocabulary")
+async def add_voice_vocabulary(payload: dict) -> dict:
+    """Add one or more custom words to the Whisper hotword vocabulary.
+
+    Body: {"word": "Spain"} or {"words": ["Spain", "Argentina", "Mr. Smart"]}
+
+    Added words are persisted and immediately used for the next transcription.
+    They bias Whisper's decoder toward those token sequences so accented or
+    fast pronunciations are correctly recognised.
+    """
+    from smartagent.server.vocabulary import user_vocabulary
+    words_raw: list[str] = []
+    if "word" in payload:
+        words_raw.append(str(payload["word"]))
+    if "words" in payload:
+        words_raw.extend([str(w) for w in payload["words"]])
+    if not words_raw:
+        return {"ok": False, "reason": "no words provided"}
+    added = [w for w in words_raw if user_vocabulary.add(w)]
+    # Rebuild hotwords cache on the active session immediately
+    try:
+        from smartagent.server import voice_pipeline as _vp
+        with _vp._registry_lock:
+            s = _vp._active_session
+        if s is not None:
+            s._rebuild_hotwords()
+    except Exception:
+        pass
+    return {"ok": True, "added": added, "skipped": [w for w in words_raw if w not in added], "total": len(user_vocabulary.words)}
+
+
+@router.delete("/voice/vocabulary")
+async def remove_voice_vocabulary(payload: dict) -> dict:
+    """Remove a word from the custom vocabulary.  Body: {"word": "Spain"}"""
+    from smartagent.server.vocabulary import user_vocabulary
+    word = str(payload.get("word", "")).strip()
+    if not word:
+        return {"ok": False, "reason": "no word provided"}
+    removed = user_vocabulary.remove(word)
+    return {"ok": removed, "word": word, "total": len(user_vocabulary.words)}
+
+
 @router.post("/voice/message")
 async def voice_message(payload: dict) -> dict:
     """Receive a final voice transcript and trigger MARK's spoken reply.
@@ -2076,7 +2125,12 @@ async def voice_websocket(ws: WebSocket) -> None:
                     logger.warning("voice_ws: feed error: %s", exc)
                     continue
                 for ev in events:
-                    await ws.send_text(json.dumps(ev))
+                    try:
+                        await ws.send_text(json.dumps(ev))
+                    except Exception:
+                        # WebSocket already closed (race between disconnect and
+                        # the feed thread emitting an event) — stop processing.
+                        break
                     # ── Direct brain dispatch — the streamline loop ────────
                     ev_type = ev.get("type")
 

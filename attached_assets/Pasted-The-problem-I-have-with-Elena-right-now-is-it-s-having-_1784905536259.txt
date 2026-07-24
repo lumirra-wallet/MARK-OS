@@ -1,0 +1,80 @@
+The problem I have with Elena right now is it's having issues in hearing the correct pronunciation of all the words I am saying because I was trying to say Spain and Argentina, but it keeps showing spin and attention on the transcript, and that is what the Elena is saying on the speaker, which is not supposed to be. So please, I want you to fix this and correct everything. And make sure you put every tools and everything, check GitHub repos, and include everything that is necessary that you think that will help make this possible and make everything to work smoothly. And implement all of them and tell me what you've done so far. Thank you.
+
+13 minutes ago
+Improving speech recognition accuracy
+
+Improving speech recognition accuracy
+Let me look at the full voice pipeline and Whisper configuration to understand what's causing the transcription errors.
+
+
+3 actions
+Now I have the full picture. The issues are clear:
+
+small.en model is too small for proper nouns like "Spain" and "Argentina"
+No hotword/vocabulary boosting
+No post-processing correction layer
+Let me research the exact faster-whisper API and check what's available before implementing.
+
+
+4 actions
+hotwords parameter is confirmed available in faster-whisper 1.2.1. Here's what I'm implementing:
+
+Upgrade small.en → medium.en — 3x more parameters, dramatically better on proper nouns
+Hotwords system — geography, names, custom user vocab boosted at decode time
+Better beam search — beam_size=10, patience=2.0, best_of=5
+Dynamic hotwords — extract nouns from conversation context automatically
+Post-processing corrections — targeted lookup for known Whisper error pairs
+User vocabulary API + UI — persist custom words the user commonly says
+Writing all of it now in parallel:
+
+
+2 actions
+Now updating voice_pipeline.py with the model upgrade, hotwords, and corrections — plus the API endpoints and frontend UI — all in parallel:
+
+
+2 actions
+Now updating the transcribe() function and VoiceSession to wire in hotwords and corrections, adding API endpoints, and adding the frontend vocabulary UI — all in parallel:
+
+
+2 actions
+Now I'll wire hotwords into the VoiceSession.feed() call, add the vocabulary session state, update update_session_context, add API endpoints, and build the frontend UI — all in parallel:
+
+
+2 actions
+Now wiring in the _rebuild_hotwords() method and updating set_context, feed, and update_session_context — plus the API endpoints and frontend UI all at once:
+
+
+2 actions
+Now wire the hotwords into the two transcribe() calls inside feed(), update update_session_context, add the API endpoints, and build the frontend vocabulary UI — all in parallel:
+
+
+14 actions
+Adding vocabulary endpoints to api.py and the vocabulary UI to SettingsView.tsx in parallel:
+
+
+5 actions
+I also spotted a React setState-during-render error in MarkPresence, and the 's s s s s' / 'ee ee ee ee' noise hallucinations need filtering. Let me fix all of these in parallel while adding the vocabulary UI.
+
+
+7 actions
+Now I'll add the noise filter to voice_pipeline.py, add the vocabulary section to SettingsView.tsx, and add the markApi vocabulary methods — all in parallel:
+
+
+14 actions
+Now adding the vocabulary UI section to SettingsView.tsx and restarting the MARK server simultaneously:
+
+
+8 actions
+Finishing the vocabulary UI, then restarting both critical workflows in parallel:
+
+
+6 actions
+Both services are up. Let me verify TypeScript is clean and confirm the MARK server loads the new vocabulary module correctly:
+
+
+3 actions
+TypeScript clean, vocabulary API responding. Let me verify no browser errors:
+
+
+Refreshed logs
+You've reached your daily free quota limit. It will reset at 12:00 AM UTC.

@@ -6,7 +6,7 @@ import { markApi, type LlmSettings } from '@/lib/markApi';
 import { useMarkStore } from '@/store/markStore';
 import {
   Loader2, CheckCircle2, XCircle, Cloud, Sliders,
-  Zap, Activity, ChevronDown, ChevronUp,
+  Zap, Activity, ChevronDown, ChevronUp, Mic, Plus, Trash2, BookOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -108,6 +108,52 @@ export function SettingsView() {
   const [llmHealth,    setLlmHealth]    = useState<{ available: boolean; latency_ms: number | null; error: string | null } | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // ── Voice vocabulary ───────────────────────────────────────────────────────
+  const [vocabWords,    setVocabWords]    = useState<string[]>([]);
+  const [vocabInput,    setVocabInput]    = useState('');
+  const [vocabLoading,  setVocabLoading]  = useState(false);
+  const [vocabAdding,   setVocabAdding]   = useState(false);
+  const [vocabError,    setVocabError]    = useState('');
+
+  const loadVocabulary = async () => {
+    setVocabLoading(true);
+    try {
+      const data = await markApi.getVocabulary(serverUrl);
+      setVocabWords(data.words);
+    } catch {
+      setVocabError('Could not load vocabulary');
+    } finally {
+      setVocabLoading(false);
+    }
+  };
+
+  const addVocabWord = async () => {
+    const word = vocabInput.trim();
+    if (!word) return;
+    setVocabAdding(true);
+    setVocabError('');
+    try {
+      await markApi.addVocabularyWord(serverUrl, word);
+      setVocabInput('');
+      await loadVocabulary();
+    } catch {
+      setVocabError('Failed to add word');
+    } finally {
+      setVocabAdding(false);
+    }
+  };
+
+  const removeVocabWord = async (word: string) => {
+    try {
+      await markApi.removeVocabularyWord(serverUrl, word);
+      setVocabWords(prev => prev.filter(w => w !== word));
+    } catch {
+      // silently ignore
+    }
+  };
+
+  useEffect(() => { loadVocabulary(); }, [serverUrl]);
 
   // Local editable copies
   const [temperature, setTemperature] = useState(0.7);
@@ -403,6 +449,80 @@ export function SettingsView() {
               </div>
             </div>
           ) : null}
+        </Section>
+
+        {/* ── Voice Vocabulary ────────────────────────────────────────────────── */}
+        <Section
+          title="Voice Vocabulary"
+          description="Words Elena always recognises correctly — country names, people, technical terms. Added words are permanently boosted in the speech recognition decoder."
+        >
+          <div className="space-y-4">
+            {/* Add word input */}
+            <div className="flex gap-2">
+              <Input
+                placeholder="e.g. Spain, Argentina, ChatGPT…"
+                value={vocabInput}
+                onChange={e => setVocabInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addVocabWord(); }}
+                className="font-mono text-sm"
+              />
+              <Button
+                onClick={addVocabWord}
+                disabled={vocabAdding || !vocabInput.trim()}
+                size="sm"
+                className="shrink-0"
+              >
+                {vocabAdding
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Plus className="w-4 h-4" />
+                }
+              </Button>
+            </div>
+
+            {vocabError && (
+              <p className="text-xs text-destructive">{vocabError}</p>
+            )}
+
+            {/* How it works note */}
+            <div className="flex items-start gap-2 p-3 bg-violet-500/5 border border-violet-500/15 rounded-lg">
+              <Mic className="w-3.5 h-3.5 text-violet-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Elena uses <span className="text-violet-400 font-medium">Whisper {typeof window !== 'undefined' && 'medium.en'}</span> with hotword boosting.
+                Words you add here are prioritised during speech decoding so
+                accented or fast pronunciations are still recognised correctly.
+                A large base vocabulary of countries and tech terms is always active.
+              </p>
+            </div>
+
+            {/* Word list */}
+            {vocabLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+              </div>
+            ) : vocabWords.length === 0 ? (
+              <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground/50">
+                <BookOpen className="w-4 h-4" />
+                No custom words yet — base geography and tech vocabulary is always active.
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {vocabWords.map(word => (
+                  <div
+                    key={word}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-xs font-mono text-violet-300"
+                  >
+                    <span>{word}</span>
+                    <button
+                      onClick={() => removeVocabWord(word)}
+                      className="text-violet-400/50 hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </Section>
       </div>
     </div>

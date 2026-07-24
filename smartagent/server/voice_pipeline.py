@@ -178,10 +178,12 @@ def _get_whisper_model() -> Any:
     global _whisper_model
     if _whisper_model is None:
         from faster_whisper import WhisperModel
-        # small.en gives substantially better transcription accuracy than base.en
-        # with ~2x the compute — still real-time on CPU for conversational speech.
-        # Upgrade from base.en because users were reporting missed/garbled words.
-        model_size = os.environ.get("MARK_WHISPER_MODEL", "small.en")
+        # medium.en gives dramatically better accuracy than small.en for proper nouns,
+        # accented speech, and geographic names (Spain, Argentina, etc.).
+        # ~3× more parameters than small.en — still real-time on CPU for short
+        # conversational utterances (< 30 s).  Override via MARK_WHISPER_MODEL env var.
+        # Options: tiny.en, base.en, small.en, medium.en, large-v3-turbo, large-v3
+        model_size = os.environ.get("MARK_WHISPER_MODEL", "medium.en")
         _whisper_model = WhisperModel(model_size, device="cpu", compute_type="int8")
         logger.info("voice_pipeline: loaded Whisper model %r", model_size)
     return _whisper_model
@@ -227,16 +229,34 @@ def transcribe(
     *,
     partial: bool = False,
     initial_prompt: str | None = None,
+    hotwords: str | None = None,
 ) -> str:
-    """Real Faster-Whisper transcription with conversation-context priming.
+    """Real Faster-Whisper transcription with vocabulary boosting.
 
-    ``initial_prompt`` should be the last 1-3 turns of conversation text.
-    Whisper uses it as a "vocabulary hint" — dramatically improving accuracy
-    for accents, unusual names, and domain-specific terminology because
-    Whisper's decoder has already seen those tokens and biases toward them.
+    Parameters
+    ----------
+    audio:         Float32 PCM in [-1, 1] at 16 kHz.
+    partial:       True → fast display-only pass (beam_size=1, no hotwords).
+    initial_prompt: Last 1-3 turns of conversation text as a context hint.
+                   Whisper's decoder biases toward tokens it has already seen
+                   here — dramatically improves accented proper-noun recall.
+    hotwords:      Comma-separated vocabulary string passed to faster-whisper's
+                   hotwords parameter.  Adds a positive logit bias to every
+                   matching token sequence during beam search.  Most effective
+                   mechanism for fixing "Spain"→"spin" type errors: the model
+                   actively prefers the hotword form when audio is ambiguous.
 
-    Segments where Whisper itself reports no_speech_prob > 0.50 are discarded.
-    Very short results (< 2 chars) are rejected as noise.
+    Transcription quality knobs (final pass only)
+    ----------------------------------------------
+    beam_size=10    More hypotheses explored vs default 5 — catches the correct
+                    token even when greedy search picks the wrong near-homophone.
+    patience=2.0    Allows the beam search to continue past the first completed
+                    hypothesis — improves recall for interrupted/fast speech.
+    best_of=5       With temperature fallback: sample 5 candidates and pick the
+                    highest-scoring one — reduces greedy decoding errors.
+    temperature=    [0.0, 0.2, 0.4] fallback ladder — greedy first, then
+                    progressively more sampling if compression/logprob checks
+                    flag the result as uncertain.
     """
     if audio.size == 0:
         return ""
@@ -245,41 +265,189 @@ def transcribe(
     audio = _normalize_audio(audio)
 
     model = _get_whisper_model()
-    segments, _ = model.transcribe(
-        audio,
-        language="en",
-        # beam_size=5 on final: standard Whisper default; gives meaningful
-        # accuracy gains for accented speech vs beam_size=3.  Partials stay
-        # at 1 — they're display-only so latency matters more than precision.
-        beam_size=1 if partial else 5,
-        vad_filter=False,
-        # Temperature fallback: 0.0 (greedy, low hallucination) first; if
-        # Whisper's compression_ratio or logprob heuristics flag the result as
-        # uncertain it automatically retries at 0.2.  This handles genuinely
-        # ambiguous phonemes that pure greedy decoding often gets wrong.
-        temperature=[0.0, 0.2] if not partial else 0.0,
-        word_timestamps=False,
-        # condition_on_previous_text: only use when we have a real context
-        # prompt — without one it can cause context "bleeding" where Whisper
-        # copies tokens from a hallucinated prefix instead of the audio.
-        condition_on_previous_text=bool(initial_prompt),
-        initial_prompt=initial_prompt,
-        # Suppress common Whisper hallucination tokens (music, applause, etc.)
-        suppress_tokens=[-1],
-    )
+
+    if partial:
+        # ── Partial (display-only): fast greedy, no expensive extras ──────────
+        segments, _ = model.transcribe(
+            audio,
+            language="en",
+            beam_size=1,
+            best_of=1,
+            patience=1.0,
+            temperature=0.0,
+            vad_filter=False,
+            word_timestamps=False,
+            condition_on_previous_text=bool(initial_prompt),
+            initial_prompt=initial_prompt,
+            suppress_blank=True,
+            suppress_tokens=[-1],
+        )
+    else:
+        # ── Final (authoritative): full accuracy pass ─────────────────────────
+        segments, _ = model.transcribe(
+            audio,
+            language="en",
+            # Higher beam_size = more hypotheses explored.
+            # 10 catches correct tokens that beam_size=5 misses for fast/accented speech.
+            beam_size=10,
+            # patience > 1 lets the search continue past the first completed
+            # hypothesis — catches proper nouns when greedy path finishes early.
+            patience=2.0,
+            # best_of=5 with temperature fallback: sample multiple candidates
+            best_of=5,
+            # Temperature ladder: 0.0 (greedy, lowest hallucination) first;
+            # retry at 0.2 then 0.4 if compression_ratio or logprob flags
+            # the result as uncertain — handles genuinely ambiguous phonemes.
+            temperature=[0.0, 0.2, 0.4],
+            vad_filter=False,
+            word_timestamps=False,
+            condition_on_previous_text=bool(initial_prompt),
+            initial_prompt=initial_prompt,
+            # hotwords: the core fix for "Spain"→"spin" / "Argentina"→"attention".
+            # faster-whisper adds a positive logit bias to every token sequence
+            # that matches a hotword — the decoder actively prefers the correct
+            # proper noun form over the phonetically similar common word.
+            hotwords=hotwords or None,
+            suppress_blank=True,
+            suppress_tokens=[-1],
+        )
+
     texts: list[str] = []
     for seg in segments:
-        # 0.50 threshold: more inclusive than the old 0.65 — keeps real speech
-        # from accented/quiet speakers that Whisper would otherwise silently
-        # drop.  Noise bursts are caught by the normalization cap + length filter.
+        # 0.50 threshold: keeps real speech from accented/quiet speakers that
+        # Whisper would otherwise silently drop.  Noise bursts are caught by
+        # the normalization cap + length filter below.
         if getattr(seg, "no_speech_prob", 0.0) > 0.50:
             continue
         t = seg.text.strip()
         if t:
             texts.append(t)
     result = " ".join(texts).strip()
+
+    # ── Hallucination / noise filter ───────────────────────────────────────────
+    # Whisper (especially small.en) generates characteristic "stuck" outputs
+    # when fed noise, room hum, or very soft audio: repeated single characters
+    # ("s s s s s", "ee ee ee ee"), music stubs ("[Music]", "(applause)"), or
+    # very short repeated words.  Catch and discard these before they reach Elena.
+    if result:
+        result = _filter_hallucination(result)
+
+    # Post-processing: apply targeted phonetic corrections (e.g. "Spayn"→"Spain").
+    # Only for final pass — partials are display-only throwaway text.
+    if not partial and result:
+        try:
+            from smartagent.server.vocabulary import apply_corrections
+            result = apply_corrections(result)
+        except Exception:
+            pass
+
     # Minimum 2 chars — "ok", "no", "yes" are valid single-word turns.
     return result if len(result) >= 2 else ""
+
+
+# ── Hallucination filter ───────────────────────────────────────────────────────
+# Characteristic noise/stuck outputs from Whisper — discard before sending to LLM.
+
+_HALLUCINATION_STUBS = re.compile(
+    r"^\s*(\[.*?\]|\(.*?\)|♪.*?♪|you|thanks for watching|thank you for watching|"
+    r"subtitles by|transcribed by|www\..+|http[s]?://)\s*$",
+    re.IGNORECASE,
+)
+# Repeated single-char pattern: "s s s s s", "e e e e", "ee ee ee"
+_REPEATED_NOISE = re.compile(r"^(\b\w{1,3}\b\s+){4,}$", re.IGNORECASE)
+
+# Hotword-echo hallucination: when hotwords are active and audio is unclear,
+# the decoder sometimes generates a comma-separated list of country names or
+# a single word repeated many times.  These look exactly like the hotword list.
+# Detect by checking that the text is ONLY comma-separated tokens with no verbs,
+# function words, or sentence structure — a dead giveaway of hotword hallucination.
+_COMMA_LIST_RE  = re.compile(r"^[A-Za-z\s,\.]+$")  # only letters, spaces, commas, dots
+_REPEATED_TOKEN = re.compile(r"\b(\w+)\b(?:,?\s+\1\b){3,}", re.IGNORECASE)  # same token 4+ times
+
+
+def _filter_hallucination(text: str) -> str:
+    """Return empty string if ``text`` looks like a Whisper hallucination.
+
+    Patterns caught:
+    - Metadata stubs: [Music], (applause), ♪…♪, subtitles by, www.*
+    - Repeated short-token noise: "s s s s s", "ee ee ee ee"
+    - Single-character repetition: "sssssss"
+    - Hotword-echo lists: "Argentina, Colombia, Spain, Colombia, Chile..." (no verbs, pure nouns)
+    - Same word repeated 4+ times: "Canada, Canada, Canada, Canada..."
+    """
+    t = text.strip()
+    if not t:
+        return ""
+
+    # Known stub patterns (metadata artifacts the model generates for silence)
+    if _HALLUCINATION_STUBS.match(t):
+        logger.debug("voice_pipeline: hallucination stub rejected: %r", t[:60])
+        return ""
+
+    # Repeated short-token noise (e.g. "s s s s s s", "ee ee ee ee")
+    if _REPEATED_NOISE.match(t + " "):
+        logger.debug("voice_pipeline: repeated noise rejected: %r", t[:60])
+        return ""
+
+    # Single repeated character spanning the whole output (e.g. "sssssss")
+    unique_chars = set(t.replace(" ", "").lower())
+    if len(unique_chars) == 1 and len(t) >= 6:
+        logger.debug("voice_pipeline: single-char hallucination rejected: %r", t[:60])
+        return ""
+
+    # Repeated single-word token 4+ times: "Canada, Canada, Canada, Canada..."
+    if _REPEATED_TOKEN.search(t):
+        logger.debug("voice_pipeline: repeated-token hallucination rejected: %r", t[:60])
+        return ""
+
+    # Repeated multi-word phrase: split on commas, check if any segment appears ≥ 3×.
+    # Catches "the United States, the United States, the United States of A".
+    # Uses prefix matching so "the United States" and "the United States of A"
+    # are both counted as repetitions of the same phrase.
+    if "," in t:
+        segments = [s.strip().lower().rstrip(".") for s in t.split(",") if s.strip()]
+        if len(segments) >= 3:
+            from collections import Counter
+            seg_counts = Counter(segments)
+            top_seg, top_count = seg_counts.most_common(1)[0]
+            # Direct repetition: same phrase ≥ 3 times
+            if top_count >= 3:
+                logger.debug(
+                    "voice_pipeline: repeated-phrase hallucination rejected (exact): %r", t[:60]
+                )
+                return ""
+            # Prefix repetition: phrase appears ≥ 2 times AND ≥ 3 segments start with it.
+            # Catches the "United States / United States / United States of A" pattern.
+            if top_count >= 2 and len(top_seg.split()) >= 2:
+                prefix_count = sum(1 for s in segments if s.startswith(top_seg))
+                if prefix_count >= 3:
+                    logger.debug(
+                        "voice_pipeline: repeated-phrase hallucination rejected (prefix): %r", t[:60]
+                    )
+                    return ""
+
+    # Hotword-list hallucination: a long comma-separated string with no sentence
+    # structure (no verbs, articles, or typical sentence function words).
+    # This catches "Argentina, Colombia, Chile, Spain, Colombia, Chile..."
+    tokens = [tok.strip().rstrip(",.") for tok in t.split(",") if tok.strip()]
+    if len(tokens) >= 4 and _COMMA_LIST_RE.match(t):
+        # Check if the tokens look like a noun-only list (no common function words)
+        _FUNCTION_WORDS = {
+            "the", "a", "an", "and", "but", "or", "so", "if", "is", "are",
+            "was", "were", "i", "you", "we", "they", "he", "she", "it",
+            "have", "has", "do", "did", "will", "can", "would", "could",
+            "to", "of", "in", "on", "at", "for", "with", "by", "that", "this",
+        }
+        lower_tokens = {tok.lower() for tok in tokens if tok}
+        function_word_count = sum(1 for w in lower_tokens if w in _FUNCTION_WORDS)
+        if function_word_count == 0 and len(tokens) >= 4:
+            logger.debug(
+                "voice_pipeline: hotword-list hallucination rejected (%d tokens): %r",
+                len(tokens), t[:60],
+            )
+            return ""
+
+    return t
 
 
 # ── Turn-taking states ────────────────────────────────────────────────────────
@@ -344,6 +512,30 @@ class VoiceSession:
         # recognition of names, technical terms, and accented pronunciation.
         self._conversation_context: str = ""
 
+        # Dynamic nouns extracted from conversation text — added to hotwords
+        # so Whisper's decoder is already biased toward words the user or Elena
+        # just said before the next transcription call.
+        self._dynamic_nouns: list[str] = []
+
+        # Cached hotwords string rebuilt on every context update
+        self._hotwords_cache: str = ""
+        self._rebuild_hotwords()
+
+    def _rebuild_hotwords(self) -> None:
+        """Rebuild the cached hotwords string from user vocab + dynamic nouns.
+
+        Called on init and whenever the conversation context changes.
+        """
+        try:
+            from smartagent.server.vocabulary import build_hotwords, user_vocabulary
+            self._hotwords_cache = build_hotwords(
+                context_nouns=self._dynamic_nouns,
+                user_words=user_vocabulary.words,
+            )
+        except Exception as exc:
+            logger.debug("voice_pipeline: hotwords build failed: %s", exc)
+            self._hotwords_cache = ""
+
     def set_context(self, context: str) -> None:
         """Update the conversation context hint fed to Whisper as initial_prompt.
 
@@ -356,12 +548,27 @@ class VoiceSession:
           - Domain vocabulary the owner uses regularly
           - Any word the owner pronounces differently from the training norm
 
-        The string is capped at 200 chars so it never exceeds Whisper's
-        initial_prompt token budget (~224 tokens for the smallest models).
+        Also extracts proper-noun candidates from the context text and adds
+        them to the hotwords cache so Whisper is immediately biased toward
+        words just mentioned — critical for proper nouns said for the first
+        time before the static vocabulary list covers them.
+
+        The initial_prompt is capped at 200 chars so it never exceeds Whisper's
+        prompt token budget (~224 tokens for the smallest models).
         """
-        # Keep only the last 200 chars — enough to give strong vocabulary
-        # signal without risking prompt overflow.
         self._conversation_context = context.strip()[-200:]
+
+        # Extract capitalised nouns from the conversation and rebuild hotwords
+        try:
+            from smartagent.server.vocabulary import extract_nouns
+            nouns = extract_nouns(context)
+            # Merge with existing dynamic nouns, keep most recent 40
+            combined = nouns + [n for n in self._dynamic_nouns if n not in nouns]
+            self._dynamic_nouns = combined[:40]
+        except Exception:
+            pass
+
+        self._rebuild_hotwords()
 
     def _ensure_vad(self) -> None:
         """Load this session's PRIVATE VAD model on first audio.
@@ -593,6 +800,7 @@ class VoiceSession:
                     text  = transcribe(
                         audio, partial=False,
                         initial_prompt=self._conversation_context or None,
+                        hotwords=self._hotwords_cache or None,
                     )
                     if text:
                         # ── Voice command detection ───────────────────────────
