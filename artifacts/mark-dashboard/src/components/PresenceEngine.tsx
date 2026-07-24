@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, Component, type ReactNode, type ErrorInfo } from 'react';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -223,11 +223,36 @@ const MEMBRANE_FRAGMENT = `
   }
 `;
 
-export function PresenceEngine({ className = '', micLevel = 0, isListening = false, isVoiceSpeaking = false }: PresenceEngineProps) {
+// ── ErrorBoundary — catches any synchronous render-time crash from Three.js ──
+// useEffect errors are caught by the try/catch inside the effect itself;
+// this boundary is the last line of defence for anything that slips through.
+class PresenceErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { failed: false };
+  }
+  static getDerivedStateFromError(_: Error) { return { failed: true }; }
+  componentDidCatch(_: Error, __: ErrorInfo) { /* swallow — degraded UI shown below */ }
+  render() {
+    if (this.state.failed) return (
+      <div
+        className="w-full h-full"
+        style={{ background: 'radial-gradient(circle at 50% 45%, rgba(14,32,24,0.5) 0%, rgba(5,12,9,0.85) 35%, rgba(1,4,3,0.97) 62%, #000000 100%)' }}
+      />
+    );
+    return this.props.children;
+  }
+}
+
+function PresenceEngineInner({ className = '', micLevel = 0, isListening = false, isVoiceSpeaking = false }: PresenceEngineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { selfState, isSpeaking: isTextSpeaking } = useSelfState();
   const tokenTimestamps = useMarkStore(s => s.tokenTimestamps);
   const timeline = useMarkStore(s => s.timeline);
+  // webglAvailable — false when the browser/environment can't create a WebGL
+  // context (headless server preview, certain Linux VMs, etc.).  We degrade
+  // gracefully to a pure-CSS animated gradient so the rest of the UI still works.
+  const [webglAvailable, setWebglAvailable] = useState(true);
 
   const stateRef = useRef({ selfState, isTextSpeaking, tokenTimestamps, micLevel, isListening, isVoiceSpeaking });
   stateRef.current = { selfState, isTextSpeaking, tokenTimestamps, micLevel, isListening, isVoiceSpeaking };
@@ -238,7 +263,7 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container || !webglAvailable) return;
 
     // Pre-existing timeline history shouldn't all fire as "new" the instant
     // this mounts — only events that arrive after mount should spark/pulse it.
@@ -249,7 +274,21 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
     camera.position.set(0, 0.1, 6.6);
     camera.lookAt(0, 0, 0);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    } catch {
+      setWebglAvailable(false);
+      return;
+    }
+    // Double-check: Three.js sometimes returns a renderer with a null context
+    // instead of throwing (depends on the driver).
+    if (!renderer.getContext()) {
+      renderer.dispose();
+      setWebglAvailable(false);
+      return;
+    }
+
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.1;
@@ -555,7 +594,22 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
         container.removeChild(renderer.domElement);
       }
     };
-  }, []);
+  // webglAvailable in the dep array: when it flips false the effect re-runs,
+  // hits the early-return guard, and does nothing — safe.
+  }, [webglAvailable]);
+
+  // CSS-only fallback: identical dark gradient background, no 3D.
+  // The rest of the UI (chat, voice controls, timeline) stays fully functional.
+  if (!webglAvailable) {
+    return (
+      <div
+        className={`w-full h-full ${className}`}
+        role="img"
+        aria-label="MARK's presence"
+        style={{ background: 'radial-gradient(circle at 50% 45%, rgba(14,32,24,0.5) 0%, rgba(5,12,9,0.85) 35%, rgba(1,4,3,0.97) 62%, #000000 100%)' }}
+      />
+    );
+  }
 
   return (
     <div
@@ -565,5 +619,17 @@ export function PresenceEngine({ className = '', micLevel = 0, isListening = fal
       aria-label="MARK's living presence — a breathing translucent membrane reflecting his current state"
       style={{ background: 'radial-gradient(circle at 50% 45%, rgba(14,32,24,0.5) 0%, rgba(5,12,9,0.85) 35%, rgba(1,4,3,0.97) 62%, #000000 100%)' }}
     />
+  );
+}
+
+// Public export — PresenceErrorBoundary wraps the inner component so that any
+// unexpected Three.js render-time exception is caught here rather than crashing
+// the entire React tree (the inner component already guards WebGL context
+// creation; this catches anything else that could slip through).
+export function PresenceEngine(props: PresenceEngineProps) {
+  return (
+    <PresenceErrorBoundary>
+      <PresenceEngineInner {...props} />
+    </PresenceErrorBoundary>
   );
 }

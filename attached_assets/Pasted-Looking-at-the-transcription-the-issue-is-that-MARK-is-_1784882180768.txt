@@ -1,0 +1,76 @@
+Looking at the transcription, the issue is that MARK is interrupting before the owner finishes speaking. The VAD cutoff at 800ms combined with the 1.2s stitching window is too aggressive for this particular speaker's pattern — they have frequent pauses, stuttering, and disfluencies like repeated words ("kick kick kick", "a a a a"), so that silence threshold is catching natural speech breaks and triggering premature responses.
+
+The real solution isn't just extending the window uniformly since they also complained about slowness. Instead, I should implement adaptive endpointing that looks at the transcript itself: if it ends with clear sentence-final punctuation and has enough words, use the shorter stitch window; if it trails off with a comma, conjunction, or filler words, extend the patience window to 2.5-3 seconds. This way MARK understands when the owner is actually done speaking versus just pausing mid-thought. I can also add barge-in handling so if the user resumes while MARK is thinking, it cancels and merges the new input.
+
+On the clarification front, the Brain Runtime already has an ask_clarification stance, but I need to strengthen the prompt so that when the transcript is garbled or ambiguous, MARK defaults to asking a short clarifying question rather than guessing. And there's a potential issue with MARK's own speech getting cut off mid-sentence—the energy gate combined with echo might be causing the mic to pick up MARK's voice from the speakers, triggering a spurious barge-in detection that cuts the response short.
+
+The fix involves raising the barge-in RMS threshold and requiring sustained energy over multiple consecutive chunks (around 100ms of real voice) instead of triggering on a single 32ms frame, which should eliminate false interruptions from echo or speaker bleed.
+
+For expressiveness, I can't add genuine coughs or laughs with the current TTS setup, but I can make Mark sound more natural by having the speech planner use conversational interjections like "Hmm" or "Oh!", vary sentence structure, and adjust the synthesis speed per emotional tone—Kokoro supports passing speed parameters on a per-sentence basis to convey different moods.
+
+The plan is to implement adaptive endpointing in VoiceSession to handle short versus long responses, require three consecutive hot chunks to interrupt MARK so brief echo spikes don't cut him off, and update the brain prompt to explicitly ask for clarification when the transcript is garbled or unclear.
+
+For implementation, I'll add a heuristic function that examines whether text looks complete—checking for trailing punctuation and sentence structure—to decide between a shorter 1.2-second stitch window for complete thoughts or a longer 2.8-second window for incomplete ones.
+
+I'm also adding a barge-in counter that tracks consecutive high-energy audio chunks and triggers an interrupt after three in a row, resetting whenever there's a quiet moment.
+
+Then I'll update the system prompt in the conversation logic, restart the service cleanly, and run a focused test with a mid-thought pause and garbled input to verify everything works before committing.
+Reading your message carefully, four distinct problems — and notably, three of them I can see in the shape of your own speech: you speak with natural pauses and restarts, and MARK's current 2-second cutoff chops you mid-thought and answers fragments it never fully heard. That's exactly "replying on a word it never understood."
+
+The fixes:
+
+Patient, smart listening — if your sentence looks unfinished (trails off, ends in "and…/um…", no punctuation), MARK waits longer before deciding you're done; if it looks complete, he responds fast. Patience without slowness.
+Ask instead of guess — when the transcript is garbled/unclear, MARK's decision must be a short clarifying question, never a guess-answer.
+Stop cutting himself off — his replies truncating mid-speech is almost certainly echo barge-in: his own voice leaking into your mic for a split second trips the interrupt. Real interruptions are sustained; I'll require ~100ms of continuous voice, not one 32ms spike.
+Expression — natural interjections and tone-matched delivery in speech planning.
+Read
+voice_pipeline.py
+I need to switch from a fixed window size to an adaptive approach that determines when the audio is complete. I'll create a helper function that checks if the text looks finished, then use a longer default window that can be adjusted based on this heuristic.
+I'm adding a completeness heuristic to enable adaptive endpointing and use it to determine the stitch window.
+Edited
+voice_pipeline.py
++42
+-8
+The client-side energy gate hangover is currently set to 2.6 seconds, but that's not enough time to cover the full pipeline: VAD ending at 0.8s plus the long stitch at 2.8s means I need 3.6 seconds of samples after speech ends, and the gate closes before that window completes, so the final callback never fires until the next speech starts. I need to extend the hangover to around 4.5 seconds to account for the full path including margin, then rebuild the frontend.
+I found that the long window breaks an invariant where the client's energy-gate hangover (2.6s) must outlast VAD-end (0.8s) plus the long stitch (2.8s), so I'm extending it to 4.5s.
+Edited
+use-voice.ts
++5
+-4
+Now moving on to implement Fix 2 for the sustained barge-in issue, then tackle Fix 3 by refining the clarification logic and updating the brain prompt to better handle expression, before rebuilding and running verification tests.
+Fix 2 — sustained barge-in (stop MARK cutting himself off on echo spikes):
+
+Edited
+voice_pipeline.py
++8
+-1
+Now wire the consecutive-chunk counter into the barge-in check:
+
+Edited
+voice_pipeline.py
++12
+-3
+
+Usage limit reached
+Each time I I speak my mark, um, it doesn't listen to everything I completely before it replaces. And, also, Mark is taking... still taking long to respond based on... I think it's... you see video video... if if if a transcript... everyone understand if it's an attorney receives a a a a a a... on a text. I wanted to make it to to to to more live streaming. that make make the condition to... should be responding and to be asking questions if it is not came my clarity. It should try to understand it should try to understand what I was to to to hear quickly. Mark should be looking more into into you guys to understanding me than than just replying me on on a word that it never understood. So to make sure you hand to the audio and listening and speakers, make sure mark says everything because from one thing I even even the transcript that that mark is reading, it's it's not saying everything at once and make mark to be faster in stock in in... and having a combination. Make mark to have expression in what the put some mix expression in sounds and how they are having a... kick kick kick kick kick kick kick kick kick kick kick look levely at things like, um, cough and and -- want to was substantin
+
+The owner's resending the same message, so I'm continuing with the implementation. I need to fix three remaining issues: clarify the don't-guess behavior and add expression handling to the brain prompt, then rebuild the frontend, restart the system, and run a simulation to verify it handles both mid-thought pauses that merge into a single final response and garbled inputs that trigger clarification requests before committing.
+Continuing the implementation — Fix 3: the understand-first/ask-don't-guess rule and natural expression, in the Brain Runtime's conversation prompt:
+
+
+Edited brain_runtime.py, ran a command
++15
+-3
+The heuristic passed all test cases, so I'm rebuilding the frontend with the gate hangover change, restarting, and running the decisive simulation to verify the mid-thought pause arrives as a single utterance and the garbled turn produces a clarifying question.
+
+Ran 3 commands
+The /ws/voice handshake is timing out while the main /ws connection succeeds, suggesting the server's startup warm-up—SmartAgent initialization, voice reasoner ping, or lazy-loading Whisper/VAD—is blocking the event loop, possibly because agent construction happens synchronously within the loop rather than being offloaded via asyncio.to_thread.
+
+The simplest fix is to add a retry with a brief delay, since the server might still be initializing (loading fp32 model files into the ONNX session and initializing espeak takes several seconds, plus the test process's own TTS engine adds another 5-10s). The voice_websocket should accept instantly, so if it's timing out despite the 10s default open_timeout, something heavy is blocking the loop—likely the warmup ping thread holding the GIL during numpy/ONNX operations, though ONNX mostly releases it.
+/ws/voice handshake timed out — the server was likely still mid-warmup (first fp32 model load). Retry after letting it settle:
+
+Checked warmup state and retried simulation
+
+Usage limit reached
+Each time I I speak my mark, um, it doesn't listen to everything I completely before it replaces. And, also, Mark is taking... still taking long to respond based on... I think it's... you see video video... if if if a transcript... everyone understand if it's an attorney receives a a a a a a... on a text. I wanted to make it to to to to more live streaming. that make make the condition to... should be responding and to be asking questions if it is not came my clarity. It should try to understand it should try to understand what I was to to to hear quickly. Mark should be looking more into into you guys to understanding me than than just replying me on on a word that it never understood. So to make sure you hand to the audio and listening and speakers, make sure mark says everything because from one thing I even even the transcript that that mark is reading, it's it's not saying everything at once and make mark to be faster in stock in in... and having a combination. Make mark to have expression in what the put some mix expression in sounds and how they are having a... kick kick kick kick kick kick kick kick kick kick kick look levely at things like, um, cough and and -- want to was substantin
+
