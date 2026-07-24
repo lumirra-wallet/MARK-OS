@@ -296,10 +296,11 @@ export function useVoice() {
         const rms = Math.sqrt(sum / (raw.length / 4));
         const now = performance.now();
         // Hangover must exceed the server's VAD end-of-speech window (0.8 s)
-        // PLUS its stitch window (1.2 s), because both tick on RECEIVED
-        // samples — the trailing silence we transmit is what lets the server
-        // finish the utterance. 2.6 s = 0.8 + 1.2 + margin.
-        if (rms > 0.006) gateOpenUntil = now + 2600;
+        // PLUS its LONGEST stitch window (2.8 s for an unfinished-sounding
+        // thought), because both tick on RECEIVED samples — the trailing
+        // silence we transmit is what lets the server finish the utterance.
+        // 4.5 s = 0.8 + 2.8 + margin.
+        if (rms > 0.006) gateOpenUntil = now + 4500;
         if (now > gateOpenUntil) return;                // silence → transmit nothing
 
         const pcm16k = resampleTo16k(raw, srcRate);

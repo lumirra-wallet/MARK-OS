@@ -62,8 +62,15 @@ VAD_CHUNK_SAMPLES = 512          # Silero VAD's required chunk at 16 kHz
 # MARK is speaking.  Room echo through a typical laptop/desk speaker measures
 # ~0.02–0.05 RMS at the mic; genuine voice at conversational distance is
 # typically ≥0.08.  Setting the threshold at 0.065 sits comfortably above
-# echo while still responding to a real barge-in within one chunk (~32ms).
+# steady echo.
 _BARGE_IN_THRESHOLD = 0.065
+
+# A single hot 32 ms chunk is NOT a barge-in: echo transients and clunks
+# spike briefly and were cutting MARK off mid-sentence ("Mark never says
+# everything").  Require this many CONSECUTIVE hot chunks (~100 ms of
+# sustained voice) before interrupting — a real interruption easily
+# sustains this; a spike never does.
+_BARGE_IN_CONSECUTIVE_CHUNKS = 3
 
 # POST_SPEECH cool-down: number of 16kHz samples to discard transcripts for.
 # 900ms × 16000 samples/s = 14400 samples.  Slightly longer than the TTS
@@ -80,11 +87,38 @@ _BARGE_IN_ECHO_HOLDOFF_SAMPLES = int(0.20 * SAMPLE_RATE)  # 200 ms
 # before emitting "final".  If the user starts speaking again within the window,
 # the new fragment is merged (at the text level) with the previous one so MARK
 # receives the complete thought, not a series of fragments.
-# 1 200 ms: phone-call feel.  Combined with the 800 ms VAD end-of-speech window
-# below, MARK reacts ~2 s after the owner stops talking (was ~4 s) — mid-
-# sentence pauses shorter than the VAD window never even reach stitching, and
-# a resumed thought within 1.2 s still merges into one utterance.
-_STITCH_WINDOW_SAMPLES = int(1.2 * SAMPLE_RATE)   # 1 200 ms
+#
+# ADAPTIVE: the window depends on whether the transcript so far LOOKS like a
+# finished thought.  The owner speaks with natural mid-thought pauses and
+# restarts; a fixed short window kept cutting them off and MARK answered
+# fragments he never fully heard.  A finished-sounding sentence gets the
+# short window (snappy reply); a trailing-off one gets the long window
+# (patience).  See _looks_complete().
+_STITCH_WINDOW_SAMPLES      = int(1.2 * SAMPLE_RATE)   # finished thought
+_STITCH_WINDOW_LONG_SAMPLES = int(2.8 * SAMPLE_RATE)   # sounds unfinished
+
+# Trailing words that strongly signal "I'm not done talking".
+_TRAILING_CONTINUATIONS = {
+    "and", "but", "so", "or", "because", "like", "um", "uh", "the", "a",
+    "to", "of", "with", "that", "is", "was", "if", "when", "then", "also",
+}
+
+
+def _looks_complete(text: str) -> bool:
+    """Heuristic: does this transcript sound like a finished thought?
+
+    Whisper punctuates its output, so terminal punctuation is a strong
+    completion signal; a trailing conjunction/filler or a very short
+    fragment is a strong continuation signal.
+    """
+    t = text.strip()
+    if not t:
+        return False
+    if t[-1] in ".!?":
+        last_word = t.rstrip(".!?,").rsplit(" ", 1)[-1].lower()
+        return last_word not in _TRAILING_CONTINUATIONS
+    # No terminal punctuation (trailing comma, dash, or nothing) → unfinished.
+    return False
 
 _whisper_model: Any = None
 _vad_model: Any = None
@@ -189,6 +223,8 @@ class VoiceSession:
 
         # Turn-taking state machine
         self._state = _STATE_LISTENING
+        # Consecutive hot chunks while MARK speaks (sustained barge-in gate)
+        self._barge_in_streak = 0
         # Counts down samples during POST_SPEECH holdoff
         self._post_holdoff_remaining = 0
         # Event used so speech_runtime can wake the holdoff early if needed
@@ -335,13 +371,20 @@ class VoiceSession:
 
         # ── TTS_ACTIVE: full mute ─────────────────────────────────────────────
         if self._state == _STATE_TTS_ACTIVE:
-            # Check chunk energy for barge-in detection
+            # Sustained-energy barge-in: require _BARGE_IN_CONSECUTIVE_CHUNKS
+            # hot chunks in a row (~100 ms of real voice).  A single spike —
+            # echo transient, cough, clunk — resets nothing MARK is saying.
             rms = float(np.sqrt(np.mean(samples ** 2)))
             if rms >= _BARGE_IN_THRESHOLD:
+                self._barge_in_streak += 1
+            else:
+                self._barge_in_streak = 0
+            if self._barge_in_streak >= _BARGE_IN_CONSECUTIVE_CHUNKS:
                 logger.warning(
-                    "voice_pipeline: barge-in detected (rms=%.4f ≥ %.4f) — interrupting",
-                    rms, _BARGE_IN_THRESHOLD,
+                    "voice_pipeline: sustained barge-in (rms=%.4f x%d) — interrupting",
+                    rms, self._barge_in_streak,
                 )
+                self._barge_in_streak = 0
                 self.barge_in()
                 events.append({"type": "speech_start"})
             # Discard all audio while muted (do NOT feed VAD)
@@ -393,11 +436,18 @@ class VoiceSession:
                             self._pending_final = self._pending_final + " " + text
                         else:
                             self._pending_final = text
-                        # (Re)start the stitch window countdown
-                        self._stitch_remaining = _STITCH_WINDOW_SAMPLES
+                        # (Re)start the stitch window countdown — patient when
+                        # the thought sounds unfinished, snappy when it doesn't.
+                        complete = _looks_complete(self._pending_final)
+                        self._stitch_remaining = (
+                            _STITCH_WINDOW_SAMPLES if complete
+                            else _STITCH_WINDOW_LONG_SAMPLES
+                        )
                         logger.warning(
-                            "voice_pipeline: fragment captured %r — stitch window open (2 s)",
+                            "voice_pipeline: fragment captured %r — stitch %.1fs (%s)",
                             self._pending_final[:60],
+                            self._stitch_remaining / SAMPLE_RATE,
+                            "complete" if complete else "unfinished",
                         )
                 self._utterance = []
 
