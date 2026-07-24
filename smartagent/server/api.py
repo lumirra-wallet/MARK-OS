@@ -1867,6 +1867,15 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
             except Exception:
                 pass
 
+        # Feed this turn back into Whisper's initial_prompt for the NEXT
+        # transcription — so Whisper knows the active vocabulary and topic.
+        # This dramatically improves recognition of accented/varied speech.
+        try:
+            from smartagent.server.voice_pipeline import update_session_context
+            update_session_context(text, reply_text)
+        except Exception:
+            pass
+
         await connection_manager.broadcast({
             "type":      "event",
             "name":      ServerEvents.RUN_COMPLETED,

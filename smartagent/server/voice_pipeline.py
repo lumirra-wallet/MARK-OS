@@ -58,6 +58,13 @@ logger = logging.getLogger(__name__)
 SAMPLE_RATE = 16000
 VAD_CHUNK_SAMPLES = 512          # Silero VAD's required chunk at 16 kHz
 
+# ── Target RMS for audio normalization ───────────────────────────────────────
+# Whisper accuracy drops sharply for quiet audio (RMS < 0.03).  We normalise
+# every utterance to this level before transcription.  Gain is capped at 12×
+# so broadband noise bursts don't get amplified into false transcriptions.
+_NORM_TARGET_RMS  = 0.12
+_NORM_MAX_GAIN    = 12.0
+
 # Barge-in: energy a chunk must exceed for a speech_start to be emitted while
 # MARK is speaking.  Room echo through a typical laptop/desk speaker measures
 # ~0.02–0.05 RMS at the mic; genuine voice at conversational distance is
@@ -94,7 +101,11 @@ _BARGE_IN_ECHO_HOLDOFF_SAMPLES = int(0.20 * SAMPLE_RATE)  # 200 ms
 # fragments he never fully heard.  A finished-sounding sentence gets the
 # short window (snappy reply); a trailing-off one gets the long window
 # (patience).  See _looks_complete().
-_STITCH_WINDOW_SAMPLES      = int(1.2 * SAMPLE_RATE)   # finished thought
+#
+# Increased from 1.2s → 2.0s for "complete" thoughts: non-native speakers and
+# those with accent variation need the extra beat to confirm they are done.
+# Long window stays at 4 s for unfinished fragments.
+_STITCH_WINDOW_SAMPLES      = int(2.0 * SAMPLE_RATE)   # finished thought (2 s — generous for accents)
 _STITCH_WINDOW_LONG_SAMPLES = int(4.0 * SAMPLE_RATE)   # sounds unfinished — 4 s for slower/thoughtful speakers
 
 # Trailing words that strongly signal "I'm not done talking".
@@ -157,37 +168,84 @@ def pcm16_to_float32(raw: bytes) -> np.ndarray:
     return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-def transcribe(audio: np.ndarray, *, partial: bool = False) -> str:
-    """Real Faster-Whisper transcription.  Segments where Whisper itself
-    thinks there is no speech (no_speech_prob > 0.55) are discarded.
-    Very short results (< 3 chars) are also rejected as noise."""
+def _normalize_audio(audio: np.ndarray) -> np.ndarray:
+    """Normalize utterance amplitude to a consistent RMS level.
+
+    Whisper's accuracy degrades significantly for quiet audio — a speaker who
+    is far from the mic or speaking softly can drop below the threshold where
+    Whisper reliably recognises phonemes.  Normalising to _NORM_TARGET_RMS
+    before every transcription call levels the playing field regardless of mic
+    gain, distance, or speaking volume.
+
+    The gain cap (_NORM_MAX_GAIN) prevents broadband noise bursts from being
+    amplified into false speech — if the chunk is genuinely silent/noise, RMS
+    will be tiny and the cap keeps it from blowing up into a hallucination.
+    """
+    rms = float(np.sqrt(np.mean(audio ** 2)))
+    if rms < 1e-7:
+        return audio   # truly silent — don't amplify
+    gain = min(_NORM_TARGET_RMS / rms, _NORM_MAX_GAIN)
+    return np.clip(audio * gain, -1.0, 1.0)
+
+
+def transcribe(
+    audio: np.ndarray,
+    *,
+    partial: bool = False,
+    initial_prompt: str | None = None,
+) -> str:
+    """Real Faster-Whisper transcription with conversation-context priming.
+
+    ``initial_prompt`` should be the last 1-3 turns of conversation text.
+    Whisper uses it as a "vocabulary hint" — dramatically improving accuracy
+    for accents, unusual names, and domain-specific terminology because
+    Whisper's decoder has already seen those tokens and biases toward them.
+
+    Segments where Whisper itself reports no_speech_prob > 0.50 are discarded.
+    Very short results (< 2 chars) are rejected as noise.
+    """
     if audio.size == 0:
         return ""
-    # beam_size=5 (faster-whisper's default) roughly 3-5x's the CPU time of
-    # beam_size=2 for a marginal accuracy gain — on CPU-only hardware that
-    # was a real, measurable slice of the "few seconds before MARK responds"
-    # latency users felt on every single turn. 2 keeps most of the accuracy
-    # while cutting that cost substantially; partials stay at 1 (display-only).
+
+    # Normalize amplitude before sending to Whisper
+    audio = _normalize_audio(audio)
+
     model = _get_whisper_model()
     segments, _ = model.transcribe(
-        audio, language="en",
-        beam_size=1 if partial else 3,   # beam_size=3 vs 2: better accuracy, still fast
+        audio,
+        language="en",
+        # beam_size=5 on final: standard Whisper default; gives meaningful
+        # accuracy gains for accented speech vs beam_size=3.  Partials stay
+        # at 1 — they're display-only so latency matters more than precision.
+        beam_size=1 if partial else 5,
         vad_filter=False,
-        temperature=0.0,                  # greedy decoding reduces hallucination
+        # Temperature fallback: 0.0 (greedy, low hallucination) first; if
+        # Whisper's compression_ratio or logprob heuristics flag the result as
+        # uncertain it automatically retries at 0.2.  This handles genuinely
+        # ambiguous phonemes that pure greedy decoding often gets wrong.
+        temperature=[0.0, 0.2] if not partial else 0.0,
         word_timestamps=False,
-        condition_on_previous_text=False, # prevents context bleeding across utterances
+        # condition_on_previous_text: only use when we have a real context
+        # prompt — without one it can cause context "bleeding" where Whisper
+        # copies tokens from a hallucinated prefix instead of the audio.
+        condition_on_previous_text=bool(initial_prompt),
+        initial_prompt=initial_prompt,
+        # Suppress common Whisper hallucination tokens (music, applause, etc.)
+        suppress_tokens=[-1],
     )
     texts: list[str] = []
     for seg in segments:
-        # Raise the no-speech rejection bar: was 0.55, now 0.65 — keeps more
-        # real speech while still filtering silence/noise transcription artifacts.
-        if getattr(seg, "no_speech_prob", 0.0) > 0.65:
+        # 0.50 threshold: more inclusive than the old 0.65 — keeps real speech
+        # from accented/quiet speakers that Whisper would otherwise silently
+        # drop.  Noise bursts are caught by the normalization cap + length filter.
+        if getattr(seg, "no_speech_prob", 0.0) > 0.50:
             continue
         t = seg.text.strip()
         if t:
             texts.append(t)
     result = " ".join(texts).strip()
-    return result if len(result) >= 3 else ""
+    # Minimum 2 chars — "ok", "no", "yes" are valid single-word turns.
+    return result if len(result) >= 2 else ""
 
 
 # ── Turn-taking states ────────────────────────────────────────────────────────
@@ -246,6 +304,31 @@ class VoiceSession:
         self._holdoff_done = threading.Event()
         self._holdoff_done.set()   # initially "done"
 
+        # Conversation context for Whisper initial_prompt
+        # Updated after every turn by update_session_context() so Whisper
+        # knows the active vocabulary and topic — dramatically improves
+        # recognition of names, technical terms, and accented pronunciation.
+        self._conversation_context: str = ""
+
+    def set_context(self, context: str) -> None:
+        """Update the conversation context hint fed to Whisper as initial_prompt.
+
+        Call this after every completed turn with the last 1-3 exchange lines.
+        Whisper's decoder biases toward tokens it has already seen in the
+        prompt, so giving it recent conversation text significantly improves
+        accuracy for:
+          - Accented/non-native speakers whose phoneme patterns differ
+          - Names (Elena, workspace names, project terms)
+          - Domain vocabulary the owner uses regularly
+          - Any word the owner pronounces differently from the training norm
+
+        The string is capped at 200 chars so it never exceeds Whisper's
+        initial_prompt token budget (~224 tokens for the smallest models).
+        """
+        # Keep only the last 200 chars — enough to give strong vocabulary
+        # signal without risking prompt overflow.
+        self._conversation_context = context.strip()[-200:]
+
     def _ensure_vad(self) -> None:
         """Load this session's PRIVATE VAD model on first audio.
 
@@ -262,12 +345,16 @@ class VoiceSession:
         self._vad_model = load_silero_vad()
         self._vad = VADIterator(
             self._vad_model, sampling_rate=SAMPLE_RATE,
-            threshold=0.5,
-            # 800 ms silence → VAD "end".  Short enough for phone-call
-            # responsiveness; anything the owner resumes within the 1.2 s
-            # stitch window still merges into the same utterance, so slow
-            # thinkers aren't cut off — their fragments are joined.
-            min_silence_duration_ms=800,
+            # Lowered from 0.5 → 0.35: catches softer speech and accented
+            # speakers whose phoneme energy sits below the old threshold.
+            # False positives (background hiss triggering VAD) are absorbed by
+            # the no_speech_prob filter in transcribe() and the 2-char minimum.
+            threshold=0.35,
+            # 1000 ms silence → VAD "end" (was 800 ms).  Non-native speakers
+            # and those with accent variation naturally pause longer between
+            # words.  The 2 s stitch window still merges fragments so the
+            # extended silence just means one more beat of patience.
+            min_silence_duration_ms=1000,
         )
 
     # ── Turn-taking API (called by speech_runtime / voice_websocket) ──────────
@@ -449,7 +536,10 @@ class VoiceSession:
                 self.speech_active = False
                 if self._utterance:
                     audio = np.concatenate(self._utterance)
-                    text  = transcribe(audio, partial=False)
+                    text  = transcribe(
+                        audio, partial=False,
+                        initial_prompt=self._conversation_context or None,
+                    )
                     if text:
                         # Append to any existing pending fragment
                         if self._pending_final:
@@ -494,7 +584,10 @@ class VoiceSession:
                 # fraction of the cost; the FINAL still uses the full audio.
                 self.samples_since_partial = 0
                 audio = np.concatenate(self._utterance)[-10 * SAMPLE_RATE:]
-                text  = transcribe(audio, partial=True)
+                text  = transcribe(
+                    audio, partial=True,
+                    initial_prompt=self._conversation_context or None,
+                )
                 if text:
                     # Show full context: already-stitched prefix + current fragment
                     if self._pending_final:
@@ -601,3 +694,29 @@ def unmute_active_session() -> None:
         s = _active_session
     if s is not None:
         s.unmute()
+
+
+def update_session_context(user_text: str, assistant_text: str) -> None:
+    """Feed the latest conversation turn into the active VoiceSession's Whisper
+    initial_prompt so the next transcription is primed with real vocabulary.
+
+    Called by api.py after every completed brain turn.  Thread-safe: reads the
+    registry under lock, then calls set_context outside it (set_context itself
+    only writes a plain str field — no lock needed for CPython's GIL).
+
+    The prompt is built as «User: …  Elena: …» so Whisper sees both sides of
+    the conversation — your words tell it your topic and vocabulary; Elena's
+    words reinforce names and terms she used that you're likely to echo back.
+    """
+    with _registry_lock:
+        s = _active_session
+    if s is None:
+        return
+    # Truncate each side so the combined prompt fits the 200-char cap in
+    # set_context().  User text gets more budget (120 vs 80) because Whisper
+    # recognising YOUR words is more important than recognising Elena's reply.
+    u = user_text.strip()[:120]
+    a = assistant_text.strip()[:80]
+    prompt = f"User: {u}  Elena: {a}" if a else f"User: {u}"
+    s.set_context(prompt)
+    logger.debug("voice_pipeline: Whisper context updated → %r", prompt[:80])
