@@ -261,6 +261,18 @@ def transcribe(
     if audio.size == 0:
         return ""
 
+    # ── Feature 7: Noise Separation — spectral subtraction ───────────────────
+    # Estimate stationary background noise from the first 0.1 s (usually
+    # pre-speech silence) and subtract it from the power spectrum.
+    # This reduces mic hiss, HVAC rumble, and keyboard noise before Whisper sees
+    # the audio — improving accuracy in noisy environments without any extra dep.
+    # Only applied to the final pass (not partials — speed matters there).
+    if not partial:
+        try:
+            audio = _spectral_subtract_noise(audio)
+        except Exception:
+            pass  # always fall through to the original audio on any error
+
     # Normalize amplitude before sending to Whisper
     audio = _normalize_audio(audio)
 
@@ -448,6 +460,77 @@ def _filter_hallucination(text: str) -> str:
             return ""
 
     return t
+
+
+# ── Feature 7: Noise Separation — spectral subtraction ────────────────────────
+# Pure-numpy implementation.  Uses the first 100ms of the utterance (which is
+# usually pre-speech background) to estimate the noise floor, then subtracts that
+# estimate from the power spectrum of the whole utterance.
+# Reduces stationary background noise (mic hiss, HVAC rumble, fan noise) before
+# Whisper sees the audio — improving accuracy in noisy environments without any
+# extra dependency beyond numpy (already required).
+
+def _spectral_subtract_noise(audio: np.ndarray, sr: int = SAMPLE_RATE) -> np.ndarray:
+    """Spectral subtraction noise reduction.
+
+    Estimates the stationary noise floor from the first 100 ms of the signal
+    (usually silence before the speaker starts) and subtracts it from every
+    short-time power spectrum frame.  Returns a float32 audio array at the
+    same length as the input.
+
+    Only applied to final-pass audio (not partials) — accuracy matters there;
+    speed matters for partials.  Fails silently: any exception causes the
+    original audio to be returned unchanged.
+    """
+    if audio.size < sr // 10:   # <100 ms — nothing to subtract
+        return audio
+
+    n_fft      = 512
+    hop        = n_fft // 4
+    n_noise_frames = max(1, (sr // 10) // hop)   # first ~100 ms as noise ref
+
+    # Hanning window
+    window = np.hanning(n_fft).astype(np.float32)
+
+    # Pad so we get complete frames at both ends
+    audio_padded = np.pad(audio, (n_fft // 2, n_fft // 2), mode="reflect")
+
+    # Build STFT (analysis)
+    n_frames = 1 + (len(audio_padded) - n_fft) // hop
+    frames   = np.lib.stride_tricks.sliding_window_view(audio_padded, n_fft)[::hop][:n_frames]
+    spectra  = np.fft.rfft(frames * window, n=n_fft)   # shape: (frames, n_fft//2+1)
+
+    # Noise estimate from first n_noise_frames
+    noise_mag_sq = np.mean(np.abs(spectra[:n_noise_frames]) ** 2, axis=0)
+
+    # Over-subtraction factor (α=2.0) + flooring (β=0.01) — standard SS parameters
+    alpha = 2.0
+    beta  = 0.01
+    sig_mag_sq  = np.abs(spectra) ** 2
+    clean_mag_sq = np.maximum(sig_mag_sq - alpha * noise_mag_sq, beta * sig_mag_sq)
+    clean_mag    = np.sqrt(clean_mag_sq)
+
+    # Restore phase from original spectra
+    phase        = np.exp(1j * np.angle(spectra))
+    clean_spectra = clean_mag * phase
+
+    # ISTFT (synthesis) — overlap-add
+    reconstructed = np.zeros(len(audio_padded), dtype=np.float32)
+    window_sum    = np.zeros(len(audio_padded), dtype=np.float32)
+    for i, frame_start in enumerate(range(0, len(audio_padded) - n_fft + 1, hop)):
+        if i >= len(clean_spectra):
+            break
+        frame = np.fft.irfft(clean_spectra[i], n=n_fft).astype(np.float32) * window
+        reconstructed[frame_start:frame_start + n_fft] += frame
+        window_sum[frame_start:frame_start + n_fft]    += window ** 2
+
+    # Normalize by window overlap (avoid division by zero)
+    mask = window_sum > 1e-8
+    reconstructed[mask] /= window_sum[mask]
+
+    # Trim the padding back to original length and clip to [-1, 1]
+    result = reconstructed[n_fft // 2 : n_fft // 2 + len(audio)]
+    return np.clip(result, -1.0, 1.0).astype(np.float32)
 
 
 # ── Turn-taking states ────────────────────────────────────────────────────────
@@ -847,12 +930,13 @@ class VoiceSession:
                             })
                 self._utterance = []
 
-            elif self.speech_active and self.samples_since_partial >= 2 * SAMPLE_RATE:
-                # ── Partial transcript (display only, every ~2 s of speech) ───
+            elif self.speech_active and self.samples_since_partial >= SAMPLE_RATE:
+                # ── Partial transcript (display only, every ~1 s of speech) ───
+                # Feature 2: Streaming Speech Recognition — emit partials every
+                # 1 s so the UI shows words appearing as the user speaks, not
+                # in 2 s jumps.  Still bounded at a 10 s tail to cap CPU.
                 # Every partial re-transcribes the accumulated utterance, so a
-                # 1 s cadence over an unbounded buffer was O(n²) CPU during
-                # long speech — a real contributor to the 100%-CPU stalls.
-                # 2 s cadence + a 10 s tail bound keeps the display live at a
+                # 1 s cadence + a 10 s tail bound keeps the display live at a
                 # fraction of the cost; the FINAL still uses the full audio.
                 self.samples_since_partial = 0
                 audio = np.concatenate(self._utterance)[-10 * SAMPLE_RATE:]

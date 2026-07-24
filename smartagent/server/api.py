@@ -1818,6 +1818,18 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
         from smartagent.server.brain_runtime import brain_runtime, Observation
         observation = Observation(text=text, workspace=ws, source="voice")
 
+        # ── Feature 5/9/10: Update conversation session BEFORE brain inference ──
+        # on_user_answered() clears any open questions (the owner just spoke —
+        # they've responded).  on_utterance() detects emotion/topic/entities and
+        # returns the updated state so brain_runtime.converse() sees it via
+        # conversation_session.to_prompt_block() and .resolve().
+        try:
+            from smartagent.server.conversation_session import conversation_session as _cvs_pre
+            _cvs_pre.on_user_answered()
+            _cvs_pre.on_utterance(text)
+        except Exception as _cvs_pre_exc:
+            logger.debug("voice_chat: pre-inference session update failed: %s", _cvs_pre_exc)
+
         if _brain is not None:
             await _brain.thinking_started(text)
 
@@ -1875,6 +1887,66 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
             update_session_context(text, reply_text)
         except Exception:
             pass
+
+        # ── Feature 5/9/10: Update conversation session state after reply ─────
+        try:
+            from smartagent.server.conversation_session import conversation_session as _cvs
+            _cvs.on_reply(reply_text)
+            # Broadcast updated session state to the dashboard
+            await connection_manager.broadcast({
+                "type":      "event",
+                "name":      "SessionStateChanged",
+                "payload":   _cvs.to_dict(),
+                "timestamp": _now_iso(),
+            })
+        except Exception as _cvs_exc:
+            logger.debug("voice_chat: session state broadcast failed: %s", _cvs_exc)
+
+        # ── Feature 11: Background Thinking ──────────────────────────────────
+        # After the turn completes, spawn a short async reflection task that:
+        #   1. Extracts semantic facts from this exchange into long-term memory
+        #   2. Updates the owner profile with signals from this utterance
+        #   3. Adds extracted facts to the conversation session for future turns
+        # This runs fully asynchronously — Elena is already back to listening.
+        async def _background_think() -> None:
+            try:
+                _bg_agent = await _get_mark_agent(ws or None)
+                # Extract owner signals from this turn
+                try:
+                    brain_runtime._owner_mem().extract_and_update(text)
+                except Exception:
+                    pass
+                # Extract and store semantic facts from the conversation pair
+                try:
+                    from smartagent.memory.layers.semantic import SemanticMemory
+                    sem = SemanticMemory()
+                    # Only store if the reply has real content worth remembering
+                    if reply_text and len(reply_text) > 30:
+                        sem.store(
+                            fact=f"User said: {text[:120]} | Elena replied: {reply_text[:200]}",
+                            source="voice_conversation",
+                            tags=["voice", "conversation"],
+                        )
+                except Exception:
+                    pass
+                # Update session background_facts with key extractions
+                try:
+                    from smartagent.server.conversation_session import conversation_session as _cvs2
+                    if decision is not None and decision.key_points:
+                        for kp in decision.key_points[:2]:
+                            if kp and len(kp) > 10:
+                                _cvs2.add_background_fact(kp[:150])
+                    # If Elena identified an active task from the intent, track it
+                    if decision is not None and decision.intent:
+                        intent_lower = decision.intent.lower()
+                        if any(kw in intent_lower for kw in ("build", "fix", "implement", "create", "debug", "test")):
+                            _cvs2.set_task(decision.intent[:80])
+                except Exception:
+                    pass
+            except Exception as _bg_exc:
+                logger.debug("voice_chat: background thinking failed: %s", _bg_exc)
+
+        asyncio.ensure_future(_background_think(), loop=loop)
 
         await connection_manager.broadcast({
             "type":      "event",

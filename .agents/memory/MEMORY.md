@@ -31,3 +31,4 @@
 - [Voice Echo Loop / Double Processing](voice-echo-loop.md) — 5 root causes for same-utterance processed twice; barge-in threshold, echo holdoff, tts_end holdoff restart, VAD silence threshold, isRunningRef race.
 - [Voice Always-Active Rebuild](voice-always-active.md) — ghost messages (idle inspector LLM calls removed), auto-start on mount, single-WS enforcement, browser TTS mic mute fix; global must be at function top.
 - [Elena Rebrand & Voice Pipeline](elena-rebrand.md) — MARK→Elena (she/her/35yo/American slang/short replies); Whisper small.en+temp=0; af_sky voice; user-visible labels only changed, internal state keys left as-is.
+- [Voice Pipeline 12-Feature Fix](voice-pipeline-12-features.md) — _spectral_subtract_noise was called but never defined (NameError on every final transcription); on_utterance never called before brain inference; both fixed.
