@@ -40,10 +40,9 @@ logger = logging.getLogger(__name__)
 _SENTENCE_END_RE = re.compile(r'([.!?]+["\')\]]*(?:\s+|$))')
 
 # Force a flush when no sentence boundary has been seen for this many chars.
-# 60 chars — produces the first audio chunk sooner (≈ half a sentence),
-# cutting time-to-first-audio even on short utterances.  Kokoro synthesizes
-# a 60-char sentence in ~0.3 s vs ~0.8 s for 160 chars.
-_SOFT_FLUSH_LEN = 60
+# 40 chars — produces the first audio chunk faster (~0.2 s vs 0.3 s for 60),
+# cutting time-to-first-audio on short conversational replies.
+_SOFT_FLUSH_LEN = 40
 
 _END_OF_REPLY = object()   # sentinel in the worker queue
 

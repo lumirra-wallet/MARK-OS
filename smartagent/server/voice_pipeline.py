@@ -74,16 +74,16 @@ _NORM_MAX_GAIN    = 12.0
 _BARGE_IN_THRESHOLD = 0.065
 
 # A single hot 32 ms chunk is NOT a barge-in: echo transients and clunks
-# spike briefly and were cutting MARK off mid-sentence ("Mark never says
-# everything").  Require this many CONSECUTIVE hot chunks (~100 ms of
-# sustained voice) before interrupting — a real interruption easily
-# sustains this; a spike never does.
-_BARGE_IN_CONSECUTIVE_CHUNKS = 3
+# spike briefly and were cutting Elena off mid-sentence.  Require this many
+# CONSECUTIVE hot chunks (~64 ms of sustained voice) before interrupting —
+# a real interruption easily sustains this; a spike never does.
+# Reduced from 3 → 2 so genuine barge-in is detected ~32 ms faster.
+_BARGE_IN_CONSECUTIVE_CHUNKS = 2
 
 # POST_SPEECH cool-down: number of 16kHz samples to discard transcripts for.
-# 900ms × 16000 samples/s = 14400 samples.  Slightly longer than the TTS
-# audio system's own 800ms holdoff so there is always overlap — no gap.
-_POST_SPEECH_HOLDOFF_SAMPLES = int(0.90 * SAMPLE_RATE)  # 900 ms
+# 550ms absorbs room reverb + AEC settling without making Elena feel deaf.
+# Reduced from 900ms → 550ms so she returns to listening ~350ms sooner.
+_POST_SPEECH_HOLDOFF_SAMPLES = int(0.55 * SAMPLE_RATE)  # 550 ms
 
 # Barge-in echo holdoff: after a barge-in, apply a short POST_SPEECH holdoff
 # (200ms) before opening the VAD for transcription.  The chunk that tripped the
@@ -103,11 +103,12 @@ _BARGE_IN_ECHO_HOLDOFF_SAMPLES = int(0.20 * SAMPLE_RATE)  # 200 ms
 # short window (snappy reply); a trailing-off one gets the long window
 # (patience).  See _looks_complete().
 #
-# Increased from 1.2s → 2.0s for "complete" thoughts: non-native speakers and
-# those with accent variation need the extra beat to confirm they are done.
-# Long window stays at 4 s for unfinished fragments.
-_STITCH_WINDOW_SAMPLES      = int(2.0 * SAMPLE_RATE)   # finished thought (2 s — generous for accents)
-_STITCH_WINDOW_LONG_SAMPLES = int(4.0 * SAMPLE_RATE)   # sounds unfinished — 4 s for slower/thoughtful speakers
+# Complete thoughts use speculative_final (fires immediately with 0 ms wait),
+# so _STITCH_WINDOW_SAMPLES is only the fallback path.  0.8 s is plenty —
+# if speculative_final already dispatched, dedup drops the "final" copy.
+# Unfinished fragments still get a patient 2.5 s to continue their thought.
+_STITCH_WINDOW_SAMPLES      = int(0.8 * SAMPLE_RATE)   # finished thought — fast fallback (speculative_final handles it)
+_STITCH_WINDOW_LONG_SAMPLES = int(2.5 * SAMPLE_RATE)   # sounds unfinished — 2.5 s patience window
 
 # Trailing words that strongly signal "I'm not done talking".
 _TRAILING_CONTINUATIONS = {

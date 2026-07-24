@@ -1717,6 +1717,8 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
     # belt-and-suspenders safety net; the real fix is a working LLM provider.
     _LOOP_PHRASES = (
         CHAT_FALLBACK_TEXT[:30].lower(),   # starts-with match on the first phrase
+        "i'm elena",
+        "i am elena",
         "i'm mark",
         "i am mark",
         "i plan engineering work",
@@ -1771,15 +1773,37 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
     # Wait for any interrupted run to fully clean up before we start, then
     # claim the lock atomically so a second concurrent coroutine can't slip
     # through the TOCTOU window between "see running=False" and "set running=True".
+    #
+    # Human-conversation behaviour: if the previous run is still active after
+    # 1.0 s (barge-in should have cancelled it already), we forcibly interrupt
+    # TTS and cancel the inference task rather than silently dropping the new
+    # utterance.  This ensures Elena never "stops talking" — she always responds.
     _lock = _get_voice_chat_lock()
     async with _lock:
-        for _ in range(30):
+        for _ in range(10):          # 1.0 s fast wait (barge-in usually clears this)
             if not _state.running:
                 break
             await asyncio.sleep(0.1)
         if _state.running:
-            logger.info("voice_chat: run still active after 3 s — skipping response for %r", text[:60])
-            return
+            # Barge-in didn't clear it — interrupt everything and take over.
+            logger.info(
+                "voice_chat: run still active after 1 s — interrupting for new utterance %r",
+                text[:60],
+            )
+            _state.cancel_requested = True
+            try:
+                speech_runtime.interrupt()
+            except Exception:
+                pass
+            if _current_inference_task is not None:
+                _current_inference_task.cancel()
+            # Give cleanup a brief moment to settle (non-blocking micro-wait).
+            for _ in range(8):       # up to 400 ms more
+                if not _state.running:
+                    break
+                await asyncio.sleep(0.05)
+            # Force the slot open — we own it now regardless.
+            _state.running = False
         # Claim the run slot immediately while still holding the lock.
         _state.running = True
         logger.info("voice_chat: starting response for %r", text[:80])
