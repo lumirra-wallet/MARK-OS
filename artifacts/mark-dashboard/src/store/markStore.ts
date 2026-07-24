@@ -1,6 +1,16 @@
 import { create } from 'zustand';
 import { markApi, PermissionInfo, SelfState } from '@/lib/markApi';
-// SpeechPlayer removed — audio now delivered via LiveKit RemoteAudioTrack
+import { SpeechPlayer } from '@/lib/speechPlayer';
+
+// MARK's real voice audio arrives as binary PCM16 @ 24 kHz frames on the main
+// /ws (one Kokoro sentence per frame) and is played gaplessly here. This is the
+// WebSocket voice transport — no LiveKit/WebRTC. One shared player for the app.
+const KOKORO_SAMPLE_RATE = 24000;
+let speechPlayer: SpeechPlayer | null = null;
+function getSpeechPlayer(): SpeechPlayer {
+  if (!speechPlayer) speechPlayer = new SpeechPlayer(KOKORO_SAMPLE_RATE);
+  return speechPlayer;
+}
 
 // ── Chat message model ────────────────────────────────────────────────────────
 
@@ -532,7 +542,8 @@ export const useMarkStore = create<MarkState>((set, get) => {
     memoryActivity:   [],
     knowledgeGrowth:  0,
     stopMarkSpeech: () => {
-      // Audio comes via LiveKit; no speechPlayer to stop — just reset state.
+      // Instant interruption (barge-in): cut all scheduled + playing audio.
+      getSpeechPlayer().stop();
       set({ isMarkSpeaking: false });
     },
 
@@ -650,11 +661,11 @@ export const useMarkStore = create<MarkState>((set, get) => {
         ws.onerror = () => { /* handled by close */ };
 
         ws.onmessage = (event) => {
-          // Binary frames: in the LiveKit architecture, TTS audio is delivered
-          // via the LiveKit RemoteAudioTrack, NOT over this WebSocket.
-          // If a binary frame arrives (e.g. legacy fallback when LiveKit is
-          // not configured), discard it — SpeechPlayer has been removed.
+          // Binary frames = MARK's real voice: raw PCM16 @ 24 kHz, one Kokoro
+          // sentence per frame, streamed by speech_runtime over this /ws.
+          // Enqueue for gapless playback (WebSocket voice transport).
           if (event.data instanceof ArrayBuffer) {
+            getSpeechPlayer().enqueue(event.data);
             return;
           }
           try {

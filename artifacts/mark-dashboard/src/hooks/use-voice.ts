@@ -250,8 +250,11 @@ export function useVoice() {
       } catch (err) {
         console.warn('[MARK voice] mic unavailable:', err);
         setIsListening(false);
-        // Connection succeeded but mic failed — don't close the WS; it will
-        // reconnect.  Mark as not listening so the UI shows the correct state.
+        // Mic denied / unavailable (permission not yet granted, or a
+        // non-secure origin like a LAN IP). Back off to 10 s before retrying
+        // so we don't reconnect-storm every second while waiting for the user
+        // to grant the microphone. A successful open later resets this to 1 s.
+        reconnectDelayRef.current = 10_000;
         ws.close();
         return;
       }

@@ -1876,6 +1876,110 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# WebSocket voice transport — continuous mic streaming, no WebRTC.
+#
+# This is the reliable single-user local transport: the browser
+# (use-voice.ts) streams raw PCM16 @ 16 kHz frames over this WebSocket; we
+# feed them to a VoiceSession (Silero VAD + faster-whisper + turn-taking)
+# and stream transcript events back.  MARK's spoken reply (Kokoro TTS) goes
+# back as binary PCM frames on the MAIN /ws connection (speech_runtime's
+# legacy broadcast path, active whenever no LiveKit AudioSource is set).
+#
+# No separate server, no JWT, no UDP media ports, no Windows-Firewall
+# surface — everything rides the one TCP WebSocket the dashboard already
+# uses.  Chosen over self-hosted LiveKit for exactly that reliability.
+# ---------------------------------------------------------------------------
+
+@router.post("/voice/message")
+async def voice_message(payload: dict) -> dict:
+    """Receive a final voice transcript and trigger MARK's spoken reply.
+
+    The browser POSTs {text, workspace} here the moment the server-side VAD
+    reports a complete utterance (the 'final' event on /ws/voice).  MARK's
+    reply is generated in the background and streamed back as audio over the
+    main /ws — so this returns immediately.
+    """
+    text = (payload.get("text") or "").strip()
+    workspace = payload.get("workspace") or _state.workspace or ""
+    if not text:
+        return {"ok": False, "reason": "empty"}
+    asyncio.ensure_future(_voice_chat_response(text, workspace))
+    return {"ok": True}
+
+
+@router.websocket("/ws/voice")
+async def voice_websocket(ws: WebSocket) -> None:
+    """Continuous browser-mic voice stream.
+
+    Protocol
+    --------
+    Browser → server:
+      * binary frames  — raw PCM16 mono @ 16 kHz mic audio
+      * text  {"type":"tts_start"} / {"type":"tts_end"} — mic-gate hints while
+        MARK is speaking (secondary echo-cancellation layer)
+
+    Server → browser (JSON text frames):
+      * {"type":"speech_start"}        — user started talking (drives barge-in)
+      * {"type":"partial","text":...}  — interim transcript (display only)
+      * {"type":"final","text":...}    — complete utterance; browser POSTs it
+                                          to /voice/message to get MARK's reply
+    """
+    from smartagent.server.voice_pipeline import (
+        VoiceSession, register_session, unregister_session,
+    )
+
+    await ws.accept()
+    loop = asyncio.get_event_loop()
+    # Make sure speech_runtime can stream TTS audio + speech events back over
+    # the main /ws while this voice socket is open.
+    speech_runtime.attach(connection_manager, loop)
+
+    session = VoiceSession()
+    register_session(session)
+    logger.info("voice_ws: mic stream connected")
+
+    try:
+        while True:
+            message = await ws.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+
+            data = message.get("bytes")
+            if data is not None:
+                # Feed one PCM16 frame through VAD/STT.  transcribe() inside
+                # feed() is blocking, so run the whole step in a worker thread
+                # to keep the event loop responsive.  Calls are awaited in
+                # order, so VoiceSession is never touched concurrently.
+                try:
+                    events = await asyncio.to_thread(session.feed, data)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("voice_ws: feed error: %s", exc)
+                    continue
+                for ev in events:
+                    await ws.send_text(json.dumps(ev))
+                continue
+
+            text = message.get("text")
+            if text:
+                try:
+                    ctrl = json.loads(text)
+                except Exception:
+                    continue
+                ctrl_type = ctrl.get("type")
+                if ctrl_type == "tts_start":
+                    session.mute()
+                elif ctrl_type == "tts_end":
+                    session.unmute()
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("voice_ws: %s", exc)
+    finally:
+        unregister_session(session)
+        logger.info("voice_ws: mic stream disconnected")
+
+
+# ---------------------------------------------------------------------------
 # LiveKit voice endpoints (M1 + WebSocket proxy for signaling)
 # ---------------------------------------------------------------------------
 

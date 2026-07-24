@@ -116,18 +116,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _scan_interval = float(_os.environ.get("PREVIEW_SCAN_INTERVAL", "15"))
     preview_manager.start_detection(loop, connection_manager, interval=_scan_interval)
 
-    # Start MARK's LiveKit agent — joins 'mark-presence' room and stays connected.
-    # No-op if LIVEKIT_API_KEY / LIVEKIT_API_SECRET are not configured, or if
-    # the 'livekit' package is not installed.  Safe to remove entirely if you
-    # never want LiveKit.
-    # LiveKit presence agent — joins 'mark-presence' for real-time session
-    # coordination.  Audio transport is via /ws binary frames (not LiveKit).
-    # No-op when LIVEKIT_API_KEY/SECRET are absent or 'livekit' not installed.
-    try:
-        from smartagent.server.livekit_agent import livekit_agent as _lk_agent
-        await _lk_agent.start()
-    except Exception as _lk_exc:
-        logger.warning("LiveKit agent init failed (non-fatal): %s", _lk_exc)
+    # Voice transport selection.  Default is "websocket": the browser streams
+    # mic PCM over /ws/voice and hears MARK via binary frames on the main /ws
+    # (see api.py voice_websocket).  This needs no separate server, no JWT, and
+    # no UDP media ports — the reliable choice for a single local machine.
+    #
+    # Set VOICE_TRANSPORT=livekit to instead run the self-hosted LiveKit agent
+    # (WebRTC/SFU) — only worth it for cloud / multi-user deployments, and it
+    # requires livekit-server running plus firewall access to its media ports.
+    voice_transport = _os.environ.get("VOICE_TRANSPORT", "websocket").strip().lower()
+    if voice_transport == "livekit":
+        try:
+            from smartagent.server.livekit_agent import livekit_agent as _lk_agent
+            await _lk_agent.start()
+            logger.info("Voice transport: LiveKit agent started")
+        except Exception as _lk_exc:
+            logger.warning("LiveKit agent init failed (non-fatal): %s", _lk_exc)
+    else:
+        logger.info("Voice transport: WebSocket (/ws/voice) — LiveKit disabled")
 
     yield
     logger.info("MARK server shutting down")

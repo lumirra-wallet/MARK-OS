@@ -2,15 +2,6 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "livekit-server",
-      "runtimeExecutable": "C:\\Program Files\\Git\\bin\\bash.exe",
-      "runtimeArgs": [
-        "-c",
-        "cd \"C:/Users/Mr smart/MARK-OS/.tools\" && ./livekit-server.exe --dev"
-      ],
-      "port": 7880
-    },
-    {
       "name": "mark",
       "runtimeExecutable": "C:\\Program Files\\Git\\bin\\bash.exe",
       "runtimeArgs": [
