@@ -13,7 +13,7 @@ import { useMarkStore } from '@/store/markStore';
  * ──────────────
  *   Inbound (mic → MARK):
  *     getUserMedia (native sample rate, AEC + NS + AGC on)
- *     → ScriptProcessorNode
+ *     → AudioWorkletNode (mark-audio-processor.js, audio render thread)
  *     → resampleTo16k (linear interpolation)
  *     → floatTo16BitPCM
  *     → binary WebSocket frames → /ws/voice
@@ -116,7 +116,7 @@ export function useVoice() {
   // ── Refs (stable across renders, no re-render cost) ──────────────────────
   const wsRef              = useRef<WebSocket | null>(null);
   const audioCtxRef        = useRef<AudioContext | null>(null);
-  const processorRef       = useRef<ScriptProcessorNode | null>(null);
+  const processorRef       = useRef<AudioWorkletNode | null>(null);
   const analyserRef        = useRef<AnalyserNode | null>(null);
   const streamRef          = useRef<MediaStream | null>(null);
   const rafRef             = useRef(0);
@@ -275,15 +275,25 @@ export function useVoice() {
       }
       streamRef.current = stream;
 
-      // ── Audio graph: source → analyser → processor → silence sink ──────
+      // ── Audio graph: source → analyser → worklet → silence sink ─────────
       const ctx = new AudioContext();
       audioCtxRef.current = ctx;
-      const source    = ctx.createMediaStreamSource(stream);
-      const analyser  = ctx.createAnalyser();
+      const source   = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
-      // 4096-sample buffer ≈ 85 ms at 48 kHz — fine granularity for voice
-      const processor = ctx.createScriptProcessor(4096, 1, 1);
-      const srcRate   = ctx.sampleRate;
+      const srcRate  = ctx.sampleRate;
+
+      // Load the AudioWorklet processor from the public folder.
+      // import.meta.env.BASE_URL resolves to e.g. "/mark-dashboard/" so the
+      // full URL is "/mark-dashboard/mark-audio-processor.js" — correct under
+      // Vite's configured base path.
+      // AudioWorkletNode replaces the deprecated ScriptProcessorNode: it runs
+      // on the dedicated audio render thread (no main-thread jitter) and uses
+      // zero-copy ArrayBuffer transfer for the PCM chunks.
+      await ctx.audioWorklet.addModule(
+        `${import.meta.env.BASE_URL}mark-audio-processor.js`,
+      );
+      const processor = new AudioWorkletNode(ctx, 'mark-audio-processor');
 
       // ── Energy gate state ─────────────────────────────────────────────
       // Only transmit audio when there is actual signal (plus a hangover
@@ -295,16 +305,20 @@ export function useVoice() {
       //     the hangover keeps VAD context around soft speech onsets.
       let gateOpenUntil = 0;
 
-      processor.onaudioprocess = (ev: AudioProcessingEvent) => {
-        // ── Client-side mic gate ────────────────────────────────────────
+      // The worklet transfers a 4096-sample Float32Array chunk (~85 ms at
+      // 48 kHz) via its MessagePort.  Energy gating and WebSocket dispatch
+      // stay on the main thread so they can read micMutedRef without any
+      // cross-thread messaging overhead.
+      processor.port.onmessage = (ev: MessageEvent<ArrayBuffer>) => {
+        // ── Client-side mic gate ──────────────────────────────────────
         // Stop sending PCM while MARK is speaking OR while the user has
-        // muted (enabledRef = false).  This is the secondary echo
-        // cancellation layer; the server's proactive mute is the primary.
+        // muted (enabledRef = false).  Secondary echo-cancellation layer;
+        // the server's proactive mute is the primary.
         if (micMutedRef.current) return;
         if (!enabledRef.current) return;
         if (ws.readyState !== WebSocket.OPEN) return;
 
-        const raw = ev.inputBuffer.getChannelData(0);
+        const raw = new Float32Array(ev.data);
         // RMS energy of this ~85 ms block
         let sum = 0;
         for (let i = 0; i < raw.length; i += 4) sum += raw[i] * raw[i];
@@ -316,7 +330,7 @@ export function useVoice() {
         // silence we transmit is what lets the server finish the utterance.
         // 4.5 s = 0.8 + 2.8 + margin.
         if (rms > 0.006) gateOpenUntil = now + 4500;
-        if (now > gateOpenUntil) return;                // silence → transmit nothing
+        if (now > gateOpenUntil) return;              // silence → transmit nothing
 
         const pcm16k = resampleTo16k(raw, srcRate);
         ws.send(floatTo16BitPCM(pcm16k));
@@ -324,7 +338,10 @@ export function useVoice() {
 
       source.connect(analyser);
       analyser.connect(processor);
-      // Processor must be connected to destination to fire onaudioprocess
+      // Connect to destination so Chrome's audio graph keeps the worklet
+      // alive (AudioWorkletNode.process() returns true to self-sustain, but
+      // an unconnected output graph can still be garbage-collected in some
+      // versions).  The worklet outputs silence so there is no audible effect.
       processor.connect(ctx.destination);
 
       analyserRef.current  = analyser;
@@ -399,11 +416,12 @@ export function useVoice() {
       stopMic();
       if (!enabledRef.current) return;
       // Code 4000 = evicted: another tab started streaming mic audio and now
-      // owns the conversation. Don't fight it — back off a long while so the
-      // two tabs can't ping-pong evict each other.
+      // owns the conversation. Give it a short pause then try to reclaim —
+      // the other tab may have closed. 3 s is enough to avoid a ping-pong
+      // without a noticeable hole in presence.
       if (ev.code === 4000) {
-        console.log('[MARK voice] another tab took over the conversation — standing by');
-        reconnectDelayRef.current = 30_000;
+        console.log('[MARK voice] evicted by another tab — reclaiming in 3 s');
+        reconnectDelayRef.current = 3_000;
       }
       // Exponential back-off reconnect (cap at 30 s)
       const delay = reconnectDelayRef.current;

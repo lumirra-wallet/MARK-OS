@@ -422,13 +422,15 @@ function PresenceEngineInner({ className = '', micLevel = 0, isListening = false
     let hue = BASE_HUE;
     let coreIntensity = 0.2;
     let learnWaveFront = 0; // advances only while genuinely in 'learning' mode
-    const clock = new THREE.Clock();
+    // THREE.Timer replaces the deprecated THREE.Clock.
+    const timer = new THREE.Timer();
     let introT = 0; // one-shot gentle fade/scale-in on mount
 
     const loop = () => {
+      timer.update();
       const { selfState, isTextSpeaking, tokenTimestamps, micLevel, isListening, isVoiceSpeaking } = stateRef.current;
-      const t = clock.getElapsedTime();
-      const dt = Math.min(clock.getDelta(), 0.05);
+      const t = timer.getElapsed();
+      const dt = Math.min(timer.getDelta(), 0.05);
 
       const mode = selfState?.mode ?? 'idle';
       const modeEnergy = MODE_ENERGY[mode] ?? 0.2;
@@ -545,13 +547,16 @@ function PresenceEngineInner({ className = '', micLevel = 0, isListening = false
         (p.sprite.material as THREE.SpriteMaterial).opacity = 0.06 + breathe * 0.09 + energy * 0.04;
       }
 
-      // ── Two-pass render: capture everything except the membrane's own ──
-      // spark to the backdrop texture (it should refract the atmosphere,
-      // not itself), then render the full scene through the bloom composer.
+      // ── Two-pass render: capture everything *except* the membrane to the ──
+      // backdrop texture — the membrane samples that texture for refraction,
+      // so it must be invisible during the first pass, otherwise it samples
+      // its own previous-frame output (WebGL feedback loop / temporal echo).
+      membrane.visible = false;
       const prevTarget = renderer.getRenderTarget();
       renderer.setRenderTarget(backdropTarget);
       renderer.render(scene, camera);
       renderer.setRenderTarget(prevTarget);
+      membrane.visible = true;
       composer.render();
     };
 
