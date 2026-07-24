@@ -404,7 +404,15 @@ def _load_github(model: str, model_manager: Any) -> None:
 
 
 def _load_nvidia(model: str, model_manager: Any) -> None:
-    """Register NvidiaProvider instances in model_manager."""
+    """Register NvidiaProvider instances in model_manager.
+
+    Also registers a local Ollama fallback (when OLLAMA_HOST is configured)
+    so an NVIDIA outage or rate-limit (e.g. ResourceExhausted) silently
+    retries on the local model instead of leaving MARK unable to respond —
+    the exact mirror of how _load_ollama() uses NVIDIA as its fallback.
+    NVIDIA stays the active/preferred engine; Ollama is only touched when an
+    NVIDIA call actually fails.
+    """
     api_key = os.environ.get("NVIDIA_API_KEY", "")
     if not api_key:
         logger.warning("ProviderFactory: NVIDIA_API_KEY not set — NVIDIA provider unavailable")
@@ -421,6 +429,24 @@ def _load_nvidia(model: str, model_manager: Any) -> None:
         logger.info("ProviderFactory: active NVIDIA model → %s", model)
     except Exception as exc:
         logger.warning("ProviderFactory: failed to load NVIDIA provider: %s", exc)
+        return
+
+    ollama_host = os.environ.get("OLLAMA_HOST", "")
+    if not ollama_host:
+        logger.info("ProviderFactory: OLLAMA_HOST not set — no Ollama fallback for NVIDIA")
+        return
+    try:
+        from smartagent.models.providers.ollama_provider import OllamaProvider
+        ollama_model = OLLAMA_DEFAULT_MODEL
+        if model_manager.registry.find(ollama_model) is None:
+            p = OllamaProvider(model_name=ollama_model, base_url=ollama_host)
+            model_manager.registry.register(p)
+            logger.info("ProviderFactory: registered Ollama model %s as NVIDIA fallback", ollama_model)
+        if hasattr(model_manager, "set_fallback"):
+            model_manager.set_fallback(ollama_model, is_failure=is_llm_error_text)
+            logger.info("ProviderFactory: Ollama fallback active for NVIDIA (model=%s)", ollama_model)
+    except Exception as exc:
+        logger.warning("ProviderFactory: failed to register Ollama fallback for NVIDIA: %s", exc)
 
 
 def _load_ollama(model: str, model_manager: Any) -> None:

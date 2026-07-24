@@ -1815,50 +1815,42 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
         # Planner turn that Decision into spoken words. MARK's cognition never
         # depends on generated text; the words express the Decision, they are
         # not the Decision. See smartagent/server/brain_runtime.py.
-        from smartagent.server.brain_runtime import (
-            brain_runtime, speech_planner, Observation,
-        )
+        from smartagent.server.brain_runtime import brain_runtime, Observation
         observation = Observation(text=text, workspace=ws, source="voice")
 
         if _brain is not None:
             await _brain.thinking_started(text)
 
-        # Stage 1 — deliberate: transcript → Decision (no speech yet).
+        # Fused phone-call turn: ONE streamed reasoning call in which the
+        # semantic Decision is emitted first (cognition), then MARK's spoken
+        # words stream straight into speech_runtime → Kokoro. The decision is
+        # surfaced to the dashboard the moment it completes — before speech.
+        def _on_decision(decision) -> None:  # runs in the worker thread
+            asyncio.run_coroutine_threadsafe(
+                connection_manager.broadcast({
+                    "type":      "event",
+                    "name":      "MarkDecision",
+                    "payload":   decision.to_event(),
+                    "timestamp": _now_iso(),
+                }),
+                loop,
+            )
+
         _current_inference_task = asyncio.ensure_future(
-            asyncio.to_thread(brain_runtime.deliberate, observation, agent)
+            asyncio.to_thread(
+                brain_runtime.converse, observation, agent, event_bus,
+                token_event=ServerEvents.STREAMING_TOKEN,
+                on_decision=_on_decision,
+            )
         )
+        decision = None
+        reply_text = ""
         try:
-            decision = await _current_inference_task
+            decision, reply_text = await _current_inference_task
         except asyncio.CancelledError:
-            decision = None
+            pass
         finally:
             _current_inference_task = None
-
-        reply_text = ""
-        if decision is not None:
-            # Surface MARK's actual (semantic) response to the dashboard — the
-            # Decision itself, not just the words that will express it.
-            await connection_manager.broadcast({
-                "type":      "event",
-                "name":      "MarkDecision",
-                "payload":   decision.to_event(),
-                "timestamp": _now_iso(),
-            })
-
-            # Stage 2 — speech planning: Decision → spoken words (streamed to
-            # speech_runtime as STREAMING_TOKEN/source=mark → Kokoro).
-            _current_inference_task = asyncio.ensure_future(
-                asyncio.to_thread(
-                    speech_planner.render, decision, agent, event_bus,
-                    token_event=ServerEvents.STREAMING_TOKEN,
-                )
-            )
-            try:
-                reply_text = await _current_inference_task
-            except asyncio.CancelledError:
-                reply_text = ""
-            finally:
-                _current_inference_task = None
 
         if _brain is not None:
             await _brain.thinking_finished(
@@ -1935,6 +1927,11 @@ async def voice_message(payload: dict) -> dict:
     return {"ok": True}
 
 
+# The one live mic stream (see eviction logic in voice_websocket): exactly
+# one browser tab owns the conversation at a time; the newest connection wins.
+_active_voice_ws: dict[str, Any] = {"ws": None}
+
+
 @router.websocket("/ws/voice")
 async def voice_websocket(ws: WebSocket) -> None:
     """Continuous browser-mic voice stream.
@@ -1949,14 +1946,31 @@ async def voice_websocket(ws: WebSocket) -> None:
     Server → browser (JSON text frames):
       * {"type":"speech_start"}        — user started talking (drives barge-in)
       * {"type":"partial","text":...}  — interim transcript (display only)
-      * {"type":"final","text":...}    — complete utterance; browser POSTs it
-                                          to /voice/message to get MARK's reply
+      * {"type":"final","text":...}    — complete utterance (display only)
+
+    Phone-call loop: when VAD closes an utterance ("final"), MARK's brain is
+    dispatched HERE, server-side, the same instant — the browser never relays
+    the transcript back (the old final → browser → debounce → POST round-trip
+    added seconds of latency and silently dropped turns when the tab was
+    throttled).  The browser only displays transcripts and plays audio.
     """
     from smartagent.server.voice_pipeline import (
         VoiceSession, register_session, unregister_session,
     )
 
     await ws.accept()
+
+    # Single-conversation guarantee: exactly one live mic stream. A new
+    # connection (tab refresh, reconnect) evicts the previous one so two
+    # sessions never fight over the conversation.
+    prev = _active_voice_ws.get("ws")
+    if prev is not None and prev is not ws:
+        try:
+            await prev.close(code=4000)
+        except Exception:
+            pass
+    _active_voice_ws["ws"] = ws
+
     loop = asyncio.get_event_loop()
     # Make sure speech_runtime can stream TTS audio + speech events back over
     # the main /ws while this voice socket is open.
@@ -1964,6 +1978,7 @@ async def voice_websocket(ws: WebSocket) -> None:
 
     session = VoiceSession()
     register_session(session)
+    ws_workspace = ws.query_params.get("workspace", "") or ""
     logger.info("voice_ws: mic stream connected")
 
     try:
@@ -1985,6 +2000,11 @@ async def voice_websocket(ws: WebSocket) -> None:
                     continue
                 for ev in events:
                     await ws.send_text(json.dumps(ev))
+                    # ── Direct brain dispatch — the streamline loop ────────
+                    if ev.get("type") == "final" and ev.get("text"):
+                        asyncio.ensure_future(
+                            _voice_chat_response(ev["text"], ws_workspace)
+                        )
                 continue
 
             text = message.get("text")
@@ -2003,6 +2023,8 @@ async def voice_websocket(ws: WebSocket) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.warning("voice_ws: %s", exc)
     finally:
+        if _active_voice_ws.get("ws") is ws:
+            _active_voice_ws["ws"] = None
         unregister_session(session)
         logger.info("voice_ws: mic stream disconnected")
 

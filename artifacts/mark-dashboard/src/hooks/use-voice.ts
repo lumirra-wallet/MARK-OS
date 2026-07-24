@@ -96,7 +96,7 @@ function floatTo16BitPCM(floatPCM: Float32Array): ArrayBuffer {
 
 export function useVoice() {
   const {
-    workspace, sendVoiceMessage, serverUrl,
+    workspace, addSpokenUserMessage, serverUrl,
     isMarkSpeaking, speechEngineUnavailable, stopMarkSpeech,
   } = useMarkStore();
 
@@ -322,31 +322,11 @@ export function useVoice() {
 
         case 'final':
           setInterimTranscript('');
-          if (msg.text) {
-            // Accumulate — the server stitches with a 2 s window, but if
-            // it sends rapid finals (edge case) we collapse them here too.
-            accumulatedRef.current = accumulatedRef.current
-              ? accumulatedRef.current + ' ' + msg.text
-              : msg.text;
-
-            // Reset the debounce timer every time a new fragment arrives.
-            if (stitchTimerRef.current) clearTimeout(stitchTimerRef.current);
-            stitchTimerRef.current = setTimeout(() => {
-              stitchTimerRef.current = null;
-              const fullText = accumulatedRef.current.trim();
-              accumulatedRef.current = '';
-              if (!fullText) return;
-              if (isRunningRef.current) {
-                // MARK is running — queue; flush when run completes.
-                pendingMsgRef.current = fullText;
-              } else {
-                // Lock immediately — do NOT wait for the useEffect that
-                // syncs isRunningRef; that runs after the next render.
-                isRunningRef.current = true;
-                void sendVoiceMessage(fullText, workspace);
-              }
-            }, 1500);   // 1.5 s: collapses any rapid server-side finals
-          }
+          // Display only. The server dispatched MARK's brain the instant the
+          // VAD closed this utterance (see voice_websocket in api.py) — the
+          // old final → 1.5 s debounce → POST /voice/message round-trip is
+          // gone, and with it its latency and its tab-throttling dropouts.
+          if (msg.text) addSpokenUserMessage(msg.text, workspace);
           break;
       }
     };
@@ -367,7 +347,7 @@ export function useVoice() {
       // onclose fires next; reconnect handled there
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildWsUrl, pollLevel, sendVoiceMessage, stopMarkSpeech, stopMic, workspace]);
+  }, [buildWsUrl, pollLevel, addSpokenUserMessage, stopMarkSpeech, stopMic, workspace]);
 
   // ── Fully stop voice (no reconnect) ──────────────────────────────────────
   const disconnectVoice = useCallback(() => {
@@ -425,22 +405,10 @@ export function useVoice() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supported]);
 
-  // ── Flush queued message when run completes ───────────────────────────────
-  useEffect(() => {
-    if (!isRunning && pendingMsgRef.current && enabledRef.current) {
-      const queued = pendingMsgRef.current;
-      pendingMsgRef.current = null;
-      // Also cancel any stitch timer — the run completing is a clean boundary.
-      if (stitchTimerRef.current) {
-        clearTimeout(stitchTimerRef.current);
-        stitchTimerRef.current = null;
-        accumulatedRef.current = '';
-      }
-      // Lock immediately — same reason as in the 'final' handler above.
-      isRunningRef.current = true;
-      void sendVoiceMessage(queued, workspace);
-    }
-  }, [isRunning, sendVoiceMessage, workspace]);
+  // (The old "flush queued message when run completes" effect is gone: the
+  // browser no longer owns turn dispatch at all — the server dispatches
+  // MARK's brain directly from the VAD 'final', and its own voice-chat lock
+  // serialises overlapping turns. Nothing to queue client-side.)
 
   // ── Emergency fallback: browser TTS when Kokoro unavailable ──────────────
   // IMPORTANT: mute the mic gate before speak() so MARK's browser voice

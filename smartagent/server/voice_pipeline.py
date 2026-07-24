@@ -80,9 +80,11 @@ _BARGE_IN_ECHO_HOLDOFF_SAMPLES = int(0.20 * SAMPLE_RATE)  # 200 ms
 # before emitting "final".  If the user starts speaking again within the window,
 # the new fragment is merged (at the text level) with the previous one so MARK
 # receives the complete thought, not a series of fragments.
-# 2 000 ms is long enough to cover most mid-sentence thinking pauses while still
-# feeling responsive.
-_STITCH_WINDOW_SAMPLES = int(2.0 * SAMPLE_RATE)   # 2 000 ms
+# 1 200 ms: phone-call feel.  Combined with the 800 ms VAD end-of-speech window
+# below, MARK reacts ~2 s after the owner stops talking (was ~4 s) — mid-
+# sentence pauses shorter than the VAD window never even reach stitching, and
+# a resumed thought within 1.2 s still merges into one utterance.
+_STITCH_WINDOW_SAMPLES = int(1.2 * SAMPLE_RATE)   # 1 200 ms
 
 _whisper_model: Any = None
 _vad_model: Any = None
@@ -167,15 +169,23 @@ class VoiceSession:
     """
 
     def __init__(self) -> None:
-        from silero_vad import VADIterator
+        from silero_vad import VADIterator, load_silero_vad
+        # PRIVATE model instance per session — never the shared singleton.
+        # VADIterator.__init__ resets its model's internal state; with a
+        # shared model, a second connection (e.g. a mic-denied tab retrying
+        # every 10 s) resets state MID-UTTERANCE for the active session, and
+        # the VAD then never fires "end" for speech it no longer remembers —
+        # the conversation silently dies. ~200 ms load per connection is the
+        # price of correctness.
+        self._vad_model = load_silero_vad()
         self._vad = VADIterator(
-            _get_vad_model(), sampling_rate=SAMPLE_RATE,
+            self._vad_model, sampling_rate=SAMPLE_RATE,
             threshold=0.5,
-            # 2 000 ms silence required before VAD fires "end" within one chunk.
-            # Natural conversational speech can have thinking pauses of 1–1.5 s;
-            # 2 000 ms ensures we don't cut off mid-sentence.  The stitch window
-            # (below) handles pauses between sentences.
-            min_silence_duration_ms=2000,
+            # 800 ms silence → VAD "end".  Short enough for phone-call
+            # responsiveness; anything the owner resumes within the 1.2 s
+            # stitch window still merges into the same utterance, so slow
+            # thinkers aren't cut off — their fragments are joined.
+            min_silence_duration_ms=800,
         )
         self._pending  = np.array([], dtype=np.float32)
         self._utterance: list[np.ndarray] = []

@@ -128,7 +128,229 @@ class BrainRuntime:
             self._episodic = EpisodicMemory()
         return self._episodic
 
-    # ── the core inversion: transcript → Decision (no speech yet) ───────────
+    # ── shared context gathering (memory / owner / knowledge / emotion) ─────
+
+    def _gather_context(self, obs: Observation, agent: Any) -> dict[str, Any]:
+        """Run every pre-linguistic retrieval step for one observation."""
+        from smartagent.mind.emotion.emotional_state import emotional_state_engine
+        from smartagent.server import conversation_store
+
+        text = obs.text.strip()
+        owner_summary = ""
+        try:
+            owner_summary = self._owner_mem().profile_summary(max_chars=500)
+        except Exception as exc:
+            logger.debug("brain: owner memory read failed: %s", exc)
+
+        episodes: list[dict] = []
+        try:
+            episodes = self._episodic_mem().relevant(text, n=4)
+        except Exception as exc:
+            logger.debug("brain: episodic recall failed: %s", exc)
+        recent = conversation_store.recent_turns(obs.workspace, limit=8)
+
+        knowledge_lines: list[str] = []
+        try:
+            for r in agent.knowledge.search(text, limit=3):
+                c = getattr(r, "concept", None)
+                name = getattr(c, "name", "") or getattr(c, "title", "")
+                summary = getattr(c, "summary", "") or getattr(c, "description", "")
+                if name or summary:
+                    knowledge_lines.append(f"{name}: {summary}".strip(": ").strip())
+        except Exception as exc:
+            logger.debug("brain: knowledge search failed: %s", exc)
+
+        return {
+            "text": text,
+            "owner_summary": owner_summary,
+            "episodes": episodes,
+            "recent": recent,
+            "knowledge_lines": knowledge_lines,
+            "emotion": emotional_state_engine.state,
+            "emotion_reason": emotional_state_engine.reason,
+        }
+
+    def _after_decision(self, decision: Decision, obs: Observation, agent: Any) -> None:
+        """Post-decision bookkeeping shared by both cognition paths."""
+        try:
+            self._owner_mem().extract_and_update(obs.text.strip())
+        except Exception as exc:
+            logger.debug("brain: owner learning failed: %s", exc)
+        try:
+            mind = getattr(agent, "mind", None)
+            if mind is not None:
+                mind.decide(
+                    reason=decision.intent or "voice turn",
+                    evidence=decision.key_points or None,
+                )
+        except Exception as exc:
+            logger.debug("brain: mind.decide failed: %s", exc)
+        self.session.remember(decision)
+
+    # ── the fused streaming path: one call, decision still first ────────────
+
+    _SPEAK_SEPARATOR = "===SPEAK==="
+
+    def converse(
+        self, obs: Observation, agent: Any, event_bus: Any, *,
+        token_event: str, on_decision: Any = None,
+    ) -> tuple[Decision, str]:
+        """Phone-call path: ONE streamed reasoning call that emits the
+        semantic Decision FIRST, then MARK's spoken words.
+
+        The model is instructed to write the decision JSON, then the literal
+        separator line, then speech.  We buffer the stream until the separator
+        appears: everything before it is cognition (parsed into a Decision,
+        surfaced via *on_decision*, never spoken); everything after streams
+        token-by-token onto *event_bus* so Kokoro starts speaking immediately.
+        Cognition still strictly precedes expression — by construction of the
+        output order — but the whole turn costs one round-trip, not two.
+
+        Blocking — call from a worker thread.  Returns (decision, spoken).
+        """
+        ctx = self._gather_context(obs, agent)
+        ep_text = "\n".join(
+            f"- {e.get('summary','')}" for e in ctx["episodes"] if e.get("summary")
+        ) or "(nothing specific recalled)"
+        kn_text = "\n".join(f"- {k}" for k in ctx["knowledge_lines"]) or "(no relevant knowledge)"
+        recent_text = "\n".join(
+            f"{t.get('role','')}: {t.get('content','')}" for t in ctx["recent"][-6:]
+        ) or "(this is the first thing said)"
+        owner_text = ctx["owner_summary"] or "(still learning who they are)"
+
+        system = (
+            "You are MARK — a persistent AI with his own mind, in a live "
+            "spoken conversation with his owner. You think BEFORE you speak.\n\n"
+            "First, deliberate privately and commit to a decision. Output it "
+            "as a JSON object in exactly this shape:\n"
+            "{\n"
+            '  "intent": "<what this turn is really about>",\n'
+            '  "understanding": "<your read of the owner and situation>",\n'
+            '  "stance": "<answer|ask_clarification|acknowledge|reassure|greet|refuse>",\n'
+            '  "emotional_tone": "<warm|curious|focused|calm|playful|serious>",\n'
+            '  "key_points": ["<point to convey>", "..."],\n'
+            '  "confidence": <0..1>\n'
+            "}\n\n"
+            f"Then, on its own line, write exactly: {self._SPEAK_SEPARATOR}\n\n"
+            "Then speak — express your decision aloud as MARK: first person, "
+            "warm, natural spoken sentences. No markdown, no lists, no "
+            "'Certainly'. The JSON is your private mind; only what follows "
+            "the separator is heard."
+        )
+        user = (
+            f"The owner just said: \"{ctx['text']}\"\n\n"
+            f"What you know about them:\n{owner_text}\n\n"
+            f"Relevant past episodes:\n{ep_text}\n\n"
+            f"Relevant knowledge:\n{kn_text}\n\n"
+            f"Recent conversation:\n{recent_text}\n\n"
+            f"Your current emotional state: {ctx['emotion']}"
+            f"{' (' + ctx['emotion_reason'] + ')' if ctx['emotion_reason'] else ''}\n\n"
+            "Deliberate (JSON), separator, then speak."
+        )
+
+        buf = ""                 # pre-separator accumulation (cognition)
+        spoken_parts: list[str] = []
+        decision: Decision | None = None
+        separated = False
+        try:
+            for chunk in agent.model_manager.chat_stream([
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]):
+                if not chunk:
+                    continue
+                if separated:
+                    # Never let a provider error sentinel reach the speakers.
+                    try:
+                        from smartagent.llm.factory import is_llm_error_text
+                        if is_llm_error_text(chunk):
+                            logger.warning("brain: dropped mid-stream provider error: %s", chunk[:80])
+                            continue
+                    except ImportError:
+                        pass
+                    spoken_parts.append(chunk)
+                    event_bus.publish(token_event, text=chunk, source="mark")
+                    continue
+                buf += chunk
+                if self._SPEAK_SEPARATOR in buf:
+                    head, _, tail = buf.partition(self._SPEAK_SEPARATOR)
+                    separated = True
+                    decision = self._decision_from_raw(head, ctx)
+                    if on_decision is not None:
+                        try:
+                            on_decision(decision)
+                        except Exception:
+                            pass
+                    tail = tail.lstrip("=\n\r ")
+                    if tail:
+                        spoken_parts.append(tail)
+                        event_bus.publish(token_event, text=tail, source="mark")
+        except Exception as exc:
+            logger.warning("brain: converse stream failed: %s", exc)
+
+        if decision is None:
+            # No separator ever arrived — salvage: parse what we have as a
+            # decision and speak its key points rather than going silent.
+            decision = self._decision_from_raw(buf, ctx)
+            if on_decision is not None:
+                try:
+                    on_decision(decision)
+                except Exception:
+                    pass
+            fallback = " ".join(decision.key_points)
+            if fallback and not spoken_parts:
+                spoken_parts.append(fallback)
+                event_bus.publish(token_event, text=fallback, source="mark")
+
+        self._after_decision(decision, obs, agent)
+        return decision, "".join(spoken_parts).strip()
+
+    def _decision_from_raw(self, raw: str, ctx: dict[str, Any]) -> Decision:
+        """Parse a Decision out of the pre-separator (or salvage) text."""
+        # Provider error sentinels ("NVIDIA API error: ...", "Ollama server
+        # unavailable.") must NEVER become MARK's words — he is not his API
+        # errors. Speak an honest inability instead; the trace keeps the
+        # real error for debugging.
+        try:
+            from smartagent.llm.factory import is_llm_error_text
+            if raw.strip() and is_llm_error_text(raw):
+                return Decision(
+                    intent="reasoning engine unavailable",
+                    understanding="my reasoning engine did not respond",
+                    stance="acknowledge",
+                    emotional_tone="calm",
+                    key_points=[
+                        "I'm having trouble reaching my reasoning engine right now."
+                        " Give me a moment and ask me again.",
+                    ],
+                    confidence=0.2,
+                    memory_used=[],
+                    reasoning_trace=raw[:1000],
+                )
+        except ImportError:
+            pass
+        data = _strip_to_json(raw) or {}
+        kp = data.get("key_points")
+        if isinstance(kp, str):
+            kp = [kp]
+        if not isinstance(kp, list) or not kp:
+            kp = [raw.strip()[:200]] if raw.strip() else ["I heard you, but I'm not sure how to respond yet."]
+        try:
+            conf = float(data.get("confidence", 0.6))
+        except Exception:
+            conf = 0.6
+        return Decision(
+            intent=str(data.get("intent", "") or "respond to the owner")[:120],
+            understanding=str(data.get("understanding", ""))[:240],
+            stance=str(data.get("stance", "answer") or "answer")[:32],
+            emotional_tone=str(data.get("emotional_tone", "warm") or "warm")[:32],
+            key_points=[str(p)[:240] for p in kp][:5],
+            confidence=max(0.0, min(1.0, conf)),
+            memory_used=[e.get("summary", "")[:80] for e in ctx["episodes"] if e.get("summary")],
+            reasoning_trace=raw[:1000],
+        )
+
+    # ── the two-stage path (kept for depth; used by non-realtime callers) ───
 
     def deliberate(self, obs: Observation, agent: Any) -> Decision:
         """Run MARK's cognition over an observation and return a Decision.

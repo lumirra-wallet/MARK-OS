@@ -247,6 +247,10 @@ interface MarkState {
    *  server handles the conversational LLM+TTS response without going through
    *  the heavy /execute pipeline.  Response streams back over /ws as normal. */
   sendVoiceMessage:  (text: string, workspace: string) => Promise<void>;
+  /** Display-only: show what MARK heard. The server already dispatched his
+   *  brain the instant VAD closed the utterance (voice_websocket) — the
+   *  browser is no longer in the conversation loop, it just renders it. */
+  addSpokenUserMessage: (text: string, workspace: string) => void;
   clearMessages:     () => void;
   cancelRun:         () => Promise<void>;
   approve:           (requestId: string, always?: boolean) => Promise<void>;
@@ -1214,6 +1218,16 @@ export const useMarkStore = create<MarkState>((set, get) => {
           lastError: 'Failed to start run',
         }));
       }
+    },
+
+    addSpokenUserMessage: (text, workspace) => {
+      const ts = new Date().toISOString();
+      set(state => ({
+        messages: [...state.messages, {
+          id: _id(), role: 'user' as const, timestamp: ts, text, blocks: [], isActive: false,
+        }],
+        workspace,
+      }));
     },
 
     sendVoiceMessage: async (text, workspace) => {
