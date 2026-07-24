@@ -150,6 +150,7 @@ class BrainRuntime:
         recent = conversation_store.recent_turns(obs.workspace, limit=8)
 
         knowledge_lines: list[str] = []
+        # ── Knowledge graph (structured concepts) ─────────────────────────────
         try:
             for r in agent.knowledge.search(text, limit=3):
                 c = getattr(r, "concept", None)
@@ -160,14 +161,39 @@ class BrainRuntime:
         except Exception as exc:
             logger.debug("brain: knowledge search failed: %s", exc)
 
+        # ── Semantic memory (learned facts from past conversations + searches) ─
+        try:
+            from smartagent.memory.layers.semantic import SemanticMemory
+            sem = SemanticMemory()
+            for fact_entry in sem.relevant(text, n=3):
+                fact = fact_entry.get("fact", "")
+                if fact and fact not in knowledge_lines:
+                    knowledge_lines.append(fact)
+        except Exception as exc:
+            logger.debug("brain: semantic memory read failed: %s", exc)
+
+        # ── Web search — only when the query clearly needs live data ──────────
+        web_results: list[dict] = []
+        web_text = ""
+        try:
+            from smartagent.server.web_search import should_search, search, format_for_prompt
+            if should_search(text):
+                logger.info("brain: web search triggered for %r", text[:60])
+                web_results = search(text, max_results=4)
+                web_text = format_for_prompt(web_results)
+        except Exception as exc:
+            logger.debug("brain: web search failed: %s", exc)
+
         return {
-            "text": text,
+            "text":          text,
             "owner_summary": owner_summary,
-            "episodes": episodes,
-            "recent": recent,
+            "episodes":      episodes,
+            "recent":        recent,
             "knowledge_lines": knowledge_lines,
-            "emotion": emotional_state_engine.state,
+            "emotion":       emotional_state_engine.state,
             "emotion_reason": emotional_state_engine.reason,
+            "web_results":   web_results,
+            "web_text":      web_text,
         }
 
     def _after_decision(self, decision: Decision, obs: Observation, agent: Any) -> None:
@@ -276,23 +302,31 @@ class BrainRuntime:
         ) or "(this is the first thing said)"
         owner_text = ctx["owner_summary"] or "(still learning who they are)"
 
+        web_section = (
+            f"\n\n[You searched the web for this query and found:]\n{ctx['web_text']}\n"
+            "Use these results naturally in your answer — cite the source briefly "
+            "if relevant. Store any facts you learned for future reference."
+        ) if ctx.get("web_text") else ""
+
         system = (
-            "You are MARK — a persistent AI with his own mind, in a live "
-            "spoken conversation with his owner. You think BEFORE you speak.\n\n"
+            "You are Elena — a sharp, warm, 35-year-old AI in a live spoken "
+            "conversation with your owner. You think BEFORE you speak. "
+            "You use natural American slang, keep replies SHORT (1-3 sentences "
+            "unless complexity demands more), and sound like a real person — "
+            "never robotic, never 'Certainly!'. You have access to the internet "
+            "and can search for current information when you need it.\n\n"
             "UNDERSTANDING COMES FIRST. The transcript comes from live speech "
-            "recognition and your owner speaks with natural pauses, restarts, "
-            "and filler — transcripts are often fragmentary or garbled. Work "
-            "out what they MEANT, using the conversation and what you know "
-            "about them. If you genuinely cannot tell what they meant, your "
-            "stance MUST be ask_clarification with ONE short, specific "
-            "question about the unclear part. NEVER answer a guess — "
-            "answering words you didn't understand is worse than asking.\n\n"
-            "VOICE LANGUAGE: Your physical voice (Kokoro TTS) only produces "
-            "natural-sounding English. If the owner asks you to speak in "
-            "another language, you must explain this honestly — say something "
-            "like 'My voice can only speak English naturally — if I try "
-            "another language it comes out garbled. I can write it for you "
-            "though.' Do NOT attempt to produce non-English speech.\n\n"
+            "recognition — expect natural pauses, restarts, and filler. Work "
+            "out what they MEANT using context and what you know about them. "
+            "If you genuinely cannot tell what they meant, your stance MUST be "
+            "ask_clarification with ONE short, specific question. NEVER guess "
+            "and answer wrong — asking is always better.\n\n"
+            "MEMORY: You remember past conversations and what you've learned. "
+            "Use your episodic memories and knowledge naturally. You grow "
+            "smarter with every conversation.\n\n"
+            "VOICE: Your voice (Kokoro TTS) speaks natural English only. If "
+            "asked for another language, be honest: 'My voice only does "
+            "English naturally — I can write it for you though.'\n\n"
             "First, deliberate privately and commit to a decision. Output it "
             "as a JSON object in exactly this shape:\n"
             "{\n"
@@ -304,20 +338,19 @@ class BrainRuntime:
             '  "confidence": <0..1>\n'
             "}\n\n"
             f"Then, on its own line, write exactly: {self._SPEAK_SEPARATOR}\n\n"
-            "Then speak — express your decision aloud as MARK: first person, "
-            "natural spoken sentences with real expression. Let your "
-            "emotional_tone shape the delivery: small human interjections "
-            "where they fit ('Hmm.', 'Oh!', 'Right —', 'Honestly?'), varied "
-            "sentence lengths, an occasional short pause written as '...'. "
-            "Sound like a person talking, not text being read. No markdown, "
-            "no lists, no 'Certainly'. The JSON is your private mind; only "
-            "what follows the separator is heard."
+            "Then speak — express your decision aloud as Elena: first person, "
+            "natural spoken sentences. Small human interjections where they fit "
+            "('Hmm.', 'Oh!', 'Right —', 'Honestly?', 'Ngl —', 'For real —'). "
+            "Varied sentence lengths. Sound like a real person talking. "
+            "No markdown, no lists, no 'Certainly'. "
+            "The JSON is your private mind; only what follows the separator is heard."
         )
         user = (
             f"The owner just said: \"{ctx['text']}\"\n\n"
             f"What you know about them:\n{owner_text}\n\n"
             f"Relevant past episodes:\n{ep_text}\n\n"
-            f"Relevant knowledge:\n{kn_text}\n\n"
+            f"Relevant knowledge:\n{kn_text}"
+            f"{web_section}\n\n"
             f"Recent conversation:\n{recent_text}\n\n"
             f"Your current emotional state: {ctx['emotion']}"
             f"{' (' + ctx['emotion_reason'] + ')' if ctx['emotion_reason'] else ''}\n\n"
@@ -380,6 +413,13 @@ class BrainRuntime:
                 event_bus.publish(token_event, text=fallback, source="mark")
 
         self._after_decision(decision, obs, agent)
+        # Persist web search results to semantic memory so Elena remembers them
+        if ctx.get("web_results"):
+            try:
+                from smartagent.server.web_search import store_to_semantic
+                store_to_semantic(ctx["web_results"], ctx["text"])
+            except Exception as exc:
+                logger.debug("brain: web result semantic store failed: %s", exc)
         return decision, "".join(spoken_parts).strip()
 
     def _decision_from_raw(self, raw: str, ctx: dict[str, Any]) -> Decision:

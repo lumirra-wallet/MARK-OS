@@ -33,6 +33,7 @@ httpx
 aiohttp
 websockets
 requests
+duckduckgo_search
 
 # Config / env
 python-dotenv

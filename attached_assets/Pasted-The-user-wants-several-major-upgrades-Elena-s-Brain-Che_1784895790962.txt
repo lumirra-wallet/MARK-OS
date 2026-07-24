@@ -1,0 +1,109 @@
+The user wants several major upgrades:
+
+Elena's Brain - Check all MD files and construct a proper brain for Elena, ensuring she keeps conversation memories and behaves according to the MD files
+Voice/Listening UI - Make it look like ChatGPT-5's live call interface
+Persistent conversation records - Elena should remember every conversation and learn from them
+Internet access - Elena should be able to research the web and learn from it
+This is a big set of features. Let me start by exploring the current state of the brain/memory system, the MD files, and the current voice UI. I need to first examine the codebase to see what's already in place.
+
+Big set of features — let me first explore the full state of Elena's brain, memory system, and the relevant MD files before building anything.
+
+
+14 actions
+Good, I have a clear picture. Now I need to see the memory layers, storage backend, and the current voice UI before building.
+
+
+9 actions
+Now I have the full picture. Here's what's broken and what I'm building:
+
+Web search — doesn't exist; adding it with DuckDuckGo (free, no key)
+Brain pipeline — exists but semantic memory isn't wired into converse(), and web results never feed back into memory
+Voice UI — needs to look like ChatGPT-5 live mode (big animated orb, real-time transcript both sides)
+Memory persistence — the stores exist but aren't surfaced; adding a /memory/summary endpoint
+Building everything in parallel now.
+
+
+8 actions
+Now I have everything I need. Building all four features in parallel — web search, brain memory fixes, memory API, and ChatGPT-5 voice UI.
+
+
+Show less
+
+Ran pip
+
+Opened MarkHome.tsx
+
+Searched for "interimTranscript|voice…"
+
+Searched for "memory/summary|/memory|…"
+Building features concurrently
+
+Building features concurrently
+Let me continue building all the features. I'll create everything in parallel:
+
+Web search module (smartagent/server/web_search.py) - using duckduckgo_search
+Brain runtime upgrade - add semantic memory + web search to _gather_context
+Memory summary API endpoint in app.py
+Identity update - tell Elena about web search capability
+ChatGPT-5 style voice UI - redesign MarkHome.tsx
+Let me install duckduckgo_search first and then build everything in parallel. For the voice interface, I'm designing a full-screen dark experience with a central animated orb that pulses when Elena speaks and breathes when listening, with real-time transcripts displayed at the bottom showing both user and Elena's words side-by-side, plus minimal controls for mute and ending the call. I also need to check the requirements file and add duckduckgo_search to it. The main brain issue I'm addressing is that semantic memory isn't being queried in _gather_context - only the agent memory is being used.
+
+Good — continuing. Building everything in parallel now.
+
+
+4 actions
+Let me look at a few more things before writing all the code — I need to see how Elena's speech tokens arrive in the store, the requirements.minimal.txt for adding duckduckgo_search, and where learning_pipeline is called for voice turns.
+
+
+5 actions
+Now I have everything I need. Building all features in parallel — web search module, brain memory upgrade, memory API endpoint, and ChatGPT-5 voice UI.
+
+
+Show less
+
+Created web_search.py
+
+Searched for "^duckduckgo"
+
+Searched for "def _voice_chat_respons…"
+Integrating web search
+
+Integrating web search
+
+Opened markStore.ts
+
+Opened markStore.ts
+
+Opened api.py
+Integrating web search
+
+Integrating web search
+Now writing everything in parallel — all four features at once.
+
+
+Show less
+
+Edited requirements.minimal.txt
+
+Edited brain_runtime.py
+
+Edited brain_runtime.py
+
+Edited brain_runtime.py
+Implementing new features
+
+Implementing new features
+Now building the memory endpoint, store updates, and redesigned voice UI all in parallel.
+
+
+4 actions
+Let me get the initial state of markStore and the app.py endpoint structure to make precise edits.
+
+
+Show less
+
+Opened markStore.ts
+
+Opened app.py
+
+Searched for "^@app.|^router."

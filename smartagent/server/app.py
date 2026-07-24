@@ -65,6 +65,7 @@ from smartagent.server.api_git_enhanced import router as git_enhanced_router
 from smartagent.server.api_providers    import router as providers_router
 from smartagent.server.api_diagnostics  import router as diagnostics_router
 from smartagent.server.api_previews     import router as previews_router, preview_manager
+from smartagent.server.api_memory       import router as memory_router
 from smartagent.server.websocket        import connection_manager
 
 logger = logging.getLogger(__name__)
@@ -220,6 +221,7 @@ app.include_router(git_enhanced_router)
 app.include_router(providers_router)
 app.include_router(diagnostics_router)
 app.include_router(previews_router)
+app.include_router(memory_router)
 
 # ---------------------------------------------------------------------------
 # Preview self-inspection screenshots (smartagent/preview/browser_agent.py).
