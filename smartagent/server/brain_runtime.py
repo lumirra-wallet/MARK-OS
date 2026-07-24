@@ -191,6 +191,29 @@ class BrainRuntime:
 
     _SPEAK_SEPARATOR = "===SPEAK==="
 
+    @staticmethod
+    def _voice_reasoner(agent: Any) -> Any:
+        """Return the object whose .chat_stream drives the voice turn.
+
+        Prefers the fast NVIDIA voice model (NVIDIA_VOICE_MODEL — measured
+        ~2 s round-trip vs ~10 s for the 550B ultra on this account): in a
+        live call, time-to-first-token IS the felt latency. Falls back to
+        the agent's ModelManager (active model + its own fallback chain)
+        when the fast model isn't registered or fails to load.
+        """
+        try:
+            from smartagent.llm.factory import NVIDIA_VOICE_MODEL
+            registry = getattr(agent.model_manager, "registry", None)
+            provider = registry.find(NVIDIA_VOICE_MODEL) if registry else None
+            if provider is not None:
+                from smartagent.models.base.base_model import ModelStatus
+                if getattr(provider, "_status", None) != ModelStatus.LOADED:
+                    provider.load()
+                return provider
+        except Exception as exc:
+            logger.debug("brain: voice reasoner unavailable (%s) — using active model", exc)
+        return agent.model_manager
+
     def converse(
         self, obs: Observation, agent: Any, event_bus: Any, *,
         token_event: str, on_decision: Any = None,
@@ -252,8 +275,9 @@ class BrainRuntime:
         spoken_parts: list[str] = []
         decision: Decision | None = None
         separated = False
+        reasoner = self._voice_reasoner(agent)
         try:
-            for chunk in agent.model_manager.chat_stream([
+            for chunk in reasoner.chat_stream([
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ]):

@@ -41,11 +41,13 @@ SPEED = 1.0
 LANG = "en-us"
 
 _MODEL_RELEASE_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
-# int8-quantized model (~92MB vs ~326MB fp32): meaningfully faster to
-# download and to run on this CPU-only server, for a quality difference
-# that's negligible for spoken-assistant use (not studio narration). Swap
-# to "kokoro-v1.0.onnx" (fp32) if that tradeoff is ever revisited.
-_MODEL_FILENAME = os.environ.get("MARK_TTS_MODEL_FILE", "kokoro-v1.0.int8.onnx")
+# fp32 model. int8 was originally chosen for the smaller download, but
+# benchmarked 3.5x SLOWER than fp32 on this CPU (12.3 s vs 3.5 s for the
+# same 2.2 s sentence — quantized int8 ops fall off the fast path on this
+# machine's instruction set). fp32 is the difference between MARK's voice
+# lagging ~6x behind realtime and roughly keeping up. The bigger one-time
+# download (~326 MB vs ~92 MB) is irrelevant next to that.
+_MODEL_FILENAME = os.environ.get("MARK_TTS_MODEL_FILE", "kokoro-v1.0.onnx")
 _CACHE_DIR = Path(os.environ.get("MARK_TTS_CACHE", str(Path.home() / ".cache" / "mark-tts")))
 _MODEL_PATH = _CACHE_DIR / _MODEL_FILENAME
 _VOICES_PATH = _CACHE_DIR / "voices-v1.0.bin"
@@ -80,17 +82,41 @@ def _get_engine() -> Any:
         if _engine is not None:
             return _engine
         import espeakng_loader
+        import onnxruntime as rt
         from kokoro_onnx import EspeakConfig, Kokoro
 
         _ensure_model_files()
-        _engine = Kokoro(
-            str(_MODEL_PATH), str(_VOICES_PATH),
+
+        # Build the InferenceSession ourselves instead of letting Kokoro's
+        # constructor do it: onnxruntime's default intra-op thread pool
+        # SPIN-WAITS for work — measured on this machine as six native
+        # threads each burning ~30% of a core (≈1.8 cores, "CPU at 100%")
+        # CONTINUOUSLY after the first synthesis, even while MARK is
+        # completely silent.  Disabling spinning parks the pool between
+        # syntheses; a bounded thread count keeps one synthesis from
+        # saturating every core while Whisper/VAD run beside it.
+        sess_options = rt.SessionOptions()
+        sess_options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+        sess_options.add_session_config_entry("session.inter_op.allow_spinning", "0")
+        # Full core count: benchmarked identical to cpu//2 when idle, and
+        # synthesis is bursty — with spinning off the threads park between
+        # sentences, so there's no idle cost to the larger pool.
+        sess_options.intra_op_num_threads = os.cpu_count() or 4
+        session = rt.InferenceSession(
+            str(_MODEL_PATH), sess_options=sess_options,
+            providers=["CPUExecutionProvider"],
+        )
+        _engine = Kokoro.from_session(
+            session, str(_VOICES_PATH),
             espeak_config=EspeakConfig(
                 lib_path=espeakng_loader.get_library_path(),
                 data_path=espeakng_loader.get_data_path(),
             ),
         )
-        logger.info("tts_engine: Kokoro engine ready, voice=%s", MARK_VOICE)
+        logger.info(
+            "tts_engine: Kokoro engine ready, voice=%s (spin-wait disabled, %d threads)",
+            MARK_VOICE, sess_options.intra_op_num_threads,
+        )
         return _engine
 
 

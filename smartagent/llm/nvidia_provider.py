@@ -95,6 +95,15 @@ _NVIDIA_MODEL_CATALOGUE: list[dict[str, Any]] = [
         "supports_tools": True,                    "params": "550B-A55B", "size_gb": 0,
         "modified": "2026-01-01",
     },
+    {
+        # Fast conversational model on the same NVIDIA API — used by the
+        # voice loop (brain_runtime), where time-to-first-token dominates the
+        # felt latency. Measured on this account: ~2 s round-trip vs ~10 s
+        # for the 550B ultra. The ultra stays the default for deep work.
+        "id": "meta/llama-3.1-8b-instruct", "family": "llama", "context": 128_000,
+        "supports_tools": True,             "params": "8B",    "size_gb": 0,
+        "modified": "2026-01-01",
+    },
 ]
 
 

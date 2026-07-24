@@ -52,6 +52,12 @@ GITHUB_EMBEDDING_MODEL = "text-embedding-3-small"
 
 NVIDIA_DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 
+# Fast NVIDIA-hosted model for the LIVE VOICE loop (brain_runtime), where
+# time-to-first-token is the felt latency. Same API, same key — just a
+# right-sized model for turn-by-turn conversation. Override with
+# MARK_VOICE_REASONER; the 550B ultra remains the default for deep work.
+NVIDIA_VOICE_MODEL = os.environ.get("MARK_VOICE_REASONER", "meta/llama-3.1-8b-instruct")
+
 # MARK_MODEL is the canonical spec's name (docs/canonical/MASTER_BLUEPRINT.md
 # section 4) for MARK's local-core model. OLLAMA_DEFAULT_MODEL is kept as a
 # secondary alias since smartagent/server/config.py already reads it.
@@ -419,7 +425,7 @@ def _load_nvidia(model: str, model_manager: Any) -> None:
         return
     try:
         from smartagent.llm.nvidia_provider import NvidiaProvider
-        for mid in dict.fromkeys([model, NVIDIA_DEFAULT_MODEL]):
+        for mid in dict.fromkeys([model, NVIDIA_DEFAULT_MODEL, NVIDIA_VOICE_MODEL]):
             if model_manager.registry.find(mid) is None:
                 p = NvidiaProvider(model_name=mid, api_key=api_key)
                 model_manager.registry.register(p)

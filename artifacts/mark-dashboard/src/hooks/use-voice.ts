@@ -270,6 +270,16 @@ export function useVoice() {
       const processor = ctx.createScriptProcessor(4096, 1, 1);
       const srcRate   = ctx.sampleRate;
 
+      // ── Energy gate state ─────────────────────────────────────────────
+      // Only transmit audio when there is actual signal (plus a hangover
+      // window). Without this the mic streamed raw silence 24/7, which:
+      // (a) kept the server's VAD busy around the clock (real CPU),
+      // (b) held conversation ownership forever, so a newer tab could
+      //     never take over, and
+      // (c) wasted bandwidth. The threshold is far below speech level;
+      //     the hangover keeps VAD context around soft speech onsets.
+      let gateOpenUntil = 0;
+
       processor.onaudioprocess = (ev: AudioProcessingEvent) => {
         // ── Client-side mic gate ────────────────────────────────────────
         // Stop sending PCM while MARK is speaking OR while the user has
@@ -279,7 +289,20 @@ export function useVoice() {
         if (!enabledRef.current) return;
         if (ws.readyState !== WebSocket.OPEN) return;
 
-        const pcm16k = resampleTo16k(ev.inputBuffer.getChannelData(0), srcRate);
+        const raw = ev.inputBuffer.getChannelData(0);
+        // RMS energy of this ~85 ms block
+        let sum = 0;
+        for (let i = 0; i < raw.length; i += 4) sum += raw[i] * raw[i];
+        const rms = Math.sqrt(sum / (raw.length / 4));
+        const now = performance.now();
+        // Hangover must exceed the server's VAD end-of-speech window (0.8 s)
+        // PLUS its stitch window (1.2 s), because both tick on RECEIVED
+        // samples — the trailing silence we transmit is what lets the server
+        // finish the utterance. 2.6 s = 0.8 + 1.2 + margin.
+        if (rms > 0.006) gateOpenUntil = now + 2600;
+        if (now > gateOpenUntil) return;                // silence → transmit nothing
+
+        const pcm16k = resampleTo16k(raw, srcRate);
         ws.send(floatTo16BitPCM(pcm16k));
       };
 
@@ -331,9 +354,16 @@ export function useVoice() {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev: CloseEvent) => {
       stopMic();
       if (!enabledRef.current) return;
+      // Code 4000 = evicted: another tab started streaming mic audio and now
+      // owns the conversation. Don't fight it — back off a long while so the
+      // two tabs can't ping-pong evict each other.
+      if (ev.code === 4000) {
+        console.log('[MARK voice] another tab took over the conversation — standing by');
+        reconnectDelayRef.current = 30_000;
+      }
       // Exponential back-off reconnect (cap at 30 s)
       const delay = reconnectDelayRef.current;
       reconnectDelayRef.current = Math.min(delay * 2, 30_000);

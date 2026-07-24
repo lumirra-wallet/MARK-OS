@@ -105,8 +105,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async def _warm_agent() -> None:
         try:
             from smartagent.server import api as _api_mod  # type: ignore[attr-defined]
-            await _api_mod._get_mark_agent(None)
+            agent = await _api_mod._get_mark_agent(None)
             logger.info("SmartAgent warm-up complete")
+            # Warm the voice reasoner's HTTP session with a 1-token ping:
+            # the FIRST NVIDIA call in a fresh process pays ~10 s of
+            # connection/session setup; every later call is sub-second.
+            # Doing it here means the owner's first spoken turn is fast.
+            def _ping_voice_reasoner() -> None:
+                try:
+                    from smartagent.server.brain_runtime import BrainRuntime
+                    reasoner = BrainRuntime._voice_reasoner(agent)
+                    for _ in reasoner.chat_stream(
+                        [{"role": "user", "content": "ping"}], max_tokens=1,
+                    ):
+                        break
+                    logger.info("voice reasoner warm-up complete")
+                except Exception as exc:
+                    logger.debug("voice reasoner warm-up skipped: %s", exc)
+            await asyncio.to_thread(_ping_voice_reasoner)
         except Exception as _exc:  # pragma: no cover
             logger.warning("SmartAgent warm-up failed (non-fatal): %s", _exc)
     asyncio.create_task(_warm_agent(), name="mark-warmup")

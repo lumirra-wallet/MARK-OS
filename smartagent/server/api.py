@@ -1927,9 +1927,15 @@ async def voice_message(payload: dict) -> dict:
     return {"ok": True}
 
 
-# The one live mic stream (see eviction logic in voice_websocket): exactly
-# one browser tab owns the conversation at a time; the newest connection wins.
-_active_voice_ws: dict[str, Any] = {"ws": None}
+# Sticky conversation ownership: exactly one mic stream drives MARK at a
+# time.  Ownership is claimed by streaming audio and KEPT while frames keep
+# arriving; another connection can only take over after the owner has gone
+# silent for _VOICE_OWNER_GRACE_S (tab closed, crashed, or stopped).  Frames
+# from non-owners inside the grace window are dropped — never processed,
+# never evicting — so two live tabs can't ping-pong-evict each other and a
+# background tab can't steal the conversation mid-sentence.
+_VOICE_OWNER_GRACE_S = 3.0
+_active_voice_ws: dict[str, Any] = {"ws": None, "last_frame": 0.0}
 
 
 @router.websocket("/ws/voice")
@@ -1960,17 +1966,6 @@ async def voice_websocket(ws: WebSocket) -> None:
 
     await ws.accept()
 
-    # Single-conversation guarantee: exactly one live mic stream. A new
-    # connection (tab refresh, reconnect) evicts the previous one so two
-    # sessions never fight over the conversation.
-    prev = _active_voice_ws.get("ws")
-    if prev is not None and prev is not ws:
-        try:
-            await prev.close(code=4000)
-        except Exception:
-            pass
-    _active_voice_ws["ws"] = ws
-
     loop = asyncio.get_event_loop()
     # Make sure speech_runtime can stream TTS audio + speech events back over
     # the main /ws while this voice socket is open.
@@ -1989,6 +1984,29 @@ async def voice_websocket(ws: WebSocket) -> None:
 
             data = message.get("bytes")
             if data is not None:
+                # ── Sticky ownership (see _active_voice_ws above) ──────────
+                now = time.monotonic()
+                owner = _active_voice_ws.get("ws")
+                if owner is ws:
+                    _active_voice_ws["last_frame"] = now
+                elif owner is None or (
+                    now - _active_voice_ws.get("last_frame", 0.0) > _VOICE_OWNER_GRACE_S
+                ):
+                    logger.info(
+                        "voice_ws: conversation ownership → %s (prev owner silent/absent)",
+                        getattr(ws, "client", "?"),
+                    )
+                    if owner is not None:
+                        try:
+                            await owner.close(code=4000)
+                        except Exception:
+                            pass
+                    _active_voice_ws["ws"] = ws
+                    _active_voice_ws["last_frame"] = now
+                else:
+                    # A live conversation exists on another connection —
+                    # drop this frame silently. No eviction, no processing.
+                    continue
                 # Feed one PCM16 frame through VAD/STT.  transcribe() inside
                 # feed() is blocking, so run the whole step in a worker thread
                 # to keep the event loop responsive.  Calls are awaited in

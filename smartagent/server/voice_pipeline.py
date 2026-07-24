@@ -169,24 +169,11 @@ class VoiceSession:
     """
 
     def __init__(self) -> None:
-        from silero_vad import VADIterator, load_silero_vad
-        # PRIVATE model instance per session — never the shared singleton.
-        # VADIterator.__init__ resets its model's internal state; with a
-        # shared model, a second connection (e.g. a mic-denied tab retrying
-        # every 10 s) resets state MID-UTTERANCE for the active session, and
-        # the VAD then never fires "end" for speech it no longer remembers —
-        # the conversation silently dies. ~200 ms load per connection is the
-        # price of correctness.
-        self._vad_model = load_silero_vad()
-        self._vad = VADIterator(
-            self._vad_model, sampling_rate=SAMPLE_RATE,
-            threshold=0.5,
-            # 800 ms silence → VAD "end".  Short enough for phone-call
-            # responsiveness; anything the owner resumes within the 1.2 s
-            # stitch window still merges into the same utterance, so slow
-            # thinkers aren't cut off — their fragments are joined.
-            min_silence_duration_ms=800,
-        )
+        # VAD model is loaded LAZILY on the first audio frame (_ensure_vad):
+        # mic-denied tabs connect + retry every 10 s without ever sending a
+        # frame — eager loading burned a model load per retry for nothing.
+        self._vad_model: Any = None
+        self._vad: Any = None
         self._pending  = np.array([], dtype=np.float32)
         self._utterance: list[np.ndarray] = []
         self.speech_active = False
@@ -207,6 +194,30 @@ class VoiceSession:
         # Event used so speech_runtime can wake the holdoff early if needed
         self._holdoff_done = threading.Event()
         self._holdoff_done.set()   # initially "done"
+
+    def _ensure_vad(self) -> None:
+        """Load this session's PRIVATE VAD model on first audio.
+
+        Private instance per session — never a shared singleton:
+        VADIterator.__init__ resets its model's internal state, and with a
+        shared model a second connection resets state MID-UTTERANCE for the
+        active session — its VAD then never fires "end" for speech it no
+        longer remembers and the conversation silently dies (observed live).
+        Lazy so connections that never send audio never pay the load.
+        """
+        if self._vad is not None:
+            return
+        from silero_vad import VADIterator, load_silero_vad
+        self._vad_model = load_silero_vad()
+        self._vad = VADIterator(
+            self._vad_model, sampling_rate=SAMPLE_RATE,
+            threshold=0.5,
+            # 800 ms silence → VAD "end".  Short enough for phone-call
+            # responsiveness; anything the owner resumes within the 1.2 s
+            # stitch window still merges into the same utterance, so slow
+            # thinkers aren't cut off — their fragments are joined.
+            min_silence_duration_ms=800,
+        )
 
     # ── Turn-taking API (called by speech_runtime / voice_websocket) ──────────
 
@@ -348,6 +359,7 @@ class VoiceSession:
             return events
 
         # ── LISTENING: full VAD + transcription + stitching pipeline ──────────
+        self._ensure_vad()
         self._pending = np.concatenate([self._pending, samples])
 
         while len(self._pending) >= VAD_CHUNK_SAMPLES:
@@ -389,10 +401,15 @@ class VoiceSession:
                         )
                 self._utterance = []
 
-            elif self.speech_active and self.samples_since_partial >= SAMPLE_RATE:
-                # ── Partial transcript (display only, every ~1 s of speech) ───
+            elif self.speech_active and self.samples_since_partial >= 2 * SAMPLE_RATE:
+                # ── Partial transcript (display only, every ~2 s of speech) ───
+                # Every partial re-transcribes the accumulated utterance, so a
+                # 1 s cadence over an unbounded buffer was O(n²) CPU during
+                # long speech — a real contributor to the 100%-CPU stalls.
+                # 2 s cadence + a 10 s tail bound keeps the display live at a
+                # fraction of the cost; the FINAL still uses the full audio.
                 self.samples_since_partial = 0
-                audio = np.concatenate(self._utterance)
+                audio = np.concatenate(self._utterance)[-10 * SAMPLE_RATE:]
                 text  = transcribe(audio, partial=True)
                 if text:
                     # Show full context: already-stitched prefix + current fragment
