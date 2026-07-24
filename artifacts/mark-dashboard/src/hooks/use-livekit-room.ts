@@ -68,6 +68,23 @@ export function useLiveKitRoom(): UseLiveKitRoomResult {
   const micPollRef        = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Autoplay unblock ───────────────────────────────────────────────────────
+  // Browsers refuse to play audio until the user has interacted with the page.
+  // LiveKit exposes room.startAudio() for exactly this, but it MUST be called
+  // synchronously from inside a real gesture handler (click / tap) — calling it
+  // from a timer or a track-subscribed callback is rejected and MARK stays
+  // silent. We drive it from the mic button AND from a page-wide pointerdown so
+  // the very first click anywhere makes MARK audible, then keep the listener
+  // cheap (a no-op once playback is already allowed).
+  const unblockAudio = useCallback(async () => {
+    const room = roomRef.current;
+    try {
+      if (room && !room.canPlaybackAudio) await room.startAudio();
+    } catch { /* will retry on the next gesture */ }
+    const el = audioElRef.current;
+    if (el) { try { await el.play(); } catch { /* still blocked — retry next gesture */ } }
+  }, []);
+
   // ── Fetch voice config + token ─────────────────────────────────────────────
 
   const fetchCreds = useCallback(async (): Promise<{
@@ -143,9 +160,15 @@ export function useLiveKitRoom(): UseLiveKitRoomResult {
       // Detach previous element, attach new one
       audioElRef.current?.remove();
       const el = track.attach() as HTMLAudioElement;
+      el.autoplay = true;
+      el.setAttribute('playsinline', 'true');
       el.style.display = 'none';
       document.body.appendChild(el);
       audioElRef.current = el;
+      // Try to play now; if autoplay is still blocked this rejects and the
+      // next user gesture (mic button / page pointerdown) unblocks it.
+      el.play().catch(() => {});
+      void unblockAudio();
       console.log('[MARK voice] subscribed to MARK TTS audio track');
     });
 
@@ -227,6 +250,10 @@ export function useLiveKitRoom(): UseLiveKitRoomResult {
   // ── Toggle mic mute / unmute ───────────────────────────────────────────────
 
   const toggleVoice = useCallback(() => {
+    // This runs inside a click handler — the one place the browser lets us
+    // unblock MARK's voice. Do it on every toggle (mute or unmute), since
+    // unblocking playback is independent of whether the mic is muted.
+    void unblockAudio();
     setVoiceEnabled(prev => {
       const next = !prev;
       enabledRef.current = next;
@@ -252,8 +279,14 @@ export function useLiveKitRoom(): UseLiveKitRoomResult {
   useEffect(() => {
     if (!supported) return;
     void connect();
+    // First-gesture audio unblock: the moment the user clicks/taps anywhere,
+    // make MARK audible. Kept live (not once) because the room may connect
+    // after the first click; it's a no-op once playback is already allowed.
+    const onGesture = () => { void unblockAudio(); };
+    window.addEventListener('pointerdown', onGesture);
     return () => {
       enabledRef.current = false;
+      window.removeEventListener('pointerdown', onGesture);
       void disconnect();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
