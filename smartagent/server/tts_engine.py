@@ -120,6 +120,31 @@ def _get_engine() -> Any:
         return _engine
 
 
+def prewarm() -> None:
+    """Pre-initialize the Kokoro engine in a background thread at startup.
+
+    The first synthesis call is slow (~2 s) because the ONNX inference session
+    must JIT-compile its kernels on first use.  Calling prewarm() during server
+    startup hides that cost: by the time the owner speaks for the first time,
+    the engine is already warm and the first TTS response arrives in ~0.3 s
+    instead of ~2.3 s.  Non-fatal — failure is logged and the engine will
+    lazy-load on the first real synthesis call instead.
+    """
+    import threading
+
+    def _warm() -> None:
+        try:
+            engine = _get_engine()
+            # Synthesize a single silent/inaudible short phrase — enough to
+            # trigger kernel compilation without producing audible output.
+            engine.create(".", voice=MARK_VOICE, speed=SPEED, lang=LANG)
+            logger.info("tts_engine: Kokoro pre-warm complete — first synthesis will be fast")
+        except Exception as exc:
+            logger.warning("tts_engine: pre-warm failed (non-fatal): %s", exc)
+
+    threading.Thread(target=_warm, daemon=True, name="kokoro-prewarm").start()
+
+
 def is_available() -> bool:
     """True once the real engine has initialized (downloading/loading real
     weights if this is the first call). Checked once at server startup so

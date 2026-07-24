@@ -26,14 +26,16 @@ function getPresenceText(params: {
   isListening: boolean;
   isMarkSpeaking: boolean;
   isVoiceSpeaking: boolean;
+  isThinking: boolean;
   emotionalState: string;
   modeLabel: string;
   lastStep?: string;
 }): string {
-  const { running, isListening, isMarkSpeaking, isVoiceSpeaking, emotionalState, modeLabel, lastStep } = params;
+  const { running, isListening, isMarkSpeaking, isVoiceSpeaking, isThinking, emotionalState, modeLabel, lastStep } = params;
 
-  if (isListening && !isMarkSpeaking) return 'Listening.';
   if (isMarkSpeaking || isVoiceSpeaking) return 'Speaking.';
+  if (isThinking) return 'Thinking…';
+  if (isListening && !isMarkSpeaking) return 'Listening.';
   if (running) {
     if (lastStep === 'reasoning')         return 'Thinking.';
     if (lastStep === 'memory_retrieved')  return 'Reviewing recent memories.';
@@ -74,6 +76,9 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
   const voice = useVoice();
   const [chatOpen, setChatOpen] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(true);
+  // "Pure voice call" mode — hides the transcript/status line so it feels
+  // like talking on the phone rather than typing in a chat box.
+  const [transcriptVisible, setTranscriptVisible] = useState(true);
 
   const latestStep = cognitiveEvents[0]?.step;
 
@@ -82,6 +87,7 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
     isListening:     voice.isListening,
     isMarkSpeaking,
     isVoiceSpeaking: voice.isSpeaking,
+    isThinking:      voice.isThinking,
     emotionalState:  emotionalState || 'neutral',
     modeLabel:       modeLabel || 'Idle',
     lastStep:        latestStep,
@@ -175,34 +181,55 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
           The status line and pulse ring are visible whenever the mic is live. */}
       <div className="absolute bottom-24 inset-x-0 z-10 flex flex-col items-center gap-2 pointer-events-none">
 
-        {/* Live transcript / status line — always shown while connected */}
-        <div className="flex items-center gap-1.5 min-h-[1.25em] max-w-md text-center px-4">
-          {voice.isListening && voice.voiceEnabled && !voice.isSpeaking && (
-            /* Pulsing dot — amplitude-driven via opacity so it feels live */
-            <span
-              className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0 transition-opacity duration-75"
-              style={{ opacity: 0.35 + voice.micLevel * 0.65 }}
-            />
-          )}
-          <p className="text-xs text-muted-foreground truncate">
-            {!voice.supported
-              ? 'Voice not supported in this browser'
-              : voice.isSpeaking
-                ? 'Speaking…'
-                : voice.interimTranscript
-                  ? voice.interimTranscript
-                  : !voice.voiceEnabled
-                    ? 'Mic muted — click to unmute'
-                    : voice.isListening
-                      ? 'Listening…'
-                      : 'Connecting…'}
-          </p>
-        </div>
+        {/* Thinking pulse — fires the INSTANT VAD detects speech end,
+            ~300-800 ms before the LLM call starts.  Amber to distinguish
+            from the green "listening" mic ring. */}
+        {voice.isThinking && (
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400" />
+            </span>
+            <p className="text-xs text-amber-400/80 font-mono tracking-wide">Thinking…</p>
+          </div>
+        )}
+
+        {/* Live transcript / status line — toggleable for "pure voice call" feel */}
+        {transcriptVisible && (
+          <div className="flex items-center gap-1.5 min-h-[1.25em] max-w-md text-center px-4">
+            {voice.isListening && voice.voiceEnabled && !voice.isSpeaking && !voice.isThinking && (
+              /* Pulsing dot — amplitude-driven via opacity so it feels live */
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0 transition-opacity duration-75"
+                style={{ opacity: 0.35 + voice.micLevel * 0.65 }}
+              />
+            )}
+            <p className="text-xs text-muted-foreground truncate">
+              {!voice.supported
+                ? 'Voice not supported in this browser'
+                : voice.isSpeaking
+                  ? 'Speaking…'
+                  : voice.isThinking
+                    ? 'Processing…'
+                    : voice.interimTranscript
+                      ? voice.interimTranscript
+                      : !voice.voiceEnabled
+                        ? 'Mic muted — click to unmute'
+                        : voice.isListening
+                          ? 'Listening…'
+                          : 'Connecting…'}
+            </p>
+          </div>
+        )}
 
         {/* Mic button with amplitude ring */}
         <div className="relative pointer-events-auto">
+          {/* Thinking ring — amber pulse while MARK processes your words */}
+          {voice.isThinking && (
+            <span className="absolute inset-0 rounded-full border border-amber-400/50 animate-ping" />
+          )}
           {/* Outer pulse ring — scale with mic level while MARK is listening */}
-          {voice.voiceEnabled && voice.isListening && !voice.isSpeaking && (
+          {voice.voiceEnabled && voice.isListening && !voice.isSpeaking && !voice.isThinking && (
             <span
               className="absolute inset-0 rounded-full border border-accent/60 transition-transform duration-75"
               style={{
@@ -215,9 +242,11 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
             onClick={voice.toggleVoice}
             disabled={!voice.supported}
             className={`flex items-center justify-center w-14 h-14 rounded-full border transition-all ${
-              voice.voiceEnabled
-                ? 'bg-accent/20 border-accent text-accent shadow-lg shadow-accent/20'
-                : 'bg-card/50 border-border/50 text-muted-foreground hover:text-foreground hover:border-border'
+              voice.isThinking
+                ? 'bg-amber-500/10 border-amber-400/60 text-amber-400'
+                : voice.voiceEnabled
+                  ? 'bg-accent/20 border-accent text-accent shadow-lg shadow-accent/20'
+                  : 'bg-card/50 border-border/50 text-muted-foreground hover:text-foreground hover:border-border'
             } ${!voice.supported ? 'opacity-40 cursor-not-allowed' : ''}`}
             title={
               !voice.supported
@@ -232,6 +261,15 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
               : voice.voiceEnabled
                 ? <Mic className="w-5 h-5" />
                 : <MicOff className="w-5 h-5" />}
+          </button>
+
+          {/* Transcript toggle — small button to hide/show status line */}
+          <button
+            onClick={() => setTranscriptVisible(v => !v)}
+            className="absolute -bottom-7 left-1/2 -translate-x-1/2 text-[9px] font-mono text-muted-foreground/30 hover:text-muted-foreground/70 transition-colors whitespace-nowrap"
+            title={transcriptVisible ? 'Hide transcript (pure voice mode)' : 'Show transcript'}
+          >
+            {transcriptVisible ? 'hide text' : 'show text'}
           </button>
         </div>
       </div>

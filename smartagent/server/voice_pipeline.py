@@ -95,12 +95,17 @@ _BARGE_IN_ECHO_HOLDOFF_SAMPLES = int(0.20 * SAMPLE_RATE)  # 200 ms
 # short window (snappy reply); a trailing-off one gets the long window
 # (patience).  See _looks_complete().
 _STITCH_WINDOW_SAMPLES      = int(1.2 * SAMPLE_RATE)   # finished thought
-_STITCH_WINDOW_LONG_SAMPLES = int(2.8 * SAMPLE_RATE)   # sounds unfinished
+_STITCH_WINDOW_LONG_SAMPLES = int(4.0 * SAMPLE_RATE)   # sounds unfinished — 4 s for slower/thoughtful speakers
 
 # Trailing words that strongly signal "I'm not done talking".
 _TRAILING_CONTINUATIONS = {
     "and", "but", "so", "or", "because", "like", "um", "uh", "the", "a",
     "to", "of", "with", "that", "is", "was", "if", "when", "then", "also",
+    # Extended filler / continuation signals
+    "i", "it", "you", "we", "they", "he", "she", "just", "even", "really",
+    "yeah", "okay", "right", "well", "actually", "basically", "literally",
+    "mean", "think", "kind", "sort", "gonna", "gotta", "wanna", "cause",
+    "about", "around", "through", "for", "at", "in", "on", "by", "this",
 }
 
 
@@ -425,7 +430,12 @@ class VoiceSession:
                 # _stitch_remaining resets when "end" fires (below).
 
             elif result and "end" in result:
-                # ── Speech ended — transcribe, stitch, restart window ─────────
+                # ── Speech ended — immediate thinking cue, then transcribe ────
+                # Fire "thinking" the INSTANT VAD says you stopped talking —
+                # before Whisper even starts (~300-800 ms before "final").
+                # The frontend shows a pulse immediately so there's zero
+                # perceived silence between user finishing and MARK responding.
+                events.append({"type": "thinking"})
                 self.speech_active = False
                 if self._utterance:
                     audio = np.concatenate(self._utterance)
@@ -449,6 +459,20 @@ class VoiceSession:
                             self._stitch_remaining / SAMPLE_RATE,
                             "complete" if complete else "unfinished",
                         )
+                        # ── Speculative early dispatch ────────────────────────
+                        # For complete-sounding thoughts, dispatch the LLM NOW
+                        # (no stitch wait) instead of waiting 1.2 s.  We emit
+                        # "speculative_final" so the voice_websocket can start
+                        # the brain immediately.  The stitch window still runs;
+                        # if the user continues talking, speech_start cancels
+                        # the in-flight inference.  If they don't, the 1.2 s
+                        # "final" fires but the dedup guard drops it (same text,
+                        # < 5 s window).  Net saving: 1.2 s per complete turn.
+                        if complete:
+                            events.append({
+                                "type": "speculative_final",
+                                "text": self._pending_final,
+                            })
                 self._utterance = []
 
             elif self.speech_active and self.samples_since_partial >= 2 * SAMPLE_RATE:

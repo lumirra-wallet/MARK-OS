@@ -106,6 +106,7 @@ export function useVoice() {
   const [isListening,       setIsListening]       = useState(false);
   const [micLevel,          setMicLevel]          = useState(0);
   const [interimTranscript, setInterimTranscript] = useState('');
+  const [isThinking,        setIsThinking]        = useState(false);
   const [supported] = useState(() =>
     typeof navigator !== 'undefined' &&
     !!navigator.mediaDevices?.getUserMedia &&
@@ -132,6 +133,7 @@ export function useVoice() {
   const isRunningRef       = useRef(false);
   const reconnectTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef  = useRef(1000);
+  const heartbeatRef       = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // autoStartedRef — ensures we only auto-connect once on mount, even if
   // connectVoiceSocket identity changes (e.g. workspace change).
@@ -230,6 +232,19 @@ export function useVoice() {
       // Clear any transcript that was queued before the reconnect.
       pendingMsgRef.current = null;
       accumulatedRef.current = '';
+
+      // ── Heartbeat ping every 15 s ─────────────────────────────────────
+      // Keeps the /ws/voice WebSocket alive through proxy idle-connection
+      // timeouts (Nginx default: 60 s; Replit proxy: ~30 s).  Without this,
+      // silences longer than ~30 s caused a silent disconnect — MARK stopped
+      // hearing the user until the next onaudioprocess frame triggered a
+      // reconnect, adding a full reconnect round-trip of latency.
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+      heartbeatRef.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 15_000);
 
       // ── Acquire mic ────────────────────────────────────────────────────
       let stream: MediaStream;
@@ -333,6 +348,7 @@ export function useVoice() {
           // User started speaking (or barged in) — stop MARK's audio NOW.
           stopMarkSpeech();
           setInterimTranscript('');
+          setIsThinking(false);
           // Cancel any pending stitch debounce — user is still talking.
           if (stitchTimerRef.current) {
             clearTimeout(stitchTimerRef.current);
@@ -340,11 +356,29 @@ export function useVoice() {
           }
           break;
 
+        case 'thinking':
+          // VAD just detected you stopped talking — MARK is now transcribing
+          // and about to start thinking.  This fires ~300-800 ms BEFORE the
+          // LLM call starts, so there's a visual cue within 100 ms of speech
+          // end with zero dead silence.
+          setIsThinking(true);
+          setInterimTranscript('');
+          break;
+
         case 'partial':
           setInterimTranscript(msg.text ?? '');
           break;
 
+        case 'speculative_final':
+          // Complete-sounding thought: server dispatched LLM immediately
+          // (no stitch-window wait).  Display it as a user message now.
+          setIsThinking(false);
+          setInterimTranscript('');
+          if (msg.text) addSpokenUserMessage(msg.text, workspace);
+          break;
+
         case 'final':
+          setIsThinking(false);
           setInterimTranscript('');
           // Display only. The server dispatched MARK's brain the instant the
           // VAD closed this utterance (see voice_websocket in api.py) — the
@@ -356,6 +390,12 @@ export function useVoice() {
     };
 
     ws.onclose = (ev: CloseEvent) => {
+      // Clear heartbeat when the connection closes.
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current);
+        heartbeatRef.current = null;
+      }
+      setIsThinking(false);
       stopMic();
       if (!enabledRef.current) return;
       // Code 4000 = evicted: another tab started streaming mic audio and now
@@ -484,6 +524,7 @@ export function useVoice() {
     voiceEnabled,
     isListening,
     isSpeaking:        isMarkSpeaking,
+    isThinking,
     micLevel,
     interimTranscript,
     toggleVoice,

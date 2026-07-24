@@ -105,6 +105,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async def _warm_agent() -> None:
         try:
             from smartagent.server import api as _api_mod  # type: ignore[attr-defined]
+            from smartagent.server import tts_engine as _tts
+
+            # Pre-warm Kokoro TTS immediately so the first synthesis call
+            # (~2 s of JIT compilation) happens during startup, not when the
+            # owner first speaks.  Runs in a daemon thread — non-blocking.
+            _tts.prewarm()
+            logger.info("tts_engine: Kokoro pre-warm launched in background")
+
             agent = await _api_mod._get_mark_agent(None)
             logger.info("SmartAgent warm-up complete")
             # Warm the voice reasoner's HTTP session with a 1-token ping:

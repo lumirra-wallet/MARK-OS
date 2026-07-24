@@ -1,0 +1,22 @@
+What Needs to Be Built
+Here is the full list of changes, ordered by impact:
+
+#	What	Why it matters	Difficulty
+1	"Thinking" audio cue — play a subtle sound or show a "MARK is thinking" pulse within 100ms of you finishing	Kills the dead silence. Makes the gap feel like thought, not lag	Low
+2	Pre-warm Kokoro at startup — currently lazy-loaded, first synthesis is slow because the model initializes on the first call	Cuts ~2 seconds off the very first response	Low
+3	Reduce TTS first-sentence latency — split at 60 chars instead of 160, so the first audio chunk arrives faster	MARK starts speaking sooner, even if the sentence is short	Low
+4	Fix the Chinese / multilingual TTS bug — tell MARK in its system prompt that it speaks English only via its real voice; if asked to speak another language, it should explain it cannot do that naturally rather than producing garbled output	Stops the robotic OS-voice reading problem	Low
+5	Option to hide the transcript — let the user toggle off the visible chat box so it feels like a pure voice call	Matches the "phone call" feel you described	Medium
+6	Extend max stitch window — increase the 2.8s unfinished-thought window to 4.0s and make the filler-word list broader	Gives slower/more thoughtful speakers more time	Low
+7	Heartbeat ping on /ws/voice — send a lightweight JSON ping every 15s to keep the voice WebSocket from being dropped by idle-connection timeouts	Prevents silent disconnections	Low
+8	Conversation memory that persists across sessions — it exists (.mark_storage/chat.json, 200 turns) but needs to be verified working correctly for your setup	MARK actually remembers what you said yesterday	Medium
+9	Speculative/early LLM dispatch — start the LLM call with the partial transcript as soon as VAD detects speech end, before Whisper fully confirms the final transcript	Cuts 300–800ms off every single turn	High
+The One Big Architectural Truth
+MARK's pipeline is: Speech → Text → Thought → Speech (STT → LLM → TTS). This chain has latency at every step. ChatGPT Voice mode collapses this into Speech → Speech (audio directly in, audio directly out). That requires a different kind of model that doesn't exist in a free local setup.
+
+What we CAN do is make the chain feel faster by:
+
+Starting something immediately (the "thinking" cue)
+Making Kokoro start sooner (smaller first sentence, pre-warmed model)
+Making the LLM call start sooner (speculative dispatch on partial)
+Removing the visual "typing" experience and making it feel like a call

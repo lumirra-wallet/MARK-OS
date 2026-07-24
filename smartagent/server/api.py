@@ -2019,7 +2019,13 @@ async def voice_websocket(ws: WebSocket) -> None:
                 for ev in events:
                     await ws.send_text(json.dumps(ev))
                     # ── Direct brain dispatch — the streamline loop ────────
-                    if ev.get("type") == "final" and ev.get("text"):
+                    ev_type = ev.get("type")
+                    if ev_type in ("final", "speculative_final") and ev.get("text"):
+                        # "speculative_final" fires immediately for complete-
+                        # sounding thoughts (no 1.2 s stitch wait); "final"
+                        # fires after the stitch window.  Both dispatch the
+                        # brain — the dedup guard in _voice_chat_response drops
+                        # the second one when they carry the same text.
                         asyncio.ensure_future(
                             _voice_chat_response(ev["text"], ws_workspace)
                         )
@@ -2036,6 +2042,8 @@ async def voice_websocket(ws: WebSocket) -> None:
                     session.mute()
                 elif ctrl_type == "tts_end":
                     session.unmute()
+                # "ping" heartbeat from the browser — keep-alive, no action needed.
+                # Silently ignored here; the WS receive loop keeps the connection live.
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # noqa: BLE001
