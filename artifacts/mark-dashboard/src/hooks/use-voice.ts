@@ -2,23 +2,25 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMarkStore } from '@/store/markStore';
 
 /**
- * Real voice I/O for MARK — always active from page load.
+ * Real voice I/O for Elena — always active from page load.
  *
- * Design principle: MARK is ALWAYS listening, like a phone call that starts
+ * Design principle: Elena is ALWAYS listening, like a phone call that starts
  * the moment you open the tab.  The mic connects automatically on mount
  * (after the browser grants permission).  The toggle button mutes/unmutes
  * rather than enabling/disabling.
  *
  * Audio pipeline
  * ──────────────
- *   Inbound (mic → MARK):
- *     getUserMedia (native sample rate, AEC + NS + AGC on)
- *     → AudioWorkletNode (mark-audio-processor.js, audio render thread)
- *     → resampleTo16k (linear interpolation)
- *     → floatTo16BitPCM
+ *   Inbound (mic → Elena):
+ *     getUserMedia (mono, 48 kHz hint, AEC + NS + AGC on)
+ *     → DynamicsCompressorNode (hardware broadcast-style compression)
+ *     → AudioWorkletNode (mark-audio-processor.js, audio render thread):
+ *         stereo→mono downmix, pre-emphasis y[n]=x[n]−0.97·x[n−1],
+ *         4-point cubic Hermite resample to 16 kHz (1024-sample chunks)
+ *     → floatTo16BitPCM (main thread — worklet already at 16 kHz)
  *     → binary WebSocket frames → /ws/voice
  *     → VoiceSession (Silero VAD → faster-whisper) on the server
- *   Outbound (MARK → browser):
+ *   Outbound (Elena → browser):
  *     Kokoro TTS on the server
  *     → binary PCM16 frames on the main /ws connection
  *     → SpeechPlayer (AudioContext) in markStore.ts
@@ -49,14 +51,17 @@ import { useMarkStore } from '@/store/markStore';
  *   5. Server VAD transitions to LISTENING — next words are transcribed
  *   6. When VAD fires "end" → "final" event → browser POSTs /voice/message
  *
- * Echo cancellation layers
- * ────────────────────────
- *   1. getUserMedia echoCancellation + noiseSuppression — browser AEC
- *   2. Client mic gate (micMutedRef) — stops PCM frames during TTS
- *   3. Server-proactive mute (speech_runtime → VoiceSession) — VAD off
- *   4. Server POST_SPEECH holdoff (900ms, sample-accurate) — no transcripts
- *      after TTS even if residual echo sneaks through
- *   5. Backend Whisper no_speech_prob filter — rejects non-speech segments
+ * Noise cancellation layers (defence in depth)
+ * ─────────────────────────────────────────────
+ *   1. getUserMedia echoCancellation + noiseSuppression + AGC — browser AEC
+ *   2. DynamicsCompressorNode — hardware broadcast compression normalises
+ *      speech level and suppresses loud transients before the worklet sees them
+ *   3. Worklet pre-emphasis — lifts consonant band (2–8 kHz), suppresses hum
+ *   4. Client mic gate (micMutedRef) — stops PCM frames during TTS
+ *   5. Server Silero VAD — speech-activity detection rejects non-speech frames
+ *   6. Server-proactive mute (speech_runtime → VoiceSession) — VAD hard-off
+ *   7. Server POST_SPEECH holdoff (900ms) — no transcripts after TTS
+ *   8. Backend RMS normalisation + Whisper no_speech_prob filter
  *
  * Single-connection guarantee
  * ───────────────────────────
@@ -66,21 +71,10 @@ import { useMarkStore } from '@/store/markStore';
  */
 
 // ── PCM helpers ─────────────────────────────────────────────────────────────
-
-function resampleTo16k(floatPCM: Float32Array, srcRate: number): Float32Array {
-  if (srcRate === 16000) return floatPCM;
-  const ratio  = srcRate / 16000;
-  const outLen = Math.floor(floatPCM.length / ratio);
-  const out    = new Float32Array(outLen);
-  for (let i = 0; i < outLen; i++) {
-    const src = i * ratio;
-    const lo  = Math.floor(src);
-    const hi  = Math.min(lo + 1, floatPCM.length - 1);
-    const t   = src - lo;
-    out[i]    = floatPCM[lo] * (1 - t) + floatPCM[hi] * t;
-  }
-  return out;
-}
+// Note: resampling to 16 kHz is now handled inside the AudioWorklet on the
+// audio render thread (mark-audio-processor.js) using a 4-point cubic Hermite
+// interpolator. The main thread only receives already-16 kHz float32 chunks
+// and converts them to PCM16 for WebSocket transmission.
 
 function floatTo16BitPCM(floatPCM: Float32Array): ArrayBuffer {
   const buf  = new ArrayBuffer(floatPCM.length * 2);
@@ -251,15 +245,24 @@ export function useVoice() {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
+            // ── Channel / rate hints ────────────────────────────────────
+            // Mono eliminates stereo phase cancellation on mics that have
+            // left/right slight timing differences. The worklet downmixes
+            // anyway, but constraining to mono at the source reduces the
+            // codec/processing work the OS does before we ever see data.
+            channelCount:             1,
+            sampleRate:               48000, // hint — browser may ignore but
+            //                               // most modern hardware honours it
+            // ── Browser-native AEC / NS / AGC ───────────────────────────
             echoCancellation:         true,
             noiseSuppression:         true,
             autoGainControl:          true,
-            // Chrome-specific hints for more aggressive AEC in voice-call mode
+            // Chrome / Chromium extended constraints for voice-call quality
             googEchoCancellation:     true,
             googNoiseSuppression:     true,
-            googAutoGainControl:      true,
-            googHighpassFilter:       true,
+            googHighpassFilter:       true,    // 80 Hz DC / hum removal
             googTypingNoiseDetection: true,
+            googAudioMirroring:       false,   // no feedback-mirror artefacts
           } as MediaTrackConstraints,
         });
       } catch (err) {
@@ -279,9 +282,21 @@ export function useVoice() {
       const ctx = new AudioContext();
       audioCtxRef.current = ctx;
       const source   = ctx.createMediaStreamSource(stream);
+
+      // ── DynamicsCompressorNode — broadcast-style compression ─────────────
+      // Normalises speech level before the worklet sees it: quiet voices are
+      // lifted, loud transients are tamed. Parameters match a standard voice
+      // broadcast chain: soft knee, fast attack to catch consonants, slow
+      // release to avoid pumping on sustained vowels.
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -24;   // dBFS — start compressing here
+      compressor.knee.value       = 10;   // soft knee width in dB
+      compressor.ratio.value      = 4;    // 4:1 ratio — voice standard
+      compressor.attack.value     = 0.003; // 3 ms — catches hard consonants
+      compressor.release.value    = 0.15;  // 150 ms — avoids pumping
+
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
-      const srcRate  = ctx.sampleRate;
 
       // Load the AudioWorklet processor from the public folder.
       // import.meta.env.BASE_URL resolves to e.g. "/mark-dashboard/" so the
@@ -318,8 +333,10 @@ export function useVoice() {
         if (!enabledRef.current) return;
         if (ws.readyState !== WebSocket.OPEN) return;
 
+        // The AudioWorklet already outputs 16 kHz float32 chunks — no
+        // main-thread resampling needed. Just gate on energy and send.
         const raw = new Float32Array(ev.data);
-        // RMS energy of this ~85 ms block
+        // RMS energy of this 64 ms block (1024 samples @ 16 kHz)
         let sum = 0;
         for (let i = 0; i < raw.length; i += 4) sum += raw[i] * raw[i];
         const rms = Math.sqrt(sum / (raw.length / 4));
@@ -332,11 +349,15 @@ export function useVoice() {
         if (rms > 0.006) gateOpenUntil = now + 4500;
         if (now > gateOpenUntil) return;              // silence → transmit nothing
 
-        const pcm16k = resampleTo16k(raw, srcRate);
-        ws.send(floatTo16BitPCM(pcm16k));
+        ws.send(floatTo16BitPCM(raw));
       };
 
-      source.connect(analyser);
+      // Audio graph: source → compressor → analyser → worklet → silence sink
+      // The compressor normalises speech level before the worklet sees it.
+      // Analyser sits between compressor and worklet so the mic-level meter
+      // reflects the compressed (post-normalisation) signal, not raw spikes.
+      source.connect(compressor);
+      compressor.connect(analyser);
       analyser.connect(processor);
       // Connect to destination so Chrome's audio graph keeps the worklet
       // alive (AudioWorkletNode.process() returns true to self-sustain, but
