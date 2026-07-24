@@ -32,6 +32,30 @@ def get_storage() -> "StorageProvider":
     return _instance
 
 
+def _local_fallback(reason: str) -> "StorageProvider":
+    """Return a working local JSON store, logging *why* we fell back.
+
+    Used when a remote backend (mongodb/postgres) is configured but its
+    server is unreachable at boot — a paused Atlas cluster, no network, a
+    DNS failure (``getaddrinfo failed``), etc. Degrading to local storage
+    keeps MARK alive and quiet instead of raising on every ``get_storage()``
+    call: because the factory caches the returned singleton, falling back
+    here ONCE stops the repeated 5-second connection retries that would
+    otherwise flood the logs. Matches the rest of MARK's degrade-gracefully
+    philosophy (Ollama down → fallback reply, TTS down → browser voice).
+    """
+    from smartagent.logs.logger import get_logger
+    get_logger(__name__).warning(
+        "storage: remote backend unavailable — falling back to LOCAL JSON storage. "
+        "MARK will run normally but any data in the remote DB is not visible until "
+        "it is reachable again. Reason: %s", reason,
+    )
+    from smartagent.storage.local_storage import LocalStorageProvider
+    p = LocalStorageProvider()
+    p.initialize()
+    return p
+
+
 def _create() -> "StorageProvider":
     provider_name = os.environ.get("DATABASE_PROVIDER", "sqlite").strip().lower()
     database_url  = os.environ.get("DATABASE_URL", "")
@@ -46,10 +70,13 @@ def _create() -> "StorageProvider":
                 "DATABASE_PROVIDER=postgres but DATABASE_URL is not set. "
                 "Set DATABASE_URL=postgresql://user:pass@host/db"
             )
-        from smartagent.storage.postgres_storage import PostgresStorageProvider
-        p = PostgresStorageProvider(database_url)
-        p.initialize()
-        return p
+        try:
+            from smartagent.storage.postgres_storage import PostgresStorageProvider
+            p = PostgresStorageProvider(database_url)
+            p.initialize()
+            return p
+        except Exception as exc:  # noqa: BLE001 — connection failure, not misconfig
+            return _local_fallback(f"postgres init failed: {exc}")
 
     if provider_name == "mongodb":
         mongodb_uri = os.environ.get("MONGODB_URI", "")
@@ -59,10 +86,13 @@ def _create() -> "StorageProvider":
                 "Set MONGODB_URI=mongodb+srv://user:pass@cluster/..."
             )
         db_name = os.environ.get("MONGODB_DB_NAME", "mark")
-        from smartagent.storage.mongo_storage import MongoStorageProvider
-        p = MongoStorageProvider(mongodb_uri, db_name)
-        p.initialize()
-        return p
+        try:
+            from smartagent.storage.mongo_storage import MongoStorageProvider
+            p = MongoStorageProvider(mongodb_uri, db_name)
+            p.initialize()
+            return p
+        except Exception as exc:  # noqa: BLE001 — cluster unreachable / DNS / paused
+            return _local_fallback(f"mongodb init failed: {exc}")
 
     # Default: local JSON storage
     from smartagent.storage.local_storage import LocalStorageProvider
