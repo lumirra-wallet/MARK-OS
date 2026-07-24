@@ -148,7 +148,12 @@ class NvidiaProvider(BaseModel):
         self._model_name = model_name
         self._api_key = api_key or os.environ.get("NVIDIA_API_KEY", "")
         self._timeout = timeout
-        self._enable_thinking = enable_thinking
+        # Thinking mode is only supported by Nemotron models — sending
+        # chat_template_kwargs.enable_thinking to a Llama/non-Nemotron model
+        # causes it to ignore the system prompt and respond as a generic LLM.
+        # Auto-disable it for any model whose ID doesn't contain "nemotron".
+        nemotron = "nemotron" in model_name.lower()
+        self._enable_thinking = enable_thinking and nemotron
         self._reasoning_budget = reasoning_budget
         self._status = ModelStatus.UNLOADED
         self._call_count = 0
