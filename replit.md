@@ -18,9 +18,21 @@ The workspace uses pnpm. All three services start automatically via Replit workf
 | **API Server (Node)** | `pnpm --filter @workspace/api-server run dev` | 8080 |
 
 ### First Run / After Environment Reset
-Python packages install automatically when the MARK server starts (via `requirements.minimal.txt`). If you need to install manually:
+Run the setup script to install all dependencies:
 ```bash
-pip install -r requirements.minimal.txt
+bash scripts/setup.sh
+```
+
+This installs pnpm packages and the core Python packages. The `requirements.minimal.txt` auto-install in the dev script may fail with a disk quota error (the `/` overlay is 4 MB); the setup script works around this by using `--no-cache-dir`.
+
+If you need to install Python packages manually:
+```bash
+pip install --no-cache-dir fastapi uvicorn[standard] pydantic pydantic-settings \
+    python-multipart sqlalchemy asyncpg redis motor pymongo \
+    openai anthropic ollama httpx aiohttp websockets requests \
+    python-dotenv pyyaml tomli tomli-w orjson aiofiles tenacity \
+    python-jose[cryptography] passlib[bcrypt] cryptography pyjwt \
+    numpy structlog loguru typer rich livekit livekit-api
 ```
 
 ### Ollama (local LLM)
