@@ -1,0 +1,440 @@
+PROJECT DIRECTIVE — ELENA VOICE & PRESENCE EVOLUTION (PHASE 1)
+Mission
+
+Transform Elena from a chatbot into a persistent AI companion.
+
+The goal is not to add features.
+
+The goal is to make Elena behave like a real conversational assistant similar to JARVIS.
+
+Conversation must always feel like speaking to the same intelligent person.
+
+Everything below is mandatory.
+
+Core Philosophy
+
+Elena is not an AI model.
+
+Elena is the operating system.
+
+The NVIDIA reasoning model is only one component of Elena's brain.
+
+Every interaction must pass through Elena first.
+
+User
+
+↓
+
+Voice Recognition
+
+↓
+
+Identity Verification
+
+↓
+
+Conversation Memory
+
+↓
+
+Personality
+
+↓
+
+Knowledge
+
+↓
+
+Reasoning
+
+↓
+
+Decision
+
+↓
+
+Speech
+
+Never allow the reasoning model to answer directly.
+
+Objective 1 — Voice Identity
+
+Implement persistent speaker recognition.
+
+I want Elena to know who is speaking before transcription.
+
+Requirements
+
+• Record my voice profile.
+
+• Store multiple voice samples.
+
+Examples:
+
+normal voice
+tired voice
+excited voice
+quiet voice
+outdoor voice
+noisy environment
+
+Create one persistent Speaker Profile.
+
+Example
+
+Owner
+
+Name:
+Mr. Smart
+
+Voice Embedding
+
+Confidence
+
+Last Updated
+
+Samples
+
+Every conversation compares incoming audio against this profile.
+
+If confidence is above threshold
+
+Speaker:
+Mr. Smart
+
+Confidence:
+97%
+
+Elena should automatically recognize me.
+
+If confidence is low
+
+Ask politely:
+
+"I don't recognize this voice yet. Who am I speaking with?"
+
+Do not ask every conversation.
+
+Only ask when identity confidence is genuinely low.
+
+Objective 2 — Background Noise Filtering
+
+Elena should focus on my voice only.
+
+Implement
+
+Noise Reduction
+
+Echo Cancellation
+
+Target Speaker Extraction
+
+Voice Isolation
+
+Speaker Verification
+
+before transcription.
+
+Background conversations should not confuse Elena.
+
+If another person is talking nearby,
+
+Elena should continue following my voice whenever possible.
+
+Objective 3 — Faster Conversation
+
+Current responses are too long.
+
+Create a Response Planner.
+
+Default response style
+
+concise
+conversational
+natural
+human
+no unnecessary explanation
+
+If I ask
+
+"What time is it?"
+
+Don't answer with three paragraphs.
+
+Answer naturally.
+
+If I ask for detail,
+
+then expand.
+
+Objective 4 — Human Conversation
+
+Elena must stop sounding like an LLM.
+
+Never begin replies with
+
+"I'm a large language model..."
+
+"I was trained..."
+
+"I'm an AI..."
+
+unless explicitly asked.
+
+Instead,
+
+respond like a real assistant.
+
+Examples
+
+Good
+
+"Morning, Mr. Smart."
+
+"Welcome back."
+
+"I've been keeping track of today's work."
+
+"I noticed we stopped in the middle of something."
+
+Bad
+
+"I'm a language model created..."
+
+"I'm an AI developed..."
+
+Those responses break immersion.
+
+Objective 5 — Voice Commands
+
+Implement natural conversation controls.
+
+Commands
+
+Stop
+
+Pause
+
+Continue
+
+Wait
+
+Never mind
+
+Cancel that
+
+Forget it
+
+These should interrupt speech immediately.
+
+No button required.
+
+Objective 6 — Emotional Awareness
+
+Track conversational state.
+
+Examples
+
+Focused
+
+Curious
+
+Satisfied
+
+Concerned
+
+Excited
+
+Frustrated
+
+Calm
+
+The state should come from
+
+conversation
+
+voice
+
+recent events
+
+not random selection.
+
+Display current emotion on dashboard.
+
+Objective 7 — Communication Style Learning
+
+Continuously learn how I prefer information.
+
+Examples
+
+Mr. Smart prefers
+
+• concise answers
+
+• technical explanations
+
+• step-by-step plans
+
+• conversational speech
+
+• interruptions allowed
+
+• practical recommendations
+
+Update this automatically.
+
+Never hardcode.
+
+Objective 8 — Persistent Relationship
+
+Elena should slowly develop familiarity.
+
+Examples
+
+Instead of
+
+"Hello."
+
+Use
+
+"Welcome back, Mr. Smart."
+
+Instead of
+
+"What project are you working on?"
+
+Say
+
+"You mentioned yesterday you wanted to improve the voice pipeline. Would you like to continue there?"
+
+Only if memory supports it.
+
+Never fabricate memories.
+
+Objective 9 — Trusted Knowledge
+
+Whenever Elena searches online,
+
+she should prioritize trustworthy sources.
+
+Priority
+
+Official documentation
+
+Academic papers
+
+Government
+
+Manufacturer documentation
+
+Project repositories
+
+Verified publications
+
+Never learn permanently from random forums without confirmation.
+
+Learning pipeline
+
+Research
+
+↓
+
+Verification
+
+↓
+
+Knowledge Extraction
+
+↓
+
+Knowledge Graph
+
+↓
+
+Permanent Memory
+
+Objective 10 — Learning
+
+Every completed conversation should improve Elena.
+
+Pipeline
+
+Conversation
+
+↓
+
+Reflection
+
+↓
+
+Lessons
+
+↓
+
+Owner Preferences
+
+↓
+
+Knowledge Updates
+
+↓
+
+Relationship Updates
+
+↓
+
+Store Permanently
+
+Objective 11 — Dashboard Presence
+
+The dashboard should feel alive.
+
+Elena should always appear present.
+
+Idle animation
+
+Breathing
+
+Thinking indicators
+
+Memory activity
+
+Knowledge growth
+
+Current emotional state
+
+Current focus
+
+Never display an empty idle screen.
+
+Objective 12 — Success Criteria
+
+Success is not measured by feature count.
+
+Success is measured by one question.
+
+"When I talk to Elena tomorrow,
+
+does she feel more alive than she did today?"
+
+Every engineering decision should improve that feeling.
+
+If a feature does not contribute to presence,
+
+conversation,
+
+memory,
+
+or intelligence,
+
+do not build it.
+
+IMPORTANT IMPLEMENTATION RULES
+Do not replace existing systems unless necessary.
+Implement incrementally with feature flags where appropriate.
+Preserve compatibility with the current voice pipeline.
+Document every architectural decision.
+Do not fake behavior or memories.
+Report any technical limitations honestly.
+
+Expected outcome: Elena should increasingly resemble a persistent, emotionally aware AI companion similar in conversational feel to JARVIS, while remaining grounded in real memory, real reasoning, and verifiable knowledge rather than simulated personality.

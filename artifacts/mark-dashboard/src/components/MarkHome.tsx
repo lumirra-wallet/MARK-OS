@@ -59,6 +59,8 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
   const isMarkSpeaking     = useMarkStore(s => s.isMarkSpeaking);
   const messages           = useMarkStore(s => s.messages);
   const streamingTokens    = useMarkStore(s => s.streamingTokens);
+  const speakerName        = useMarkStore(s => s.speakerName);
+  const speakerConfidence  = useMarkStore(s => s.speakerConfidence);
 
   const { selfState } = useSelfState();
   const voice = useVoice();
@@ -195,6 +197,24 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
           <span>{Math.round(selfState.confidence * 100)}% confident</span>
           <span>·</span>
           <span>{Math.round(selfState.health * 100)}% health</span>
+        </div>
+      )}
+
+      {/* ── Speaker identity badge ───────────────────────────────────────────── */}
+      {speakerName && speakerName !== 'Unknown' && (
+        <div className="absolute top-[5.5rem] left-5 z-10 flex items-center gap-1.5 pointer-events-none">
+          <span
+            className="w-1.5 h-1.5 rounded-full bg-violet-400"
+            style={{ opacity: 0.4 + speakerConfidence * 0.6 }}
+          />
+          <span className="text-[9px] font-mono text-violet-300/50">
+            {speakerName}
+            {speakerConfidence > 0 && (
+              <span className="ml-1 text-violet-300/30">
+                {Math.round(speakerConfidence * 100)}%
+              </span>
+            )}
+          </span>
         </div>
       )}
 

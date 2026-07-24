@@ -381,7 +381,9 @@ export function useVoice() {
         return;
       }
 
-      switch (msg.type) {
+      const fullMsg = msg as { type: string; text?: string; name?: string; confidence?: number; command?: string };
+
+      switch (fullMsg.type) {
         case 'speech_start':
           // User started speaking (or barged in) — stop MARK's audio NOW.
           stopMarkSpeech();
@@ -404,7 +406,7 @@ export function useVoice() {
           break;
 
         case 'partial':
-          setInterimTranscript(msg.text ?? '');
+          setInterimTranscript(fullMsg.text ?? '');
           break;
 
         case 'speculative_final':
@@ -412,7 +414,7 @@ export function useVoice() {
           // (no stitch-window wait).  Display it as a user message now.
           setIsThinking(false);
           setInterimTranscript('');
-          if (msg.text) addSpokenUserMessage(msg.text, workspace);
+          if (fullMsg.text) addSpokenUserMessage(fullMsg.text, workspace);
           break;
 
         case 'final':
@@ -422,7 +424,27 @@ export function useVoice() {
           // VAD closed this utterance (see voice_websocket in api.py) — the
           // old final → 1.5 s debounce → POST /voice/message round-trip is
           // gone, and with it its latency and its tab-throttling dropouts.
-          if (msg.text) addSpokenUserMessage(msg.text, workspace);
+          if (fullMsg.text) addSpokenUserMessage(fullMsg.text, workspace);
+          break;
+
+        case 'voice_command':
+          // Natural voice command intercepted (stop/pause/cancel/never mind).
+          // The server already interrupted TTS; update client state to match.
+          if (fullMsg.command === 'stop') {
+            stopMarkSpeech();
+            setIsThinking(false);
+            setInterimTranscript('');
+          }
+          break;
+
+        case 'speaker_identified':
+          // Owner voice recognised — update store with identity confidence.
+          if (fullMsg.name && typeof fullMsg.confidence === 'number') {
+            useMarkStore.setState({
+              speakerName: fullMsg.name,
+              speakerConfidence: fullMsg.confidence,
+            });
+          }
           break;
       }
     };

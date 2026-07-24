@@ -232,6 +232,10 @@ interface MarkState {
   memoryActivity:   MemoryActivityEntry[];  // last 10 real memory writes
   knowledgeGrowth:  number;                 // concepts committed this session
 
+  // ── Speaker identity — updated by voice_command events ───────────────────
+  speakerName:        string;   // "Mr. Smart" or "Unknown"
+  speakerConfidence:  number;   // 0.0 – 1.0 from voice profile match
+
   // Preview actions
   setActivePreviewId: (id: string | null) => void;
   setDeviceMode:      (mode: DeviceMode) => void;
@@ -545,6 +549,10 @@ export const useMarkStore = create<MarkState>((set, get) => {
     emotionalReason:  '',
     memoryActivity:   [],
     knowledgeGrowth:  0,
+
+    // Speaker identity — updated when server sends speaker_identified events
+    speakerName:       '',
+    speakerConfidence: 0,
     stopMarkSpeech: () => {
       // Instant interruption (barge-in): cut all scheduled + playing audio.
       getSpeechPlayer().stop();

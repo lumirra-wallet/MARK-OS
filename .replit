@@ -42,4 +42,4 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-ACTIVE_PROVIDER = "GITHUB"
+ACTIVE_PROVIDER = "nvidia"

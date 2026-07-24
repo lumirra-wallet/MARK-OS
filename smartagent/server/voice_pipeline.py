@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 from typing import Any
 
@@ -118,6 +119,39 @@ _TRAILING_CONTINUATIONS = {
     "mean", "think", "kind", "sort", "gonna", "gotta", "wanna", "cause",
     "about", "around", "through", "for", "at", "in", "on", "by", "this",
 }
+
+
+# ── Voice command detection ───────────────────────────────────────────────────
+# Natural voice commands that should interrupt playback immediately, no LLM call.
+# Checked case-insensitively against the full transcript.
+_STOP_COMMANDS: frozenset[str] = frozenset({
+    "stop", "pause", "wait", "hold on", "hold it",
+    "never mind", "nevermind", "cancel", "cancel that",
+    "forget it", "forget that", "that's okay", "never mind that",
+    "enough", "quiet", "silence", "shh",
+})
+
+# Patterns that catch partial matches like "stop talking" or "pause for a second"
+_STOP_PATTERNS = re.compile(
+    r"\b(stop|pause|wait|hold on|cancel|quiet|silence|nevermind|never mind|"
+    r"forget it|cancel that|enough)\b",
+    re.IGNORECASE,
+)
+
+def _is_voice_command(text: str) -> tuple[bool, str]:
+    """Return (is_command, command_type) for a transcript.
+
+    Returns (True, 'stop') for interrupt/stop commands.
+    Returns (False, '') otherwise.
+    """
+    t = text.strip().rstrip(".,!?").lower()
+    # Exact match first (highest confidence)
+    if t in _STOP_COMMANDS:
+        return True, "stop"
+    # Short phrase — check with pattern (avoid false positives in long sentences)
+    if len(t.split()) <= 5 and _STOP_PATTERNS.search(t):
+        return True, "stop"
+    return False, ""
 
 
 def _looks_complete(text: str) -> bool:
@@ -536,11 +570,41 @@ class VoiceSession:
                 self.speech_active = False
                 if self._utterance:
                     audio = np.concatenate(self._utterance)
+
+                    # ── Speaker identity check ────────────────────────────────
+                    # Verify before transcription so low-confidence strangers
+                    # can be flagged without wasting a Whisper call.
+                    try:
+                        from smartagent.server.speaker_profile import speaker_manager
+                        sp = speaker_manager.verify(audio)
+                        if sp.is_owner:
+                            events.append({
+                                "type": "speaker_identified",
+                                "name": sp.owner_name,
+                                "confidence": round(sp.confidence, 3),
+                            })
+                        else:
+                            logger.info(
+                                "voice_pipeline: unknown speaker (confidence=%.2f)", sp.confidence
+                            )
+                    except Exception as _sp_exc:
+                        logger.debug("voice_pipeline: speaker check skipped: %s", _sp_exc)
+
                     text  = transcribe(
                         audio, partial=False,
                         initial_prompt=self._conversation_context or None,
                     )
                     if text:
+                        # ── Voice command detection ───────────────────────────
+                        # Check BEFORE appending to stitch buffer so commands
+                        # interrupt immediately and never reach the LLM.
+                        is_cmd, cmd_type = _is_voice_command(text)
+                        if is_cmd:
+                            logger.info("voice_pipeline: voice command detected %r → %s", text, cmd_type)
+                            events.append({"type": "voice_command", "command": cmd_type, "text": text})
+                            self._utterance = []
+                            continue
+
                         # Append to any existing pending fragment
                         if self._pending_final:
                             self._pending_final = self._pending_final + " " + text

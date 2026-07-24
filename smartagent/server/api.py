@@ -1919,6 +1919,56 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
 # uses.  Chosen over self-hosted LiveKit for exactly that reliability.
 # ---------------------------------------------------------------------------
 
+@router.post("/voice/enroll")
+async def voice_enroll(payload: dict) -> dict:
+    """Enroll a voice sample for speaker identity.
+
+    Accepts raw PCM16 audio bytes (base64-encoded) or a path to a WAV/MP4 file.
+    Updates the speaker profile used for identity verification on every turn.
+    """
+    import base64
+    from smartagent.server.speaker_profile import speaker_manager
+    import numpy as np
+
+    owner_name = payload.get("owner", "Mr. Smart")
+    audio_b64  = payload.get("audio_b64", "")
+    if not audio_b64:
+        return {"ok": False, "reason": "no audio provided"}
+    try:
+        raw = base64.b64decode(audio_b64)
+        audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        ok = speaker_manager.enroll_from_audio(audio, owner_name=owner_name)
+        return {"ok": ok, "owner": owner_name, "samples": len(audio)}
+    except Exception as exc:
+        logger.warning("voice_enroll: %s", exc)
+        return {"ok": False, "reason": str(exc)}
+
+
+@router.get("/voice/profile")
+async def voice_profile() -> dict:
+    """Return the current speaker profile metadata (no embedding data)."""
+    from smartagent.server.speaker_profile import speaker_manager
+    from pathlib import Path
+    import json
+
+    profile_path = Path("smartagent/data/speaker_profile.json")
+    if not profile_path.exists():
+        return {"has_profile": False}
+    try:
+        data = json.loads(profile_path.read_text())
+        return {
+            "has_profile": True,
+            "owner": data.get("owner", "Mr. Smart"),
+            "samples": data.get("samples", 0),
+            "audio_duration_s": data.get("audio_duration_s", 0),
+            "threshold": data.get("threshold", 0.75),
+            "created": data.get("created", ""),
+            "updated": data.get("updated", ""),
+        }
+    except Exception as exc:
+        return {"has_profile": False, "error": str(exc)}
+
+
 @router.post("/voice/message")
 async def voice_message(payload: dict) -> dict:
     """Receive a final voice transcript and trigger MARK's spoken reply.
@@ -2029,6 +2079,18 @@ async def voice_websocket(ws: WebSocket) -> None:
                     await ws.send_text(json.dumps(ev))
                     # ── Direct brain dispatch — the streamline loop ────────
                     ev_type = ev.get("type")
+
+                    # Voice command: stop/pause/cancel → interrupt TTS now
+                    if ev_type == "voice_command":
+                        cmd = ev.get("command", "")
+                        if cmd == "stop":
+                            try:
+                                speech_runtime.interrupt()
+                            except Exception:
+                                pass
+                            logger.info("voice_ws: voice command '%s' → TTS interrupted", ev.get("text",""))
+                        continue
+
                     if ev_type in ("final", "speculative_final") and ev.get("text"):
                         # "speculative_final" fires immediately for complete-
                         # sounding thoughts (no 1.2 s stitch wait); "final"
