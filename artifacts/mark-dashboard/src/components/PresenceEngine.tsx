@@ -610,7 +610,7 @@ function PresenceEngineInner({ className = '', micLevel = 0, isListening = false
       <div
         className={`w-full h-full ${className}`}
         role="img"
-        aria-label="MARK's presence"
+        aria-label="Elena's presence"
         style={{ background: 'radial-gradient(circle at 50% 45%, rgba(14,32,24,0.5) 0%, rgba(5,12,9,0.85) 35%, rgba(1,4,3,0.97) 62%, #000000 100%)' }}
       />
     );
@@ -621,7 +621,7 @@ function PresenceEngineInner({ className = '', micLevel = 0, isListening = false
       ref={containerRef}
       className={`w-full h-full ${className}`}
       role="img"
-      aria-label="MARK's living presence — a breathing translucent membrane reflecting his current state"
+      aria-label="Elena's living presence — a breathing translucent membrane reflecting her current state"
       style={{ background: 'radial-gradient(circle at 50% 45%, rgba(14,32,24,0.5) 0%, rgba(5,12,9,0.85) 35%, rgba(1,4,3,0.97) 62%, #000000 100%)' }}
     />
   );

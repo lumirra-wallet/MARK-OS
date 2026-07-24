@@ -197,13 +197,13 @@ export function SettingsView() {
       <div className="max-w-2xl mx-auto space-y-6">
         <div>
           <h2 className="text-2xl font-bold tracking-tight mb-1">Settings</h2>
-          <p className="text-sm text-muted-foreground">Configure MARK server connection and AI provider.</p>
+          <p className="text-sm text-muted-foreground">Configure MSART OS server connection and AI provider.</p>
         </div>
 
         {/* ── MARK Server Configuration ─────────────────────────────────────── */}
         <Section
-          title="MARK Server"
-          description="WebSocket and REST API endpoint for the local MARK daemon."
+          title="MSART OS Server"
+          description="WebSocket and REST API endpoint for the local MSART OS daemon."
         >
           <div className="grid gap-2">
             <Label htmlFor="serverUrl">API Base URL</Label>
@@ -239,7 +239,7 @@ export function SettingsView() {
         {/* ── LLM Provider ────────────────────────────────────────────────────── */}
         <Section
           title="AI Provider"
-          description="Choose which cloud provider MARK uses for all chat, agents, and planning."
+          description="Choose which cloud provider Elena uses for all chat, agents, and planning."
         >
           {llmLoading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">

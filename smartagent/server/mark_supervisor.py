@@ -1,5 +1,5 @@
 """
-mark_supervisor.py — Two-process supervisor for MARK OS.
+mark_supervisor.py — Two-process supervisor for MSART OS.
 
 Manages two child processes:
 1. LiveKit server (self-hosted open-source binary) — started first, health-checked

@@ -147,7 +147,7 @@ function EmptyPreview() {
       <div className="text-center space-y-1">
         <p className="text-sm font-medium text-foreground/60">No live previews yet</p>
         <p className="text-xs text-muted-foreground/60 max-w-[260px]">
-          When MARK starts an app, it will appear here automatically.
+          When Elena starts an app, it will appear here automatically.
           You can also enter a URL manually below.
         </p>
       </div>

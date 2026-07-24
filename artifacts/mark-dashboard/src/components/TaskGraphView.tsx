@@ -191,7 +191,7 @@ export function TaskGraphView() {
               <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                 <GitBranch className="w-10 h-10 mb-2 opacity-20" />
                 <p className="text-xs text-center">
-                  Start a MARK run to see<br/>the task dependency graph
+                  Ask Elena to start a task<br/>to see the dependency graph
                 </p>
               </div>
             ) : (

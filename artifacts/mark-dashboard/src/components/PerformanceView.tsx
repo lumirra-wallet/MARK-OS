@@ -27,7 +27,7 @@ export function PerformanceView() {
     <div className="h-full p-6 flex flex-col bg-background gap-6">
       <div>
         <h2 className="text-2xl font-bold tracking-tight mb-2">Performance Metrics</h2>
-        <p className="text-muted-foreground text-sm">Real-time throughput and latency of the MARK engine.</p>
+        <p className="text-muted-foreground text-sm">Real-time throughput and latency of the MSART OS engine.</p>
       </div>
       
       <div className="flex gap-4">

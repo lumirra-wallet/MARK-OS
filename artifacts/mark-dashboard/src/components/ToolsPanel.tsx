@@ -128,7 +128,7 @@ export function ToolsPanel() {
           <>
             <div className="w-56 border-r border-border/50 overflow-y-auto shrink-0">
               {tools.length === 0 && !loading && (
-                <p className="text-xs text-muted-foreground p-4 text-center">No tools loaded<br/>Start the MARK server</p>
+                <p className="text-xs text-muted-foreground p-4 text-center">No tools loaded<br/>Start the MSART OS server</p>
               )}
               {tools.map(tool => (
                 <button

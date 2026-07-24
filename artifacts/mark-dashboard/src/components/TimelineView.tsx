@@ -160,7 +160,7 @@ export function TimelineView() {
         {visible.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-muted-foreground">
             <Clock className="w-8 h-8 mb-2 opacity-30" />
-            <p className="text-xs">Run MARK to populate the timeline</p>
+            <p className="text-xs">Ask Elena to start a task to populate the timeline</p>
           </div>
         ) : (
           <div className="relative">

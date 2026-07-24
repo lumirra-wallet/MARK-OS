@@ -57,7 +57,7 @@ def banner(agent: "SmartAgent") -> str:
 
     lines = [
         _BORDER,
-        _center("MARK AI OPERATING SYSTEM"),
+        _center("MSART OS"),
         _BORDER,
         "",
         _field("Owner", owner),

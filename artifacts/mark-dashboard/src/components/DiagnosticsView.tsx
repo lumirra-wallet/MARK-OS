@@ -209,7 +209,7 @@ function CheckCard({ check, index }: { check: DiagCheck; index: number }) {
       {/* System detail row — this process's own PID/CPU/RSS, distinct from system-wide */}
       {isSystem && check.process_pid != null && (
         <div className="flex items-center gap-4 flex-wrap pl-[172px] text-[11px] text-muted-foreground">
-          <span>MARK process (pid <span className="font-mono text-foreground/80">{check.process_pid}</span>)</span>
+          <span>MSART OS process (pid <span className="font-mono text-foreground/80">{check.process_pid}</span>)</span>
           <span><span className="font-mono text-foreground/80">{check.process_cpu_pct?.toFixed(1)}%</span> CPU</span>
           <span><span className="font-mono text-foreground/80">{check.process_rss_mb}</span> MB RSS</span>
         </div>
@@ -321,7 +321,7 @@ export function DiagnosticsView() {
       setData(json);
       setLastCheck(new Date());
     } catch (err: any) {
-      setError(err.message || 'Failed to reach MARK server');
+      setError(err.message || 'Failed to reach MSART OS server');
     } finally {
       setLoading(false);
     }
@@ -373,7 +373,7 @@ export function DiagnosticsView() {
           <div className="flex items-start gap-2.5 p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
             <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-medium text-red-400">Cannot reach MARK server</p>
+              <p className="text-sm font-medium text-red-400">Cannot reach MSART OS server</p>
               <p className="text-xs text-red-400/70 mt-0.5">{error}</p>
               <p className="text-xs text-muted-foreground mt-1">
                 Make sure the Python server is running at <code className="font-mono">{serverUrl}</code>

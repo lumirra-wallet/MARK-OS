@@ -77,7 +77,7 @@ export function MemoryPanel() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-card/40 shrink-0">
         <div className="flex items-center gap-2">
           <Brain className="w-4 h-4 text-accent" />
-          <span className="text-sm font-semibold">MARK Memory</span>
+          <span className="text-sm font-semibold">Elena's Memory</span>
           {files.length > 0 && (
             <span className="text-xs text-muted-foreground">({files.length} files)</span>
           )}
@@ -94,7 +94,7 @@ export function MemoryPanel() {
             <p className="text-sm font-medium text-muted-foreground">No memory directory found</p>
             <p className="text-xs text-muted-foreground/60 mt-1 font-mono">{memDir}</p>
             <p className="text-xs text-muted-foreground/60 mt-2">
-              Memory files are created automatically as MARK works on your project.
+              Memory files are created automatically as Elena works on your project.
             </p>
           </div>
         </div>

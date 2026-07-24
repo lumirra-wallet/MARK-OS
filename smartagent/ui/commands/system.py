@@ -122,7 +122,7 @@ def handle_status(agent: "SmartAgent", args: list[str]) -> str:
 def handle_version(agent: "SmartAgent", args: list[str]) -> str:
     """Display MARK's version information."""
     return (
-        "MARK AI Operating System\n"
+        "MSART OS\n"
         "  Version       : 0.9\n"
         f"  Agent         : {agent.settings.agent_name}\n"
         "  Owner         : Mr. Smart\n"

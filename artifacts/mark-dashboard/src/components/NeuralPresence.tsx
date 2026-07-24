@@ -351,7 +351,7 @@ export function NeuralPresence({
         ref={svgRef}
         viewBox="0 0 320 320"
         className="w-full h-full"
-        aria-label="MARK's live cognitive state"
+        aria-label="Elena's live cognitive state"
         aria-hidden="true"
       />
     </div>

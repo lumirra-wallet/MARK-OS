@@ -110,7 +110,7 @@ export function ApprovalsSidebar() {
           <div className="flex flex-col items-center justify-center text-center p-8 h-full opacity-50">
             <Shield className="w-12 h-12 text-muted-foreground mb-4 opacity-20" />
             <p className="text-sm text-muted-foreground">No pending actions</p>
-            <p className="text-xs text-muted-foreground mt-1">MARK is running autonomously</p>
+            <p className="text-xs text-muted-foreground mt-1">Elena is running autonomously</p>
           </div>
         )}
       </div>
