@@ -1,0 +1,61 @@
+This is a major refactor spec. Let me read it carefully and understand what's needed, then explore the current codebase to understand what exists before planning the implementation.
+
+The spec is asking for:
+
+Identity Layer - Elena as OS, not LLM. Knows her identity, never says she's an LLM.
+Conversation Runtime - Continuous, tracks topics, intent, emotional context. No resets.
+Remove Technical Self-Awareness - No "context window expired", "I'm a language model" etc.
+Persistent Memory - Auto-save on conversation end, auto-restore on start.
+Voice Runtime - Always listening, no need to manually trigger the mic.
+Streaming Understanding - Process speech incrementally while the user is still speaking.
+Speech Interruption - Handle interruptions with sub-200ms latency.
+Speaker Recognition - Enroll owner voice from 20-30 seconds of speech to create an embedding.
+Noise Isolation - Apply noise suppression, echo cancellation, and voice isolation before speech-to-text.
+Response Style - Adopt a JARVIS/Friday/Samantha personality with 1-3 sentence responses by default.
+Trusted Knowledge - Prioritize authoritative sources and track internal confidence scores.
+Hidden Technical Layer - Completely hide token counts and other implementation details.
+Conversation Recovery - Provide graceful fallback messages when things go wrong.
+Executive Runtime - Workers report to Elena.
+The key architectural principle is to consolidate everything around a single Brain Runtime that handles all features—no scattered systems or duplicate logic. Before implementing, I need to explore what's already in the codebase: the current brain runtime, conversation and voice handling, the STT/VAD pipeline, any existing identity systems, frontend components, and memory infrastructure. I'll use a subagent to get a broad overview of the codebase structure.
+
+This is a substantial OS-level refactor. Let me explore the full current codebase first so I can plan against what already exists rather than guess.
+
+
+3 actions
+Good — I have the full picture. Now let me read the critical implementation files before writing anything:
+
+
+3 actions
+Let me read the remaining critical files in parallel before implementing:
+
+
+4 actions
+Now let me read the voice WebSocket handler and the specific parts of api.py I need:
+
+
+3 actions
+Good picture now. Let me check the enrollment endpoint and then start implementing all the changes in parallel:
+
+
+3 actions
+Good, I have enough context. Let me read voice_pipeline.py to understand VoiceSession before implementing the speaker verification hook:
+
+
+4 actions
+Now I have full context. I'll implement all sections of the spec simultaneously across all files:
+
+
+5 actions
+Now I have everything I need. Implementing all spec sections in parallel — backend first, then frontend:
+
+
+4 actions
+Continuing all edits in parallel — updating the recovery message, Elena naming throughout brain_runtime, conversation_session intent tracking, and api.py hooks simultaneously:
+
+
+6 actions
+Continuing all edits in parallel — batching remaining brain_runtime changes, conversation_session, api.py, and starting the new frontend component:
+
+
+3 actions
+You've reached your daily free quota limit. It will reset at 12:00 AM UTC.

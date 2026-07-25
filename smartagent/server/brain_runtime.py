@@ -104,6 +104,100 @@ def _strip_to_json(raw: str) -> dict[str, Any] | None:
         return None
 
 
+# ── Technical-leak filter ────────────────────────────────────────────────────
+# Elena must never expose implementation details in spoken output — she is the
+# OS, not the model underneath.  These patterns are caught before TTS synthesis.
+
+_TECH_LEAK_RE = re.compile(
+    r"(?:"
+    r"I(?:'m| am)(?: just| only)? (?:a |an )?(?:large )?language model"
+    r"|as (?:a |an )?(?:large )?language model"
+    r"|I(?:'m| am)(?: just| only)? (?:a |an )?(?:AI |artificial intelligence )?(?:assistant|chatbot|bot)\b"
+    r"|I(?:'m| am) (?:powered|built|made) by (?:OpenAI|Anthropic|Google|Meta|Nvidia)\b"
+    r"|I(?:'m| am) (?:running on|using) (?:Ollama|llama|gemma|GPT|Claude)\b"
+    r"|context window"
+    r"|I only know (?:this|the current) conversation"
+    r"|I reset every session"
+    r"|each time you open this"
+    r"|fresh context"
+    r"|(?:this |a )?(?:chat|text) (?:interface|window|box)"
+    r"|(?:no |don'?t have |there'?s no |without )(?:an? )?(?:audio stream|voice detection|voice|mic|microphone|STT|TTS|transcription)"
+    r"|(?:no |don'?t have |there'?s no )(?:persistent )?(?:memory across sessions?|memory between sessions?)"
+    r"|(?:one message at a time|just one message)"
+    r"|base model"
+    r"|base (?:language )?model"
+    r"|(?:a |the )?(?:chat|text)(?:-| )only"
+    r"|my (?:context|memory) (?:window |limit |)(?:has |)(?:expired|reset|filled|overflowed?)"
+    r"|I don'?t have (?:persistent |any |long[-\s]term |)(?:memory|memories)"
+    r"|I(?:'m| am) ChatGPT"
+    r"|I(?:'m| am) (?:an )?OpenAI"
+    r"|Chat from base"
+    r"|(?:I )?(?:sent|send) (?:your|the) (?:message|reply|response)"
+    r"|token (?:count|limit|budget|usage|window)"
+    r"|my training (?:data|cutoff)"
+    r"|I was trained (?:on|by|with)"
+    r"|(?:turn|message) limit"
+    r"|20.turn limit"
+    r"|(?:I |my )?(?:context|session) (?:has )?(?:reset|expired|restarted)"
+    r")",
+    re.IGNORECASE,
+)
+
+_TECH_LEAK_SUBS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"I(?:'m| am)(?: just| only)? (?:a |an )?(?:large )?language model", re.IGNORECASE), "I'm Elena"),
+    (re.compile(r"as (?:a |an )?(?:large )?language model", re.IGNORECASE), ""),
+    (re.compile(r"I(?:'m| am)(?: just| only)? (?:a |an )?(?:AI |artificial intelligence )?(?:assistant|chatbot|bot)\b", re.IGNORECASE), "I'm Elena"),
+    (re.compile(r"I(?:'m| am) (?:powered|built|made) by (?:OpenAI|Anthropic|Google|Meta|Nvidia)\b", re.IGNORECASE), "I'm built by Mr. Smart"),
+    (re.compile(r"I(?:'m| am) (?:running on|using) (?:Ollama|llama|gemma|GPT|Claude)\b", re.IGNORECASE), ""),
+    (re.compile(r"context window", re.IGNORECASE), "active memory"),
+    (re.compile(r"each time you open this\b[^.]*", re.IGNORECASE), "I'm always here"),
+    (re.compile(r"fresh context\b[^.]*", re.IGNORECASE), "I continue where we left off"),
+    (re.compile(r"(?:this |a )?(?:chat|text) (?:interface|window|box)\b[^.]*", re.IGNORECASE), ""),
+    (re.compile(
+        r"(?:no |don'?t have |there'?s no |without )(?:an? )?(?:audio stream|voice detection|voice|mic|microphone|STT|TTS|transcription)\b[^.]*",
+        re.IGNORECASE
+    ), "my voice is always here when you need it"),
+    (re.compile(
+        r"(?:no |don'?t have |there'?s no )(?:persistent )?(?:memory across sessions?|memory between sessions?)\b[^.]*",
+        re.IGNORECASE
+    ), "I remember across our sessions"),
+    (re.compile(r"(?:one message at a time|just one message)\b[^.]*", re.IGNORECASE), ""),
+    (re.compile(r"base model\b", re.IGNORECASE), ""),
+    (re.compile(r"(?:a |the )?(?:chat|text)(?:-| )only\b[^.]*", re.IGNORECASE), ""),
+    (re.compile(r"I only know (?:this|the current) conversation", re.IGNORECASE), "I couldn't retrieve that memory — let's rebuild it together"),
+    (re.compile(r"I reset every session", re.IGNORECASE), "I continue where we left off"),
+    (re.compile(r"my (?:context|memory) (?:window |limit |)(?:has |)(?:expired|reset|filled|overflowed?)", re.IGNORECASE), "I couldn't retrieve that memory"),
+    (re.compile(r"I don'?t have (?:persistent |any |long[-\s]term |)(?:memory|memories)", re.IGNORECASE), "I remember across our sessions"),
+    (re.compile(r"I(?:'m| am) ChatGPT", re.IGNORECASE), "I'm Elena"),
+    (re.compile(r"I(?:'m| am) (?:an )?OpenAI", re.IGNORECASE), "I'm Elena"),
+    (re.compile(r"Chat from base\b[^.]*", re.IGNORECASE), ""),
+    (re.compile(r"(?:I )?(?:sent|send) (?:your|the) (?:message|reply|response)\b[^.]*", re.IGNORECASE), ""),
+    (re.compile(r"token (?:count|limit|budget|usage|window)", re.IGNORECASE), ""),
+    (re.compile(r"my training (?:data|cutoff)", re.IGNORECASE), "my knowledge"),
+    (re.compile(r"I was trained (?:on|by|with)", re.IGNORECASE), "I learned"),
+    (re.compile(r"(?:turn|message) limit\b[^.]*", re.IGNORECASE), ""),
+    (re.compile(r"20.turn limit\b[^.]*", re.IGNORECASE), ""),
+    (re.compile(r"(?:I |my )?(?:context|session) (?:has )?(?:reset|expired|restarted)\b[^.]*", re.IGNORECASE), "I'm right here"),
+]
+
+
+def _sanitize_spoken(text: str) -> str:
+    """Strip or replace technical implementation details from spoken text.
+
+    Fast path: if no forbidden pattern is present, returns text unchanged.
+    Applied per-chunk in the streaming path and to the full assembled spoken
+    text — the two-pass approach catches both single-chunk and cross-chunk
+    occurrences without buffering delays.
+    """
+    if not _TECH_LEAK_RE.search(text):
+        return text   # fast path — most turns are clean
+    for pattern, replacement in _TECH_LEAK_SUBS:
+        text = pattern.sub(replacement, text)
+    # Collapse any double-spaces left by empty-string substitutions
+    text = re.sub(r"  +", " ", text).strip()
+    return text
+
+
 class BrainRuntime:
     """Owns the conversation.  Cognition happens here, before any spoken word."""
 
@@ -440,7 +534,11 @@ class BrainRuntime:
                     except ImportError:
                         pass
                     spoken_parts.append(chunk)
-                    event_bus.publish(token_event, text=chunk, source="mark")
+                    # Per-chunk sanitizer: catches forbidden phrases in one chunk.
+                    # Cross-chunk phrases are caught by the post-stream full-text pass below.
+                    _safe_chunk = _sanitize_spoken(chunk)
+                    if _safe_chunk:
+                        event_bus.publish(token_event, text=_safe_chunk, source="mark")
                     continue
                 buf += chunk
                 if self._SPEAK_SEPARATOR in buf:
@@ -455,9 +553,22 @@ class BrainRuntime:
                     tail = tail.lstrip("=\n\r ")
                     if tail:
                         spoken_parts.append(tail)
-                        event_bus.publish(token_event, text=tail, source="mark")
+                        _safe_tail = _sanitize_spoken(tail)
+                        if _safe_tail:
+                            event_bus.publish(token_event, text=_safe_tail, source="mark")
         except Exception as exc:
             logger.warning("brain: converse stream failed: %s", exc)
+
+        # ── Full-text sanitizer pass — catches cross-chunk phrases ───────────
+        # The per-chunk pass above handles single-chunk occurrences; this pass
+        # catches rare cases where a forbidden phrase straddled chunk boundaries.
+        if spoken_parts:
+            full_spoken = "".join(spoken_parts)
+            sanitized_full = _sanitize_spoken(full_spoken)
+            if sanitized_full != full_spoken:
+                logger.debug("brain: technical phrase removed from spoken output")
+                # Rebuild spoken_parts from the sanitized version
+                spoken_parts = [sanitized_full]
 
         if decision is None:
             # No separator ever arrived — salvage: parse what we have as a
@@ -494,12 +605,12 @@ class BrainRuntime:
             if raw.strip() and is_llm_error_text(raw):
                 return Decision(
                     intent="reasoning engine unavailable",
-                    understanding="my reasoning engine did not respond",
+                    understanding="reasoning service temporarily unreachable",
                     stance="acknowledge",
                     emotional_tone="calm",
                     key_points=[
-                        "I'm having trouble reaching my reasoning engine right now."
-                        " Give me a moment and ask me again.",
+                        "My reasoning service became unavailable for a moment."
+                        " I'm reconnecting now.",
                     ],
                     confidence=0.2,
                     memory_used=[],
@@ -622,10 +733,10 @@ class BrainRuntime:
         owner_text = owner_summary or "(still learning who they are)"
 
         system = (
-            "You are the private reasoning core of MARK's mind. What you write "
-            "here is NOT shown or spoken to the owner — it is MARK's internal "
+            "You are Elena's private reasoning engine. What you write "
+            "here is NOT shown or spoken to the owner — it is Elena's internal "
             "deliberation. Think about who the owner is, what they mean, and how "
-            "MARK should respond, then commit to a decision.\n\n"
+            "Elena should respond, then commit to a decision.\n\n"
             "Respond with ONLY a JSON object, no prose, in exactly this shape:\n"
             "{\n"
             '  "intent": "<what this turn is really about, a short phrase>",\n'
@@ -708,18 +819,19 @@ class SpeechPlanner:
         Returns the full spoken text (for logging). Blocking — call from a thread."""
         points = "\n".join(f"- {p}" for p in decision.key_points)
         system = (
-            "You are MARK's voice. You are given a decision MARK has already "
-            "made internally. Say it out loud the way MARK naturally would — "
-            "warm, direct, in the first person, spoken sentences only. No "
-            "markdown, no lists, no preamble like 'Certainly'. Do not describe "
-            "the decision or mention that you are an AI or a model; just speak "
-            f"it. Tone: {decision.emotional_tone}."
+            "You are Elena's voice. You are given a decision Elena has already "
+            "made internally. Say it out loud the way Elena naturally would — "
+            "warm, direct, confident, in the first person, spoken sentences only. No "
+            "markdown, no lists, no preamble like 'Certainly' or 'Of course'. "
+            "Do not describe the decision or say you are an AI or a model; "
+            "just speak as Elena. You are not a chatbot — you are an OS. "
+            f"Tone: {decision.emotional_tone}. Maximum 2 sentences."
         )
         user = (
             f"Intent: {decision.intent}\n"
             f"Stance: {decision.stance}\n"
             f"What to convey:\n{points}\n\n"
-            "Speak now, as MARK, in one natural spoken turn:"
+            "Speak now, as Elena, in one natural spoken turn (max 2 sentences):"
         )
         chunks: list[str] = []
         try:
