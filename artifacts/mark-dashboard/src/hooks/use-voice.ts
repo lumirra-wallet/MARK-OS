@@ -95,12 +95,24 @@ export function useVoice() {
   } = useMarkStore();
 
   // voiceEnabled = mic is live and transmitting (not muted by the user).
-  // Starts TRUE — MARK always listens from page load.
-  const [voiceEnabled,      setVoiceEnabled]     = useState(true);
+  // Starts FALSE — mic is OFF until the user explicitly taps "Enable Mic".
+  // This avoids triggering the browser permission prompt on page load.
+  const [voiceEnabled,      setVoiceEnabled]     = useState(false);
   const [isListening,       setIsListening]       = useState(false);
   const [micLevel,          setMicLevel]          = useState(0);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [isThinking,        setIsThinking]        = useState(false);
+  // 'idle'      — never asked, button shows "Enable Mic"
+  // 'requesting'— getUserMedia in flight
+  // 'granted'   — mic live (matches isListening=true)
+  // 'denied'    — browser blocked or user dismissed permission
+  const [micPermission, setMicPermission] = useState<'idle'|'requesting'|'granted'|'denied'>('idle');
+
+  // speakerMuted — true when the user has silenced Elena's voice output.
+  // While muted, any isMarkSpeaking transition immediately calls stopMarkSpeech.
+  const [speakerMuted,  setSpeakerMuted]  = useState(false);
+  const speakerMutedRef = useRef(false);
+
   const [supported] = useState(() =>
     typeof navigator !== 'undefined' &&
     !!navigator.mediaDevices?.getUserMedia &&
@@ -116,8 +128,8 @@ export function useVoice() {
   const rafRef             = useRef(0);
 
   // enabledRef — mirrors voiceEnabled in a ref so closures stay current.
-  // Starts TRUE to match the initial useState(true).
-  const enabledRef         = useRef(true);
+  // Starts FALSE — mic is off until the user taps "Enable Mic".
+  const enabledRef         = useRef(false);
 
   // micMutedRef — true while MARK is speaking; stops PCM frames being sent.
   // Updated synchronously via Zustand subscribe (below), never via useEffect.
@@ -156,6 +168,13 @@ export function useVoice() {
       const speaking = state.isMarkSpeaking;
       if (speaking === prevState.isMarkSpeaking) return;
 
+      // If the speaker is muted and Elena tries to start speaking, kill it
+      // immediately before any audio byte reaches the AudioContext.
+      if (speaking && speakerMutedRef.current) {
+        state.stopMarkSpeech();
+        return;
+      }
+
       micMutedRef.current = speaking;
 
       if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -168,6 +187,7 @@ export function useVoice() {
         }
       }
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Mic level polling ─────────────────────────────────────────────────────
@@ -498,6 +518,19 @@ export function useVoice() {
     setInterimTranscript('');
   }, [stopMic]);
 
+  // ── Enable mic (first-time explicit permission request) ─────────────────
+  // Called when the user taps the "Enable Mic" button for the first time.
+  // Sets voiceEnabled = true and kicks off getUserMedia — the browser permission
+  // prompt appears here, not on page load.
+  const enableMic = useCallback(() => {
+    if (enabledRef.current) return;    // already enabled
+    setMicPermission('requesting');
+    enabledRef.current = true;
+    setVoiceEnabled(true);
+    autoStartedRef.current = true;
+    connectVoiceSocket();
+  }, [connectVoiceSocket]);
+
   // ── Toggle: mute/unmute the mic (voice stays connected to the server) ────
   // When the user clicks "mute", we stop sending PCM frames but keep the WS
   // open so the server session stays warm — no VAD re-init on unmute.
@@ -525,30 +558,63 @@ export function useVoice() {
     });
   }, [connectVoiceSocket, stopMarkSpeech, stopMic]);
 
-  // ── Auto-start on mount ───────────────────────────────────────────────────
-  // MARK is always listening from the moment the page loads.  We request mic
-  // permission automatically rather than waiting for a manual toggle click.
-  useEffect(() => {
-    if (autoStartedRef.current || !supported) return;
-    autoStartedRef.current = true;
-    // enabledRef is already true (default); just kick off the connection.
-    connectVoiceSocket();
-  // connectVoiceSocket is stable enough for this mount-once effect.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supported]);
+  // ── Speaker mute/unmute ───────────────────────────────────────────────────
+  // Silences Elena's voice without stopping her from generating responses.
+  // When muted, the subscribe() intercept above kills audio before playback.
+  const toggleSpeaker = useCallback(() => {
+    setSpeakerMuted(v => {
+      const next = !v;
+      speakerMutedRef.current = next;
+      if (next) {
+        // Muting speaker: cut any audio already playing
+        stopMarkSpeech();
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      }
+      return next;
+    });
+  }, [stopMarkSpeech]);
+
+  // NO auto-start on mount — the browser will NOT request mic permission
+  // until the user explicitly taps the "Enable Mic" button.
 
   // (The old "flush queued message when run completes" effect is gone: the
   // browser no longer owns turn dispatch at all — the server dispatches
-  // MARK's brain directly from the VAD 'final', and its own voice-chat lock
+  // Elena's brain directly from the VAD 'final', and its own voice-chat lock
   // serialises overlapping turns. Nothing to queue client-side.)
 
+  // ── Permission state tracking ─────────────────────────────────────────────
+  // Detect when the mic actually comes up (isListening → true) after the user
+  // taps Enable Mic, and mark permission as granted.  If it fails (isListening
+  // stays false after the socket opens), mark as denied.
+  const prevIsListeningRef = useRef(false);
+  useEffect(() => {
+    if (isListening && !prevIsListeningRef.current) {
+      setMicPermission('granted');
+    }
+    prevIsListeningRef.current = isListening;
+  }, [isListening]);
+
+  // Track ws.onopen failure → getUserMedia denied → set 'denied'.
+  // The connect function sets a 10s reconnect delay on getUserMedia failure;
+  // we detect this by watching for enabledRef=true + isListening staying false.
+  useEffect(() => {
+    if (micPermission === 'requesting' && !isListening) {
+      const t = setTimeout(() => {
+        if (enabledRef.current && !prevIsListeningRef.current) {
+          setMicPermission('denied');
+        }
+      }, 12_000);  // 12 s — past the 10 s getUserMedia retry delay
+      return () => clearTimeout(t);
+    }
+  }, [micPermission, isListening]);
+
   // ── Emergency fallback: browser TTS when Kokoro unavailable ──────────────
-  // IMPORTANT: mute the mic gate before speak() so MARK's browser voice
-  // cannot be picked up by the mic and transcribed back to MARK.
+  // IMPORTANT: mute the mic gate before speak() so Elena's browser voice
+  // cannot be picked up by the mic and transcribed back to Elena.
   const messages       = useMarkStore(s => s.messages);
   const lastFallbackId = useRef<string | null>(null);
   useEffect(() => {
-    if (!voiceEnabled || !speechEngineUnavailable || !('speechSynthesis' in window)) return;
+    if (!voiceEnabled || speakerMuted || !speechEngineUnavailable || !('speechSynthesis' in window)) return;
     const last = messages[messages.length - 1];
     if (!last || last.role !== 'mark' || last.isActive) return;
     if (last.id === lastFallbackId.current) return;
@@ -571,7 +637,7 @@ export function useVoice() {
     };
     utterance.onerror = () => { micMutedRef.current = false; };
     window.speechSynthesis.speak(utterance);
-  }, [messages, voiceEnabled, speechEngineUnavailable]);
+  }, [messages, voiceEnabled, speakerMuted, speechEngineUnavailable]);
 
   // ── Cleanup on unmount ────────────────────────────────────────────────────
   useEffect(() => () => {
@@ -588,6 +654,10 @@ export function useVoice() {
     isThinking,
     micLevel,
     interimTranscript,
+    micPermission,
+    speakerMuted,
+    enableMic,
     toggleVoice,
+    toggleSpeaker,
   };
 }

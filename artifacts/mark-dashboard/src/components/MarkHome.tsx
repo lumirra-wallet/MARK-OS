@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { ArrowRight, Mic, MicOff, MessageCircle, X, ChevronDown, ChevronUp, Globe } from 'lucide-react';
+import { ArrowRight, Mic, MicOff, MessageCircle, X, ChevronDown, ChevronUp, Globe, Volume2, VolumeX } from 'lucide-react';
 import { useMarkStore } from '@/store/markStore';
 import { useSelfState } from '@/hooks/use-self-state';
 import { useVoice } from '@/hooks/use-voice';
@@ -287,20 +287,21 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
       </div>
 
       {/* ── Control bar ─────────────────────────────────────────────────────── */}
-      <div className="absolute bottom-0 inset-x-0 z-20 flex items-center justify-center gap-6 pb-8 pt-3">
+      <div className="absolute bottom-0 inset-x-0 z-20 flex items-center justify-center gap-4 pb-8 pt-3">
 
-        {/* Chat toggle */}
+        {/* ── Left: Chat text toggle ───────────────────────────────────────── */}
         <button
           onClick={() => setChatOpen(v => !v)}
           className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white/40 hover:text-white/70 transition-all text-xs font-mono"
+          title="Open text chat"
         >
           <MessageCircle className="w-3.5 h-3.5" />
           <span>text</span>
         </button>
 
-        {/* Primary mic button — center, larger */}
+        {/* ── Center: Mic button — Enable (first time) or Mute/Unmute ──────── */}
         <div className="relative">
-          {/* Outer pulse ring — amplitude-driven */}
+          {/* Amplitude-driven pulse ring */}
           {voice.voiceEnabled && voice.isListening && !voice.isSpeaking && !voice.isThinking && (
             <span
               className="absolute inset-0 rounded-full border border-emerald-400/40 transition-transform duration-75 pointer-events-none"
@@ -319,34 +320,86 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
             <span className="absolute inset-0 rounded-full border border-emerald-400/50 animate-pulse pointer-events-none" />
           )}
 
-          <button
-            onClick={voice.toggleVoice}
-            disabled={!voice.supported}
-            title={
-              !voice.supported
-                ? "Voice not supported in this browser"
-                : voice.voiceEnabled
-                  ? 'Mute microphone'
-                  : 'Unmute microphone'
-            }
-            className={`relative flex items-center justify-center w-16 h-16 rounded-full border-2 transition-all duration-200 shadow-lg ${
-              voice.isThinking
-                ? 'bg-amber-500/15 border-amber-400/50 text-amber-400 shadow-amber-400/10'
-                : isMarkSpeaking
-                  ? 'bg-emerald-500/15 border-emerald-400/60 text-emerald-400 shadow-emerald-400/20'
-                  : voice.voiceEnabled
-                    ? 'bg-emerald-500/10 border-emerald-400/40 text-emerald-400 shadow-emerald-400/10 hover:bg-emerald-500/20'
-                    : 'bg-white/5 border-white/15 text-white/40 hover:text-white/70 hover:border-white/30'
-            } ${!voice.supported ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-          >
-            {voice.voiceEnabled
-              ? <Mic className="w-6 h-6" />
-              : <MicOff className="w-6 h-6" />
-            }
-          </button>
+          {/* ── Not yet enabled → show "Enable Mic" prompt ─────────────────── */}
+          {voice.micPermission === 'idle' ? (
+            <button
+              onClick={voice.enableMic}
+              disabled={!voice.supported}
+              title="Tap to enable microphone — Elena will start listening"
+              className={`relative flex flex-col items-center justify-center w-16 h-16 rounded-full border-2
+                bg-white/8 border-white/20 text-white/60
+                hover:bg-white/12 hover:border-white/40 hover:text-white/90
+                transition-all duration-200 shadow-lg gap-0.5
+                ${!voice.supported ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              <Mic className="w-5 h-5" />
+              <span className="text-[7px] font-mono tracking-wider text-white/40 leading-none">enable</span>
+            </button>
+
+          ) : voice.micPermission === 'requesting' ? (
+            /* ── Permission prompt in-flight ─────────────────────────────── */
+            <button
+              disabled
+              className="relative flex flex-col items-center justify-center w-16 h-16 rounded-full border-2
+                bg-amber-500/10 border-amber-400/40 text-amber-400/70 cursor-wait gap-0.5"
+              title="Waiting for microphone permission…"
+            >
+              <Mic className="w-5 h-5 animate-pulse" />
+              <span className="text-[7px] font-mono tracking-wider text-amber-400/50 leading-none">allow…</span>
+            </button>
+
+          ) : voice.micPermission === 'denied' ? (
+            /* ── Permission denied ───────────────────────────────────────── */
+            <button
+              onClick={voice.enableMic}
+              title="Microphone blocked — tap to retry or check browser settings"
+              className="relative flex flex-col items-center justify-center w-16 h-16 rounded-full border-2
+                bg-red-500/10 border-red-400/40 text-red-400
+                hover:bg-red-500/20 transition-all duration-200 shadow-lg gap-0.5 cursor-pointer"
+            >
+              <MicOff className="w-5 h-5" />
+              <span className="text-[7px] font-mono tracking-wider text-red-400/60 leading-none">blocked</span>
+            </button>
+
+          ) : (
+            /* ── Granted → mute / unmute toggle ─────────────────────────── */
+            <button
+              onClick={voice.toggleVoice}
+              title={voice.voiceEnabled ? 'Mute microphone' : 'Unmute microphone'}
+              className={`relative flex items-center justify-center w-16 h-16 rounded-full border-2 transition-all duration-200 shadow-lg ${
+                voice.isThinking
+                  ? 'bg-amber-500/15 border-amber-400/50 text-amber-400 shadow-amber-400/10'
+                  : isMarkSpeaking
+                    ? 'bg-emerald-500/15 border-emerald-400/60 text-emerald-400 shadow-emerald-400/20'
+                    : voice.voiceEnabled
+                      ? 'bg-emerald-500/10 border-emerald-400/40 text-emerald-400 shadow-emerald-400/10 hover:bg-emerald-500/20'
+                      : 'bg-white/5 border-white/15 text-white/40 hover:text-white/70 hover:border-white/30'
+              } cursor-pointer`}
+            >
+              {voice.voiceEnabled ? <Mic className="w-6 h-6" /> : <MicOff className="w-6 h-6" />}
+            </button>
+          )}
         </div>
 
-        {/* Connection status */}
+        {/* ── Right: Speaker on/off ────────────────────────────────────────── */}
+        <button
+          onClick={voice.toggleSpeaker}
+          title={voice.speakerMuted ? "Unmute Elena's voice" : "Mute Elena's voice"}
+          className={`flex items-center justify-center w-10 h-10 rounded-full border transition-all duration-200 ${
+            voice.speakerMuted
+              ? 'bg-red-500/10 border-red-400/30 text-red-400/70 hover:bg-red-500/20'
+              : isMarkSpeaking
+                ? 'bg-emerald-500/10 border-emerald-400/40 text-emerald-400 animate-pulse'
+                : 'bg-white/5 border-white/10 text-white/35 hover:bg-white/10 hover:text-white/60'
+          }`}
+        >
+          {voice.speakerMuted
+            ? <VolumeX className="w-4 h-4" />
+            : <Volume2 className="w-4 h-4" />
+          }
+        </button>
+
+        {/* ── Far right: Connection status ─────────────────────────────────── */}
         <div className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/5 border border-white/10">
           <ConnectionDot />
         </div>
