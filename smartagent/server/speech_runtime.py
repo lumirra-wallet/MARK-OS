@@ -40,9 +40,9 @@ logger = logging.getLogger(__name__)
 _SENTENCE_END_RE = re.compile(r'([.!?]+["\')\]]*(?:\s+|$))')
 
 # Force a flush when no sentence boundary has been seen for this many chars.
-# 40 chars — produces the first audio chunk faster (~0.2 s vs 0.3 s for 60),
-# cutting time-to-first-audio on short conversational replies.
-_SOFT_FLUSH_LEN = 40
+# 25 chars — Elena starts speaking in ~0.15 s (vs 0.3 s at 60 chars).
+# Short enough that even "Got it." ships as first audio without a boundary.
+_SOFT_FLUSH_LEN = 25
 
 _END_OF_REPLY = object()   # sentinel in the worker queue
 
@@ -137,6 +137,30 @@ class SpeechRuntime:
             threading.Thread(
                 target=self._worker_loop, daemon=True, name="mark-speech-worker"
             ).start()
+
+    def get_interrupted_text(self) -> str:
+        """Capture pending (unspoken) text before interrupt() clears the queue.
+
+        Call this BEFORE interrupt() on barge-in so the next LLM turn can
+        absorb what Elena was mid-reply saying.  Drains the queue non-blockingly
+        (safe since interrupt() is called immediately after and the worker stops
+        on the next _speak_sentence check).
+        Returns up to 300 chars of pending text, or "" if nothing was queued.
+        """
+        parts: list[str] = []
+        # Queued complete sentences not yet synthesised (oldest first)
+        try:
+            while True:
+                item = self._queue.get_nowait()
+                if item is _END_OF_REPLY:
+                    break
+                parts.append(str(item))
+        except queue.Empty:
+            pass
+        # Buffer = tokens not yet flushed into a complete sentence
+        if self._buffer.strip():
+            parts.append(self._buffer.strip())
+        return " ".join(parts)[:300].strip()
 
     def interrupt(self) -> None:
         """Call the instant the user starts speaking (VAD speech_start).

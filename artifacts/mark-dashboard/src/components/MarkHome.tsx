@@ -384,17 +384,20 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
         {/* ── Right: Speaker on/off ────────────────────────────────────────── */}
         <button
           onClick={voice.toggleSpeaker}
-          title={voice.speakerMuted ? "Unmute Elena's voice" : "Mute Elena's voice"}
-          className={`flex items-center justify-center w-10 h-10 rounded-full border transition-all duration-200 ${
+          title={voice.speakerMuted ? "Tap to enable Elena's voice" : "Mute Elena's voice"}
+          className={`flex flex-col items-center justify-center gap-0.5 rounded-full border transition-all duration-200 ${
             voice.speakerMuted
-              ? 'bg-red-500/10 border-red-400/30 text-red-400/70 hover:bg-red-500/20'
+              ? 'w-12 h-12 bg-white/8 border-white/20 text-white/60 hover:bg-white/12 hover:border-white/40 hover:text-white/90'
               : isMarkSpeaking
-                ? 'bg-emerald-500/10 border-emerald-400/40 text-emerald-400 animate-pulse'
-                : 'bg-white/5 border-white/10 text-white/35 hover:bg-white/10 hover:text-white/60'
+                ? 'w-10 h-10 bg-emerald-500/10 border-emerald-400/40 text-emerald-400 animate-pulse'
+                : 'w-10 h-10 bg-white/5 border-white/10 text-white/35 hover:bg-white/10 hover:text-white/60'
           }`}
         >
           {voice.speakerMuted
-            ? <VolumeX className="w-4 h-4" />
+            ? <>
+                <VolumeX className="w-4 h-4" />
+                <span className="text-[7px] font-mono tracking-wider text-white/40 leading-none">enable</span>
+              </>
             : <Volume2 className="w-4 h-4" />
           }
         </button>

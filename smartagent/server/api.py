@@ -290,6 +290,11 @@ _voice_last_text: list = ["", 0.0]
 # _state.running = False before either sets it to True, causing the same
 # utterance to be processed twice.
 _voice_chat_lock: "asyncio.Lock | None" = None
+# Text Elena was mid-reply saying when the last barge-in interrupted her.
+# Set by voice_websocket speech_start handler (before interrupt()), read
+# and cleared by _voice_chat_response on the very next turn so the LLM
+# can acknowledge/absorb the interruption naturally.
+_interrupted_reply: str = ""
 
 
 def _get_voice_chat_lock() -> "asyncio.Lock":
@@ -1715,6 +1720,11 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
     # Guard: reject any incoming text that exactly matches, closely resembles,
     # or starts with known fallback/self-introduction phrases.  This is a
     # belt-and-suspenders safety net; the real fix is a working LLM provider.
+    # Text Elena was mid-reply saying when the last barge-in occurred.
+    # Set in the voice_websocket speech_start handler (before interrupt()),
+    # read by _voice_chat_response on the very next turn, then cleared.
+    global _interrupted_reply  # noqa: PLW0603
+
     _LOOP_PHRASES = (
         CHAT_FALLBACK_TEXT[:30].lower(),   # starts-with match on the first phrase
         "i'm elena",
@@ -1872,11 +1882,17 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
                 loop,
             )
 
+        # Snapshot interrupted context for this turn, then clear so the
+        # NEXT turn starts fresh (each barge-in sets it; each response consumes it).
+        _ic = _interrupted_reply
+        _interrupted_reply = ""
+
         _current_inference_task = asyncio.ensure_future(
             asyncio.to_thread(
                 brain_runtime.converse, observation, agent, event_bus,
                 token_event=ServerEvents.STREAMING_TOKEN,
                 on_decision=_on_decision,
+                interrupted_context=_ic,
             )
         )
         decision = None
@@ -2239,6 +2255,26 @@ async def voice_websocket(ws: WebSocket) -> None:
                             except Exception:
                                 pass
                             logger.info("voice_ws: voice command '%s' → TTS interrupted", ev.get("text",""))
+                        continue
+
+                    # Barge-in: user started speaking while Elena was talking.
+                    # Capture what Elena was mid-reply saying BEFORE interrupting —
+                    # the next turn's LLM call will absorb it so Elena can
+                    # acknowledge the interruption and continue coherently.
+                    if ev_type == "speech_start":
+                        try:
+                            _interrupted_reply = speech_runtime.get_interrupted_text()
+                        except Exception:
+                            _interrupted_reply = ""
+                        if _interrupted_reply:
+                            logger.info(
+                                "voice_ws: barge-in captured %d chars of pending reply",
+                                len(_interrupted_reply),
+                            )
+                        try:
+                            speech_runtime.interrupt()
+                        except Exception:
+                            pass
                         continue
 
                     if ev_type in ("final", "speculative_final") and ev.get("text"):

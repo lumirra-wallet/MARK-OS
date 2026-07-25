@@ -278,6 +278,7 @@ class BrainRuntime:
     def converse(
         self, obs: Observation, agent: Any, event_bus: Any, *,
         token_event: str, on_decision: Any = None,
+        interrupted_context: str = "",
     ) -> tuple[Decision, str]:
         """Phone-call path: ONE streamed reasoning call that emits the
         semantic Decision FIRST, then MARK's spoken words.
@@ -393,12 +394,24 @@ class BrainRuntime:
             "MAXIMUM 2 SENTENCES. No markdown, no lists, no preamble.\n"
             "The JSON is your private mind; only what follows the separator is heard."
         )
+        # When the user interrupted Elena mid-reply, include what Elena was
+        # about to say so she can absorb the interruption instead of ignoring it.
+        interrupted_block = (
+            f"\n\n[BARGE-IN CONTEXT: You were mid-reply saying: "
+            f"\"{interrupted_context[:200]}\"\n"
+            "Mr. Smart just interrupted you. Absorb their input — "
+            "don't re-say what you already said. If their interruption "
+            "is on a new topic, pivot cleanly. If it adds to yours, "
+            "weave it in and continue naturally. MAX 1-2 sentences.]"
+        ) if interrupted_context else ""
+
         user = (
             f"Mr. Smart just said: \"{resolved_text}\"\n\n"
             f"What you know about him:\n{owner_text}\n\n"
             f"Relevant past episodes:\n{ep_text}\n\n"
             f"Relevant knowledge:\n{kn_text}"
-            f"{web_section}\n\n"
+            f"{web_section}"
+            f"{interrupted_block}\n\n"
             f"Recent conversation:\n{recent_text}\n\n"
             f"Your current emotional state: {ctx['emotion']}"
             f"{' (' + ctx['emotion_reason'] + ')' if ctx['emotion_reason'] else ''}\n\n"

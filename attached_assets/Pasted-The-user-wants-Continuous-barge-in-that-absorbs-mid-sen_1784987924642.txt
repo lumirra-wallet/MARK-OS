@@ -1,0 +1,34 @@
+The user wants:
+
+Continuous barge-in that absorbs mid-sentence interruptions — Elena should NOT stop completely when the user speaks during her reply. Instead, she should "hear" what they said, finish or pause naturally, then incorporate the new input. Basically a "listen while speaking" mode where partial user input is tracked, and when the user stops talking (VAD end), Elena resumes with the combined context.
+
+Very fast response speed — minimize all latency
+
+Speaker starts paused/muted — user must explicitly tap speaker button to enable audio
+
+Mic starts muted/disabled — user must explicitly tap mic to enable it, and both speaker and mic need to be enabled by the user before any conversation can happen.
+
+For the barge-in feature, the current flow stops Elena immediately when speech is detected. Instead, I need to make her pause gracefully when the user interrupts, let them finish speaking, then have her brain process both what she was saying and what the user just said to generate a coherent response.
+
+The key is capturing Elena's pending speech at the moment of interruption and feeding both that context plus the user's input to the LLM so it can acknowledge the interruption and respond naturally. Alternatively, I could implement a pause-resume pattern where the audio pauses rather than stops completely, the system listens to the user's interruption, transcribes it quickly, and then the LLM decides whether to acknowledge and continue or redirect entirely. includes Elena's pending reply so she understands the context of the interruption. For speed improvements, I'm looking at reducing the Whisper beam size from 10 to 5 for faster transcription, trimming the stitch window further, and lowering the TTS first-flush threshold to get responses out quicker. The user also wants the speaker to start in a muted state rather than playing by default.
+
+Now I'm mapping out the specific changes needed: the backend needs adjustments to the Whisper beam size and barge-in detection sensitivity, while the frontend just requires flipping the initial speaker state from unmuted to muted. uted) and update the speaker button UI to indicate when it's muted with a "tap to enable" prompt. Now I'm implementing the core "absorb barge-in" feature — when Elena gets interrupted, I need to capture her pending text and feed it back into the next LLM prompt so the conversation flows naturally. The speech runtime already tracks buffered text and queued sentences, so I'll expose a method to retrieve what was pending when the interrupt happened. 2. Capture what Elena was saying when interrupted, then incorporate both her unfinished thought and the user's new input into her response. 3. Pause TTS immediately, listen for the user to finish speaking, then resume — prioritizing speed. 4. Both speaker and microphone start disabled; the user must explicitly enable them before speaking to comply with browser requirements.
+
+Now I'm planning the implementation: start with the speaker muted by default in the voice hook, then add a method to retrieve the interrupted text from the speech runtime's buffer and pending queue. Store that interrupted context globally, capture it before interrupting, and pass it to the brain so it can naturally weave together what it was saying with what the user just said.
+
+For speed, I'm reducing the barge-in threshold to trigger instantly, lowering Whisper's beam size on the final pass, flushing the speech buffer sooner, and trimming the system prompt for voice mode to skip unnecessary overhead. Finally, updating the speaker button to show the muted state initially with a tap-to-enable prompt.
+
+Let me read the key pieces I need before implementing all of this.
+
+Implementing requested features
+Let me grab the two remaining sections I need before writing all the changes in parallel.
+
+Implementing parallel changes
+Now I have everything I need. Executing all changes in one parallel batch — smart barge-in absorption, speed improvements, speaker-starts-off, and instant VAD response.
+
+Continuing pending edits
+Continuing with the remaining edits. Let me read the exact sections I need for api.py and brain_runtime.py before making changes.
+
+Batching edits together
+Now executing all remaining edits in parallel.
+
