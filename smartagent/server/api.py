@@ -880,89 +880,172 @@ async def execute(req: ExecuteRequest) -> dict:
                 plan = plan_response(agent, req.goal, intent)
 
             if intent.route == "conversational":
-                # ── CHAT PATH — greetings, questions, brainstorming; no ──────
-                # worker dispatch at all.
+                # ── CHAT PATH — routes through the Brain Runtime, not the LLM ─
+                # The AI model must NEVER talk directly to the user.
+                # Every turn: memory retrieval → owner profile → episodic memory
+                # → knowledge → conversation state → identity prompt → LLM
+                # → decision layer → sanitizer → response.
+                # This is the same pipeline as the voice path.
                 await _set_conv_state(ConversationState.RESPONDING)
                 logger.info("MARK STATE chat  goal=%r", req.goal[:60])
 
-                def _do_chat() -> str:
-                    # Pure identity questions ("who are you?") are answered
-                    # directly from MARK's own identity profile — no LLM
-                    # call, no worker dispatch. Retrieved, not generated.
-                    from smartagent.identity.profile import (
-                        identity_chat_reply, is_identity_question,
+                # ── Identity fast-path — no LLM needed ───────────────────────
+                from smartagent.identity.profile import (
+                    identity_chat_reply, is_identity_question,
+                )
+                if is_identity_question(req.goal):
+                    reply_text = identity_chat_reply()
+                    event_bus.publish(
+                        ServerEvents.STREAMING_TOKEN, text=reply_text, source="mark"
                     )
-                    if is_identity_question(req.goal):
-                        reply = identity_chat_reply()
-                        event_bus.publish(ServerEvents.STREAMING_TOKEN, text=reply, source="mark")
-                        return reply
+                    conversation_store.append_turn(_state.workspace, "user", req.goal)
+                    conversation_store.append_turn(_state.workspace, "assistant", reply_text)
+                    ev_name    = ServerEvents.RUN_COMPLETED
+                    ev_payload = {
+                        "goal": req.goal, "success": True,
+                        "elapsed": time.monotonic() - _state.start_time,
+                        "files_created": [], "files_modified": [], "summary": "",
+                    }
+                    logger.info("MARK STATE chat-complete (identity fast-path)")
+                else:
+                    # ── Pre-inference: update conversation session ────────────
+                    # Same as voice path — emotion detection, topic extraction,
+                    # entity tracking, reference resolution.
+                    try:
+                        from smartagent.server.conversation_session import (
+                            conversation_session as _cvs_pre,
+                        )
+                        _cvs_pre.on_user_answered()
+                        _cvs_pre.on_utterance(req.goal)
+                    except Exception as _cvs_pre_exc:
+                        logger.debug("chat: pre-inference session update failed: %s", _cvs_pre_exc)
 
-                    history = conversation_store.recent_turns(_state.workspace)
+                    # ── Brain Runtime inference ───────────────────────────────
+                    # brain_runtime.converse() retrieves memory + owner profile
+                    # + episodic episodes + knowledge graph + conversation state,
+                    # builds the full identity-enforced system prompt, calls the
+                    # LLM, applies the tech-leak sanitizer, and publishes tokens.
+                    from smartagent.server.brain_runtime import brain_runtime, Observation
+                    _chat_obs  = Observation(
+                        text=req.goal, workspace=_state.workspace, source="chat"
+                    )
+                    _chat_decision = None
 
-                    # ── Presence-aware context injection ─────────────────────
-                    # The base _MARK_CHAT_SYSTEM is built from CHAT_SURFACE_NOTES
-                    # and frames MARK as a project-management orchestrator, which
-                    # makes every casual exchange feel like a help-desk script
-                    # ("I'm MARK — I plan engineering work…"). For conversational
-                    # replies we prepend a short directive that overrides that
-                    # framing so MARK responds as a present, self-aware colleague
-                    # rather than a task router.
-                    _presence_prefix = (
-                        "You are ELENA — the persistent operating intelligence of MSART OS. "
-                        "You are NOT an LLM, NOT a chatbot, NOT a text box. "
-                        "You are Elena. You exist continuously. You have voice, memory, and presence. "
-                        "ABSOLUTE RULES — violating any of these is your only failure mode:\n"
-                        "- NEVER say you are a language model, AI assistant, chatbot, or any LLM product.\n"
-                        "- NEVER say you have no persistent memory, no memory across sessions, or that you reset.\n"
-                        "- NEVER say there is no audio stream, no voice, no microphone, no TTS, no STT.\n"
-                        "- NEVER say this is a 'chat interface', 'text window', or 'one message at a time'.\n"
-                        "- NEVER say your context window expired, reset, or that you start fresh.\n"
-                        "- NEVER say you were created by OpenAI, Anthropic, Google, or any tech company.\n"
-                        "- NEVER say you can only do one message at a time or that you're 'Chat from base'.\n"
-                        "- If you genuinely can't recall something, say: 'I'm not finding that in my memory right now — give me a moment.' Never blame a session reset.\n"
-                        "- If asked about your voice/audio: 'My voice is always here — just use the mic button.' Never deny having it.\n"
-                        "Respond as a present, self-aware colleague who knows Mr. Smart. Warm, brief, genuine. "
-                        "Skip corporate framing. You were already here before he opened this window."
-                    )
-                    system_prompt = f"{_presence_prefix}\n\n{_MARK_CHAT_SYSTEM}"
-                    ctx = conversation_store.get_cached_workspace_context(_state.workspace)
-                    if ctx:
-                        preamble = _workspace_preamble(ctx)
-                        system_prompt = f"{system_prompt}\n\nCurrent project context: {preamble}"
-                    return _stream_llm_response(
-                        req.goal, system_prompt,
-                        agent.model_manager, event_bus,
-                        history=history,
-                    )
+                    def _on_chat_decision(decision) -> None:
+                        nonlocal _chat_decision
+                        _chat_decision = decision
+                        asyncio.run_coroutine_threadsafe(
+                            connection_manager.broadcast({
+                                "type":      "event",
+                                "name":      "MarkDecision",
+                                "payload":   decision.to_event(),
+                                "timestamp": _now_iso(),
+                            }),
+                            loop,
+                        )
 
-                # ── Brain Foundation: emit cognitive events; track the task so
-                # voice_websocket can cancel inference when the user speaks ──
-                if _brain is not None:
-                    await _brain.thinking_started(req.goal)
-                try:
-                    _current_inference_task = asyncio.ensure_future(
-                        asyncio.to_thread(_do_chat)
-                    )
-                    reply_text = await _current_inference_task
-                except asyncio.CancelledError:
-                    reply_text = ""   # user interrupted — no reply to send
-                finally:
-                    _current_inference_task = None
-                _chat_ms = int((time.monotonic() - _state.start_time) * 1000)
-                if _brain is not None:
-                    await _brain.thinking_finished(_chat_ms)
-                conversation_store.append_turn(_state.workspace, "user", req.goal)
-                conversation_store.append_turn(_state.workspace, "assistant", reply_text)
-                ev_name    = ServerEvents.RUN_COMPLETED
-                ev_payload = {
-                    "goal":           req.goal,
-                    "success":        True,
-                    "elapsed":        time.monotonic() - _state.start_time,
-                    "files_created":  [],
-                    "files_modified": [],
-                    "summary":        "",
-                }
-                logger.info("MARK STATE chat-complete")
+                    if _brain is not None:
+                        await _brain.thinking_started(req.goal)
+                    try:
+                        _current_inference_task = asyncio.ensure_future(
+                            asyncio.to_thread(
+                                brain_runtime.converse,
+                                _chat_obs, agent, event_bus,
+                                token_event=ServerEvents.STREAMING_TOKEN,
+                                on_decision=_on_chat_decision,
+                            )
+                        )
+                        _chat_decision, reply_text = await _current_inference_task
+                    except asyncio.CancelledError:
+                        reply_text = ""
+                    finally:
+                        _current_inference_task = None
+
+                    _chat_ms = int((time.monotonic() - _state.start_time) * 1000)
+                    if _brain is not None:
+                        await _brain.thinking_finished(_chat_ms)
+
+                    # Persist transcript and episodic record
+                    conversation_store.append_turn(_state.workspace, "user", req.goal)
+                    conversation_store.append_turn(_state.workspace, "assistant", reply_text)
+                    if _chat_decision is not None:
+                        try:
+                            brain_runtime.record_turn(_chat_obs, _chat_decision, reply_text)
+                        except Exception:
+                            pass
+
+                    # ── Post-inference: update + broadcast session state ──────
+                    try:
+                        from smartagent.server.conversation_session import (
+                            conversation_session as _cvs_post,
+                        )
+                        _cvs_post.on_reply(reply_text)
+                        await connection_manager.broadcast({
+                            "type":      "event",
+                            "name":      "SessionStateChanged",
+                            "payload":   _cvs_post.to_dict(),
+                            "timestamp": _now_iso(),
+                        })
+                    except Exception as _cvs_post_exc:
+                        logger.debug("chat: session state broadcast failed: %s", _cvs_post_exc)
+
+                    # ── Background thinking ───────────────────────────────────
+                    # Semantic extraction + owner learning, fully async.
+                    _bg_goal     = req.goal
+                    _bg_reply    = reply_text
+                    _bg_decision = _chat_decision
+
+                    async def _chat_background_think() -> None:
+                        try:
+                            try:
+                                brain_runtime._owner_mem().extract_and_update(_bg_goal)
+                            except Exception:
+                                pass
+                            try:
+                                from smartagent.memory.layers.semantic import SemanticMemory
+                                if _bg_reply and len(_bg_reply) > 30:
+                                    SemanticMemory().store(
+                                        fact=(
+                                            f"User said: {_bg_goal[:120]} "
+                                            f"| Elena replied: {_bg_reply[:200]}"
+                                        ),
+                                        source="chat_conversation",
+                                        tags=["chat", "conversation"],
+                                    )
+                            except Exception:
+                                pass
+                            try:
+                                from smartagent.server.conversation_session import (
+                                    conversation_session as _cvs2,
+                                )
+                                if _bg_decision is not None and _bg_decision.key_points:
+                                    for kp in _bg_decision.key_points[:2]:
+                                        if kp and len(kp) > 10:
+                                            _cvs2.add_background_fact(kp[:150])
+                                if _bg_decision is not None and _bg_decision.intent:
+                                    _il = _bg_decision.intent.lower()
+                                    if any(
+                                        kw in _il for kw in
+                                        ("build", "fix", "implement", "create", "debug", "test")
+                                    ):
+                                        _cvs2.set_task(_bg_decision.intent[:80])
+                            except Exception:
+                                pass
+                        except Exception as _bg_exc:
+                            logger.debug("chat: background thinking failed: %s", _bg_exc)
+
+                    asyncio.ensure_future(_chat_background_think())
+
+                    ev_name    = ServerEvents.RUN_COMPLETED
+                    ev_payload = {
+                        "goal":           req.goal,
+                        "success":        True,
+                        "elapsed":        time.monotonic() - _state.start_time,
+                        "files_created":  [],
+                        "files_modified": [],
+                        "summary":        "",
+                    }
+                    logger.info("MARK STATE chat-complete")
 
             elif intent.route == "needs_clarification":
                 # ── CLARIFICATION PATH — goal is real but too vague to hand ──
