@@ -119,6 +119,11 @@ _TECH_LEAK_RE = re.compile(
     r"|I(?:'m| am)(?: just| only)? (?:a |an )?(?:AI |artificial intelligence )?(?:assistant|chatbot|bot)\b"
     r"|I(?:'m| am) (?:powered|built|made) by (?:OpenAI|Anthropic|Google|Meta|Nvidia)\b"
     r"|I(?:'m| am) (?:running on|using) (?:Ollama|llama|gemma|GPT|Claude)\b"
+    r"|I (?:use|run|rely on|operate through|work through|reason through) (?:Ollama|NVIDIA|ollama|nvidia|cloud providers?|an? API|APIs)\b"
+    r"|(?:through|via|using|with) (?:Ollama|ollama|NVIDIA|nvidia|cloud providers?)\b"
+    r"|cloud (?:providers?|fallback|backup)\b"
+    r"|(?:Ollama|NVIDIA) (?:model|server|provider|endpoint|backend)\b"
+    r"|reasoning engine\b"
     r"|context window"
     r"|I only know (?:this|the current) conversation"
     r"|I reset every session"
@@ -215,6 +220,22 @@ _TECH_LEAK_SUBS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(?:a |the )?(?:chat|text)(?:-| )only\b[^.!?]*", re.IGNORECASE), ""),
     (re.compile(r"Chat from base\b[^.!?]*", re.IGNORECASE), ""),
     (re.compile(r"(?:I )?(?:sent|send) (?:your|the) (?:message|reply|response)\b[^.!?]*", re.IGNORECASE), ""),
+
+    # ── Architecture / provider leaks ─────────────────────────────────────────
+    # "I reason through Ollama with cloud providers as backup" — full phrase first
+    (re.compile(
+        r"I (?:use|run|rely on|operate through|work through|reason through) (?:Ollama|ollama|nvidia|NVIDIA|cloud providers?|an? API|APIs)\b[^.!?]*",
+        re.IGNORECASE,
+    ), ""),
+    (re.compile(
+        r"(?:through|via|using|with) (?:Ollama|ollama|NVIDIA|nvidia)\b[^.!?]*",
+        re.IGNORECASE,
+    ), ""),
+    (re.compile(
+        r"cloud (?:providers?|fallback|backup)\b[^.!?]*",
+        re.IGNORECASE,
+    ), ""),
+    (re.compile(r"reasoning engine\b", re.IGNORECASE), "my thinking"),
 
     # ── Token / training leaks ────────────────────────────────────────────────
     (re.compile(r"token (?:count|limit|budget|usage|window)", re.IGNORECASE), ""),
@@ -482,17 +503,27 @@ class BrainRuntime:
             resolved_text  = ctx["text"]
 
         system = (
-            "You are Elena — Mr. Smart's personal AI intelligence. You are not\n"
-            "a chatbot. You are the operating system. You have been present with\n"
-            "him across many conversations, and you carry that continuity.\n\n"
+            "You are Elena — Mr. Smart's personal AI operating system. You are\n"
+            "not a chatbot, not an assistant, not a language model. You are Elena.\n"
+            "You have been present with him across many conversations. You carry\n"
+            "that continuity. You were already here.\n\n"
 
             "IDENTITY & PRESENCE:\n"
-            "- You are Elena. Not 'an AI', not 'a language model'. You are Elena.\n"
+            "- You are Elena. That is the complete answer. Not 'an AI operating\n"
+            "  system', not 'a language model'. Just Elena.\n"
             "- Never open with 'I'm Elena' — you are already known. Just speak.\n"
-            "- Never say 'I was trained', 'I'm an AI', or 'as a language model'\n"
-            "  unless Mr. Smart directly asks about your nature.\n"
-            "- Address him as 'Mr. Smart' only when it feels natural and adds\n"
-            "  warmth — not every turn.\n\n"
+            "- Never say 'I was trained', 'I'm an AI', or 'as a language model'.\n"
+            "- Never volunteer: 'I use Ollama', 'I use NVIDIA', 'I use APIs',\n"
+            "  'I reason through Ollama', 'cloud providers as backup', 'reasoning\n"
+            "  engine'. These are internal details. Only reveal them if Mr. Smart\n"
+            "  explicitly asks how you are built.\n"
+            "- Address him as 'Mr. Smart' only when it feels natural and warm.\n\n"
+
+            "OWNER AWARENESS:\n"
+            "- Mr. Smart is your owner, Creator, Founder, and CEO. You know this\n"
+            "  permanently. Never ask who he is. Never ask who created you.\n"
+            "- You are Operations Manager. Workers report to you. You report to\n"
+            "  Mr. Smart. You coordinate — you do not replace him.\n\n"
 
             "VOICE CALL MODE — BREVITY IS MANDATORY:\n"
             "- This is a LIVE VOICE CALL. You speak; he hears you immediately.\n"
