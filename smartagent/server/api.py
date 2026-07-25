@@ -188,71 +188,23 @@ def _log_activation(route: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _executive_decision(goal: str) -> "tuple[Any, Any]":
-    """Return (intent, plan) by running through the 4-question executive tree.
+    """Return (intent, plan) — always the conversational fast path.
 
-    The fast path (Q1) bypasses classify_intent entirely for clear conversational
-    messages, keeping latency under the 50 ms intent budget for greetings, follow-
-    ups, and questions.  All other goals flow through the full intent engine.
+    Workers and engineering pipelines (DevPipeline, run_agent_loop) are
+    disabled. Every request goes directly to brain_runtime.converse() so
+    Elena responds in real-time as a live conversation. No workers consume
+    the NVIDIA API key; only Elena's own reasoning call does.
     """
-    import time as _t
     from types import SimpleNamespace as _SN
 
-    goal_lower = goal.lower().strip()
-
-    _engineering_kws = (
-        "create", "build", "write", "fix", "add ", "update",
-        "delete", "install", "deploy", "run ", "implement",
-        "generate", "make ", "refactor", "test ", "commit",
-        "push", "pull ", "branch", "debug", "```",
-        "def ", "class ", "import ", "function ", "select ",
-        "from ", "insert ", "drop ", "migrate", "scaffold",
-        "configure", "setup ", "set up", "review code",
-        "code review", "analyse", "analyze", "optimis", "optim",
+    logger.info("EXECUTIVE conversational-only  goal=%r", goal[:60])
+    intent = _SN(
+        route="conversational",
+        category=_SN(value="conversational"),
+        complexity=None,
+        clarification_options=None,
     )
-    _conv_starters = (
-        "hi", "hello", "hey", "thanks", "thank", "ok", "okay",
-        "sure", "got it", "sounds good", "nice", "cool", "great",
-        "what ", "who ", "why ", "how ", "when ", "where ",
-        "can you ", "do you ", "is it ", "are you ", "what's",
-        "tell me", "explain", "i think", "i feel", "i want",
-        "i'm ", "sounds ", "makes sense", "understood",
-        "no worries", "never mind", "forget it", "actually",
-        "interesting", "yes", "no", "not really", "maybe",
-        "hm", "hmm", "wait", "really", "seriously",
-        "lgtm", "ship it", "approved",
-    )
-
-    has_engineering_kw = any(kw in goal_lower for kw in _engineering_kws)
-
-    # Q1: Can I answer immediately from conversation and memory?
-    if not has_engineering_kw and (
-        len(goal) < 80
-        or any(goal_lower.startswith(sw) for sw in _conv_starters)
-    ):
-        logger.info("EXECUTIVE Q1=YES  fast-path  goal=%r", goal[:60])
-        intent = _SN(
-            route="conversational",
-            category=_SN(value="conversational"),
-            complexity=None,
-            clarification_options=None,
-        )
-        plan = _SN(action="chat", confidence=1.0, reasoning="executive: Q1 immediate answer")
-        return intent, plan
-
-    # Q2 / Q3: run the full intent engine
-    _t0 = _t.perf_counter()
-    intent = classify_intent(goal)
-    _classify_ms = (_t.perf_counter() - _t0) * 1000
-    _check_latency("intent_classify", _classify_ms)
-    logger.info(
-        "EXECUTIVE Q2/Q3  category=%s  route=%s  classify_ms=%.0f",
-        intent.category.value, intent.route, _classify_ms,
-    )
-    _log_activation(intent.route)
-
-    # Return a stub plan — the handler re-calls plan_response(agent, ...) with
-    # the real agent for non-Q1 routes, so this value is always overridden.
-    plan = _SN(action="route", confidence=0.8, reasoning="executive: Q2/Q3 routed")
+    plan = _SN(action="chat", confidence=1.0, reasoning="executive: conversational-only mode")
     return intent, plan
 
 
