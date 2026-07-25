@@ -109,11 +109,10 @@ export function useVoice() {
   const [micPermission, setMicPermission] = useState<'idle'|'requesting'|'granted'|'denied'>('idle');
 
   // speakerMuted — true when the user has silenced Elena's voice output.
-  // Starts TRUE — speaker is OFF until the user explicitly taps "Enable Speaker".
-  // Both mic AND speaker must be enabled before any voice exchange can happen.
+  // Starts FALSE — speaker is ON by default so Elena's voice is always heard.
   // While muted, any isMarkSpeaking transition immediately calls stopMarkSpeech.
-  const [speakerMuted,  setSpeakerMuted]  = useState(true);
-  const speakerMutedRef = useRef(true);
+  const [speakerMuted,  setSpeakerMuted]  = useState(false);
+  const speakerMutedRef = useRef(false);
 
   const [supported] = useState(() =>
     typeof navigator !== 'undefined' &&

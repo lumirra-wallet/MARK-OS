@@ -558,14 +558,22 @@ class BrainRuntime:
             "The JSON is your private mind; only what follows the separator is heard."
         )
         # When the user interrupted Elena mid-reply, include what Elena was
-        # about to say so she can absorb the interruption instead of ignoring it.
+        # about to say so she can absorb the interruption and maintain
+        # conversation continuity — the same thread, unbroken.
         interrupted_block = (
-            f"\n\n[BARGE-IN CONTEXT: You were mid-reply saying: "
-            f"\"{interrupted_context[:200]}\"\n"
-            "Mr. Smart just interrupted you. Absorb their input — "
-            "don't re-say what you already said. If their interruption "
-            "is on a new topic, pivot cleanly. If it adds to yours, "
-            "weave it in and continue naturally. MAX 1-2 sentences.]"
+            f"\n\n[BARGE-IN CONTINUITY — READ CAREFULLY:\n"
+            f"You were mid-reply when Mr. Smart interrupted you. You were saying:\n"
+            f"\"{interrupted_context[:200]}\"\n\n"
+            "Your job in this response is TWO-PART:\n"
+            "  PART 1 — Answer/acknowledge what Mr. Smart just said (1 sentence max).\n"
+            "  PART 2 — Resume your original thought seamlessly at the end.\n\n"
+            "Use a natural spoken bridge between the two parts. Examples:\n"
+            "  '...and to finish what I was saying — [your original continuation]'\n"
+            "  '...right, and back to that — [your original continuation]'\n"
+            "  '...got it — and picking up from before: [your original continuation]'\n\n"
+            "ONLY skip Part 2 if Mr. Smart's interruption COMPLETELY changes the topic\n"
+            "or if your original reply was already fully delivered before he spoke.\n"
+            "Total response: MAX 2-3 sentences. No bullet points. Natural speech only.]"
         ) if interrupted_context else ""
 
         user = (

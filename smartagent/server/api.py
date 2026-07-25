@@ -1869,6 +1869,38 @@ async def _voice_chat_response(text: str, workspace: str) -> None:
         )
         return
 
+    # ── Text-level self-echo filter ───────────────────────────────────────────
+    # The VAD state machine (TTS_ACTIVE → POST_SPEECH holdoff) is the primary
+    # acoustic echo barrier.  This is a second layer: compare the incoming
+    # transcript against every sentence Elena recently spoke via TTS.  If word
+    # overlap is ≥ 65 %, the transcript is almost certainly Elena's own voice
+    # picked up by the microphone — drop it silently.
+    #
+    # Uses word-level Jaccard similarity (intersection / union of word sets)
+    # because Whisper's output may differ slightly from the TTS text (dropped
+    # articles, minor mishears), but a high-overlap transcript from the mic is
+    # still recognisably the same sentence.
+    try:
+        _recently = speech_runtime.recently_spoken_text()
+        if _recently and len(_text_lower) >= 6:
+            _incoming_words = set(_text_lower.split())
+            # Check against individual recently-spoken sentences for tighter matching
+            for _sent in _recently.split("."):
+                _sent_words = set(_sent.lower().split())
+                if not _sent_words or len(_sent_words) < 3:
+                    continue
+                _overlap = len(_incoming_words & _sent_words)
+                _union   = len(_incoming_words | _sent_words)
+                _jaccard = _overlap / _union if _union else 0.0
+                if _jaccard >= 0.62:
+                    logger.warning(
+                        "voice_chat: self-echo detected (jaccard=%.2f) — dropping: %r",
+                        _jaccard, text[:60],
+                    )
+                    return
+    except Exception as _echo_exc:
+        logger.debug("voice_chat: echo filter error (non-fatal): %s", _echo_exc)
+
     # ── Deduplication guard ───────────────────────────────────────────────────
     # VAD can fire two `final` events for the same utterance (endpoint
     # detected, then re-detected after a brief pause).  Identical text within
@@ -2365,6 +2397,7 @@ async def voice_websocket(ws: WebSocket) -> None:
                     # the next turn's LLM call will absorb it so Elena can
                     # acknowledge the interruption and continue coherently.
                     if ev_type == "speech_start":
+                        global _interrupted_reply  # noqa: PLW0603
                         try:
                             _interrupted_reply = speech_runtime.get_interrupted_text()
                         except Exception:
@@ -2398,11 +2431,14 @@ async def voice_websocket(ws: WebSocket) -> None:
                 except Exception:
                     continue
                 ctrl_type = ctrl.get("type")
-                if ctrl_type == "tts_start":
-                    session.mute()
-                elif ctrl_type == "tts_end":
-                    session.unmute()
                 # "ping" heartbeat from the browser — keep-alive, no action needed.
+                # NOTE: tts_start/tts_end are intentionally NOT handled here.
+                # The session mute/unmute is driven exclusively by speech_runtime
+                # calling mute_active_session()/unmute_active_session() directly —
+                # timed exactly to the first/last audio byte, with no browser
+                # round-trip. Handling tts_start/tts_end here caused a race where
+                # a late-arriving tts_start re-muted the VAD after it had already
+                # returned to LISTENING, leaving Elena permanently deaf.
                 # Silently ignored here; the WS receive loop keeps the connection live.
     except WebSocketDisconnect:
         pass

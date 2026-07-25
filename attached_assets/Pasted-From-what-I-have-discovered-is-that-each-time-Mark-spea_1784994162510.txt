@@ -1,0 +1,58 @@
+From what I have discovered is that each time Mark speaks, I think the speaker listens to itself, and this is making a crash between the system, making it speak as if it's talking to itself. I think it should handle that part very well where it can make conversation feel very smooth without having to make as if it's listening to itself. And also remove the muted speaker part. The speaker should never be muted. And also about the listening and talking, make sure Mark is still on the same conversation line rather than waiting for this message to deliver before it sends another message. The message line should still continue from how it was talking during the exact time when the user sent the message and it stopped for some time and then continue. It should still be from the same timeline to make everything balanced
+
+RO
+robinstephen066
+robinstephen066
+10 minutes ago
+Addressing voice pipeline feedback issues
+
+Addressing voice pipeline feedback issues
+Let me explore the voice pipeline code first to understand all three issues before touching anything.
+
+
+15 actions
+Let me read the brain_runtime's interrupted_context handling and the last part of voice_pipeline.feed():
+
+
+4 actions
+Now I have the full picture. Let me diagnose each of the three issues precisely:
+
+Issue 1 (Self-echo crash): There are TWO parallel mute mechanisms that can race: (a) server-side speech_runtime._mute_mic() via mute_active_session() — correctly timed before first audio byte, and (b) browser-sent tts_start/tts_end JSON messages arriving at arbitrary latency. If tts_start arrives late (after the holdoff has already expired and the session is back in LISTENING), it spuriously re-mutes the VAD — locking Elena in TTS_ACTIVE indefinitely. Then self-echo leaks through the gap before the next mute cycle.
+
+Issue 2 (Speaker muted): The browser's tts_end message is the culprit — it can get stuck, delayed, or dropped, leaving the VAD in TTS_ACTIVE permanently. Removing these redundant browser-controlled mute calls is the fix.
+
+Issue 3 (Conversation continuity): The _interrupted_reply text is passed to brain_runtime as interrupted_context but the LLM instruction is vague. The model doesn't reliably resume the original thought after answering the user's barge-in question.
+
+Implementing all three fixes now:
+
+
+Show less
+
+Opened brain_runtime.py
+Implementing voice interaction improvements
+
+Implementing voice interaction improvements
+I have all the context needed. Implementing all three fixes in parallel:
+
+
+Show less
+
+Edited voice_pipeline.py
+
+Edited speech_runtime.py
+
+Edited speech_runtime.py
+
+Edited speech_runtime.py
+Implementing workflow fixes
+
+Implementing workflow fixes
+Now fixing api.py — remove the redundant browser mute, add text-level echo filter, strengthen the conversation continuity instruction:
+
+
+3 actions
+Now fix the brain_runtime's interrupted_context instruction for conversation continuity:
+
+
+Edited brain_runtime.py
+You've reached your daily free quota limit. It will reset at 12:00 AM UTC.

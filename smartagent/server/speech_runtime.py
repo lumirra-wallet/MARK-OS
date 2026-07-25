@@ -111,6 +111,11 @@ class SpeechRuntime:
         self._queue: "queue.SimpleQueue[str | object]" = queue.SimpleQueue()
         self._worker_lock = threading.Lock()
         self._worker_started = False
+        # Rolling buffer of the last 30 sentences Elena spoke — used by the
+        # voice chat handler to detect self-echo (text that arrived from the
+        # mic but actually originated from Elena's own TTS output).
+        self._recently_spoken: list[str] = []
+        self._recently_spoken_lock = threading.Lock()
 
     def attach(self, manager: "ConnectionManager", loop: asyncio.AbstractEventLoop) -> None:
         self._manager = manager
@@ -127,6 +132,8 @@ class SpeechRuntime:
         self._buffer = ""
         self._interrupted.clear()
         self._spoke_anything = False
+        # Do NOT clear _recently_spoken here — we want it to persist across
+        # turns so the echo filter still works immediately after TTS ends.
         self._ensure_worker()
 
     def _ensure_worker(self) -> None:
@@ -164,11 +171,17 @@ class SpeechRuntime:
 
     def interrupt(self) -> None:
         """Call the instant the user starts speaking (VAD speech_start).
-        Stops synthesis and clears the currently_speaking flag immediately."""
+        Stops synthesis and clears the currently_speaking flag immediately.
+        Also ensures the VAD mic is always unmuted — prevents the session from
+        getting permanently stuck in TTS_ACTIVE if flush() is never reached
+        (e.g. an unhandled exception in the LLM path)."""
         if not self._interrupted.is_set():
             self._interrupted.set()
             self._currently_speaking = False
             self._broadcast_event(ServerEvents.SPEECH_INTERRUPTED, {})
+        # Safety unmute — idempotent if VAD is already LISTENING/POST_SPEECH.
+        # Guarantees the pipeline recovers even when _END_OF_REPLY never arrives.
+        self._unmute_mic()
 
     @property
     def currently_speaking(self) -> bool:
@@ -213,6 +226,20 @@ class SpeechRuntime:
                 continue
             self._speak_sentence(item)  # type: ignore[arg-type]
 
+    def recently_spoken_text(self) -> str:
+        """Return the last 30 sentences Elena spoke, joined by space.
+
+        Used by the voice echo filter to detect when incoming STT transcripts
+        are actually Elena's own TTS output picked up by the microphone.
+        """
+        with self._recently_spoken_lock:
+            return " ".join(self._recently_spoken)
+
+    def clear_recently_spoken(self) -> None:
+        """Clear the echo-detection buffer — call when starting a fresh session."""
+        with self._recently_spoken_lock:
+            self._recently_spoken.clear()
+
     def _speak_sentence(self, text: str) -> None:
         if self._interrupted.is_set() or not text.strip():
             return
@@ -228,6 +255,14 @@ class SpeechRuntime:
             self._currently_speaking = True
             self._mute_mic()
             self._broadcast_event(ServerEvents.SPEECH_START, {})
+        # Track what Elena just said so the echo filter can compare it
+        # against any incoming transcripts that might be self-echo.
+        cleaned = text.strip()
+        if cleaned:
+            with self._recently_spoken_lock:
+                self._recently_spoken.append(cleaned)
+                if len(self._recently_spoken) > 30:   # keep last 30 sentences
+                    self._recently_spoken.pop(0)
         self._broadcast_bytes(pcm)
 
     # ── Mic control helpers ───────────────────────────────────────────────────

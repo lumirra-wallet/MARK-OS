@@ -80,9 +80,10 @@ _BARGE_IN_THRESHOLD = 0.065
 _BARGE_IN_CONSECUTIVE_CHUNKS = 1
 
 # POST_SPEECH cool-down: number of 16kHz samples to discard transcripts for.
-# 550ms absorbs room reverb + AEC settling without making Elena feel deaf.
-# Reduced from 900ms → 550ms so she returns to listening ~350ms sooner.
-_POST_SPEECH_HOLDOFF_SAMPLES = int(0.55 * SAMPLE_RATE)  # 550 ms
+# 800ms absorbs room reverb + speaker echo + AEC settling fully.
+# Longer than the old 550ms to prevent self-echo from leaking into transcription
+# before the acoustic tail has fully decayed.
+_POST_SPEECH_HOLDOFF_SAMPLES = int(0.80 * SAMPLE_RATE)  # 800 ms
 
 # Barge-in echo holdoff: after a barge-in, apply a short POST_SPEECH holdoff
 # (200ms) before opening the VAD for transcription.  The chunk that tripped the
