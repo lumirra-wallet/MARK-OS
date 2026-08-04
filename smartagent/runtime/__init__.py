@@ -33,7 +33,7 @@ from .event_bus import Event, EventBus
 from .identity import Identity
 from .provider_registry import ProviderKind, ProviderRegistry
 from .runtime import Runtime
-from .session import Session, SessionState
+from .session import Session, SessionState, Turn, UtteranceKind
 
 __all__ = [
     "Config",
@@ -45,4 +45,6 @@ __all__ = [
     "Runtime",
     "Session",
     "SessionState",
+    "Turn",
+    "UtteranceKind",
 ]
