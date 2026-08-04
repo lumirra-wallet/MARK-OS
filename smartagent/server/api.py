@@ -2404,6 +2404,74 @@ async def voice_websocket(ws: WebSocket) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Gemini Live voice endpoints
+# ---------------------------------------------------------------------------
+
+# Process-wide voice provider preference.  "local" = Whisper/Kokoro pipeline;
+# "gemini" = Gemini Live API.  Persists for the server lifetime (not across
+# restarts).  Overridden by the /voice/provider REST endpoints.
+_voice_provider: str = "local"
+
+
+@router.get("/voice/provider")
+async def get_voice_provider() -> dict:
+    """Return the currently active voice provider."""
+    import os as _os
+    api_key_set = bool(_os.environ.get("GOOGLE_LIVE_API_KEY", "").strip())
+    return {
+        "provider":    _voice_provider,
+        "available":   {"local": True, "gemini": api_key_set},
+    }
+
+
+@router.post("/voice/provider")
+async def set_voice_provider(payload: dict) -> dict:
+    """Switch the active voice provider.  payload: {"provider": "local"|"gemini"}"""
+    global _voice_provider  # noqa: PLW0603
+    import os as _os
+
+    provider = (payload.get("provider") or "local").strip().lower()
+    if provider not in ("local", "gemini"):
+        raise HTTPException(400, "provider must be 'local' or 'gemini'")
+    if provider == "gemini" and not _os.environ.get("GOOGLE_LIVE_API_KEY", "").strip():
+        raise HTTPException(503, "GOOGLE_LIVE_API_KEY is not set — cannot enable Gemini Live")
+    _voice_provider = provider
+    logger.info("voice_provider: switched to %s", _voice_provider)
+    return {"ok": True, "provider": _voice_provider}
+
+
+@router.websocket("/ws/voice/gemini")
+async def voice_gemini_websocket(ws: WebSocket) -> None:
+    """Real-time voice via Gemini Live API.
+
+    The browser connects here instead of /ws/voice when the voice provider
+    is set to 'gemini'.  Binary PCM16 @ 16 kHz frames flow in; Gemini
+    generates speech and streams PCM16 @ 24 kHz audio back through the main
+    /ws connection (same path as Kokoro TTS) so the existing SpeechPlayer
+    handles playback transparently.
+
+    Protocol (identical surface to /ws/voice for drop-in frontend swap):
+      Browser → server (binary): PCM16 mono @ 16 kHz mic audio
+      Browser → server (JSON):   {"type":"ping"} keepalive
+      Server → browser (JSON):   {"type":"partial","text":…} interim transcript
+                                 {"type":"speech_end"}        turn complete
+                                 {"type":"error","text":…}    fatal error
+    """
+    from smartagent.server.gemini_live import GeminiLiveBridge
+
+    await ws.accept()
+    logger.info("voice_gemini_ws: browser connected")
+
+    bridge = GeminiLiveBridge(ws, connection_manager)
+    try:
+        await bridge.run()
+    except Exception as exc:
+        logger.warning("voice_gemini_ws: bridge error: %s", exc)
+    finally:
+        logger.info("voice_gemini_ws: browser disconnected")
+
+
+# ---------------------------------------------------------------------------
 # LiveKit voice endpoints (M1 + WebSocket proxy for signaling)
 # ---------------------------------------------------------------------------
 

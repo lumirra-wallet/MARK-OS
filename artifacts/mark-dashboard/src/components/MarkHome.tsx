@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { ArrowRight, Mic, MicOff, MessageCircle, X, ChevronDown, ChevronUp, Globe, Volume2, VolumeX } from 'lucide-react';
+import { ArrowRight, Mic, MicOff, MessageCircle, X, ChevronDown, ChevronUp, Globe, Volume2, VolumeX, Sparkles } from 'lucide-react';
 import { useMarkStore } from '@/store/markStore';
 import { useSelfState } from '@/hooks/use-self-state';
 import { useVoice } from '@/hooks/use-voice';
@@ -400,6 +400,24 @@ export function MarkHome({ onOpenWorkspace }: { onOpenWorkspace: () => void }) {
               </>
             : <Volume2 className="w-4 h-4" />
           }
+        </button>
+
+        {/* ── Voice provider toggle (local ↔ Gemini Live) ─────────────────── */}
+        <button
+          onClick={() => voice.setVoiceProvider(voice.voiceProvider === 'gemini' ? 'local' : 'gemini')}
+          title={voice.voiceProvider === 'gemini'
+            ? 'Gemini Live voice active — tap to switch to local (Whisper/Kokoro)'
+            : 'Local voice active — tap to switch to Gemini Live'}
+          className={`flex flex-col items-center justify-center gap-0.5 rounded-full border transition-all duration-200 w-10 h-10 ${
+            voice.voiceProvider === 'gemini'
+              ? 'bg-blue-500/15 border-blue-400/40 text-blue-400 hover:bg-blue-500/25'
+              : 'bg-white/5 border-white/10 text-white/30 hover:bg-white/10 hover:text-white/60'
+          }`}
+        >
+          <Sparkles className="w-4 h-4" />
+          <span className="text-[7px] font-mono tracking-wider leading-none">
+            {voice.voiceProvider === 'gemini' ? 'gemini' : 'local'}
+          </span>
         </button>
 
         {/* ── Far right: Connection status ─────────────────────────────────── */}

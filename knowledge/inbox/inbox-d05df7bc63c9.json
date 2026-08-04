@@ -1,0 +1,42 @@
+{
+  "id": "inbox-d05df7bc63c9",
+  "concept": {
+    "id": "concept-20260725-164316-41e65c2b",
+    "title": "Successful Strategy: what do you think about this error- it kept saying - No tran",
+    "description": "A high-quality execution (score 80%) was completed for the goal: 'what do you think about this error- it kept saying - No transcriptions no persistent memory across sessions here each time you open this chat it’s a fresh context window. I’m Star designed Star to be persistent in MROS the background process that maintain state learns members but in this interface, I only know what’s in this conversation to always hear thing is the goal the reality I reset every session unless there’s a memory layer build outside this chat?- also - No, this is Chat from base. I sent your reply. There’s no audio stream no voice detection no keep talking while you listen what you’re describing needs a voice interface with voice activity detection and screaming TTS/STT that’s a different build tire if you’re building that into MSROS, I can help architected but an**window just one message at a time- this is a big error, what to do'. The execution achieved 80% task success rate with 100% average confidence.",
+    "summary": "",
+    "category": "Best Practices",
+    "tags": [
+      "successful-execution",
+      "best-practice",
+      "reflection"
+    ],
+    "aliases": [],
+    "examples": [],
+    "difficulty": "intermediate",
+    "status": "active",
+    "confidence": 0.5,
+    "importance": 0.5,
+    "created_at": "2026-07-25T16:43:16+00:00",
+    "updated_at": "2026-07-25T16:43:16+00:00",
+    "author": "MARK",
+    "owner": "Mr. Smart",
+    "source_ids": [],
+    "evidence_ids": [],
+    "relationship_ids": [],
+    "dependency_ids": [],
+    "contradiction_ids": [],
+    "verification_status": "pending",
+    "revision_history": []
+  },
+  "submitted_at": "2026-07-25T16:43:16+00:00",
+  "status": "pending",
+  "validation_errors": [],
+  "validation_warnings": [
+    "No summary provided; adding a 1-3 sentence summary improves quick recall.",
+    "Confidence is still at the default 0.5; consider scoring it once evidence is attached."
+  ],
+  "conflict_ids": [],
+  "initial_confidence": 0.35,
+  "notes": ""
+}

@@ -203,13 +203,41 @@ export function useVoice() {
     rafRef.current = requestAnimationFrame(pollLevel);
   }, []);
 
+  // ── Voice provider (local = Whisper/Kokoro, gemini = Gemini Live) ─────────
+  // Persisted in localStorage so the preference survives page reloads.
+  const [voiceProvider, _setVoiceProvider] = useState<'local' | 'gemini'>(() => {
+    try {
+      const stored = localStorage.getItem('elena_voice_provider');
+      return stored === 'gemini' ? 'gemini' : 'local';
+    } catch {
+      return 'local';
+    }
+  });
+  const voiceProviderRef = useRef<'local' | 'gemini'>(voiceProvider);
+
+  const setVoiceProvider = useCallback((p: 'local' | 'gemini') => {
+    voiceProviderRef.current = p;
+    _setVoiceProvider(p);
+    try { localStorage.setItem('elena_voice_provider', p); } catch { /* ignore */ }
+    // Inform the server so it tracks the preference server-side too.
+    const apiBase = serverUrl.replace(/\/$/, '');
+    fetch(`${apiBase}/voice/provider`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: p }),
+    }).catch(() => { /* non-critical */ });
+    // Reconnect with the new endpoint.
+    wsRef.current?.close();
+  }, [serverUrl]);
+
   // ── Build the WebSocket URL ───────────────────────────────────────────────
   const buildWsUrl = useCallback(() => {
     const wsBase = serverUrl
       .replace(/^http/, 'ws')
       .replace(/\/$/, '');
+    const endpoint = voiceProviderRef.current === 'gemini' ? '/ws/voice/gemini' : '/ws/voice';
     const qs = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
-    return `${wsBase}/ws/voice${qs}`;
+    return `${wsBase}${endpoint}${qs}`;
   }, [serverUrl, workspace]);
 
   // ── Stop mic capture + close audio graph ─────────────────────────────────
@@ -607,6 +635,7 @@ export function useVoice() {
       }, 12_000);  // 12 s — past the 10 s getUserMedia retry delay
       return () => clearTimeout(t);
     }
+    return undefined;
   }, [micPermission, isListening]);
 
   // ── Emergency fallback: browser TTS when Kokoro unavailable ──────────────
@@ -657,6 +686,8 @@ export function useVoice() {
     interimTranscript,
     micPermission,
     speakerMuted,
+    voiceProvider,
+    setVoiceProvider,
     enableMic,
     toggleVoice,
     toggleSpeaker,

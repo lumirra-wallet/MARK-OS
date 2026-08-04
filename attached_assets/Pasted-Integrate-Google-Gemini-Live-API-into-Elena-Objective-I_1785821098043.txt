@@ -1,0 +1,274 @@
+Integrate Google Gemini Live API into Elena
+Objective
+
+Integrate Google Gemini Live API into Elena to transform her from a request-response assistant into a real-time conversational AI similar to ChatGPT Voice.
+
+Do not redesign Elena's brain.
+
+Elena remains the AI operating system.
+
+Gemini Live is only the real-time voice transport layer.
+
+The objective is to make conversations feel like a natural phone call.
+
+Environment
+
+Development:
+
+macOS
+Python 3.11+
+
+Deployment:
+
+Linux server
+
+The same Python codebase must run on both operating systems.
+
+API Configuration
+
+Read all configuration from environment variables.
+
+Use:
+
+GOOGLE_LIVE_API_KEY=
+GOOGLE_LIVE_MODEL=
+GOOGLE_PROJECT_ID=
+GOOGLE_LIVE_LOCATION=
+VOICE_NAME=
+
+Use:
+
+python-dotenv
+
+Create:
+
+.env.example
+
+Never hardcode secrets.
+
+Architecture
+
+Keep Elena as the center of the system.
+
+The flow should be:
+
+Microphone
+
+↓
+
+Google Gemini Live API
+
+↓
+
+Elena Conversation Executive
+
+↓
+
+Elena Brain
+
+↓
+
+Memory
+
+↓
+
+Reasoning
+
+↓
+
+Google Gemini Live API
+
+↓
+
+Speaker
+
+Gemini Live provides streaming voice only.
+
+Elena controls:
+
+conversation
+personality
+reasoning
+memory
+identity
+Real-Time Voice Requirements
+
+Implement:
+
+continuous microphone streaming
+continuous speaker streaming
+streaming speech recognition
+streaming speech synthesis
+automatic Voice Activity Detection
+barge-in (interrupt Elena while she is speaking)
+continuous conversation
+natural pauses
+automatic reconnection
+partial transcripts
+partial responses
+very low latency
+
+The interaction should feel like speaking with ChatGPT Voice.
+
+Conversation Executive
+
+Create a Conversation Executive responsible for maintaining conversational continuity.
+
+Before every response Elena must:
+
+retrieve the current conversation state
+retrieve the current user goal
+retrieve previous context
+retrieve relevant memories
+determine whether the user is:
+continuing
+confirming
+interrupting
+correcting
+asking a follow-up
+changing topics
+
+Never treat every spoken sentence as a new conversation.
+
+Examples:
+
+User:
+
+"Okay."
+
+Wrong:
+
+"What do you mean by okay?"
+
+Correct:
+
+"Alright. We were discussing the memory system."
+
+User:
+
+"Continue."
+
+Correct:
+
+Continue naturally without asking what to continue.
+
+User:
+
+"Yes."
+
+Treat it as confirmation of the previous discussion.
+
+Personality
+
+Elena is a persistent AI operating system.
+
+She must:
+
+always identify herself as Elena
+never identify herself as Google Gemini
+never identify herself as a language model
+never expose internal implementation
+remain calm
+speak naturally
+communicate professionally
+adapt to Mr. Smart's communication style over time
+
+The user should always feel they are speaking to Elena.
+
+Memory
+
+Gemini Live must never manage memory.
+
+Elena owns memory.
+
+Every response should consult:
+
+working memory
+long-term memory
+owner profile
+
+Conversation history should persist naturally.
+
+Async Design
+
+Everything should use asyncio.
+
+Avoid blocking calls.
+
+Audio streaming must continue while Elena reasons.
+
+Error Handling
+
+Implement:
+
+reconnect automatically
+network timeout recovery
+graceful shutdown
+microphone failure handling
+audio device switching
+API quota handling
+
+Never crash the voice session.
+
+Logging
+
+Create structured logging for:
+
+connection events
+latency
+response time
+audio timing
+memory lookups
+reasoning duration
+conversation interruptions
+Project Structure
+
+Organize the voice layer into modules:
+
+voice/
+    live_client.py
+    audio_input.py
+    audio_output.py
+    vad.py
+    stream_manager.py
+
+conversation/
+    session.py
+    turn_manager.py
+    interruptions.py
+
+brain/
+    reasoning.py
+    memory.py
+
+config/
+    settings.py
+
+main.py
+
+.env.example
+Deliverables
+
+Produce:
+
+complete project architecture
+updated folder structure
+requirements.txt
+.env.example
+startup script
+README.md
+macOS setup guide
+Linux deployment guide
+
+Use detailed comments explaining every major component.
+
+Success Criteria
+
+After implementation:
+
+Elena should feel like ChatGPT Voice.
+Conversations should flow naturally.
+Elena should begin responding before the entire response is generated.
+Elena should support interruptions naturally.
+Elena should maintain context across the conversation.
+The interaction should feel like speaking to one persistent AI companion rather than a request-response chatbot.

@@ -28,6 +28,9 @@ openai
 anthropic
 ollama
 
+# Gemini Live voice transport
+google-genai
+
 # HTTP / networking
 httpx
 aiohttp

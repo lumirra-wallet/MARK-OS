@@ -1,0 +1,333 @@
+Integrate Google Gemini Live API into Elena (Real-Time Voice Assistant)
+You are a senior AI systems engineer and Python architect.
+
+Goal
+Transform my existing Python AI operating system, Elina, from a request-response chatbot into a true real-time conversational voice assistant similar to ChatGPT Voice.
+
+The experience should support:
+
+Full-duplex voice conversation (listen while speaking where possible)
+Very low latency
+Streaming audio input
+Streaming audio output
+Voice interruption (barge-in)
+Continuous conversation
+Natural turn taking
+No “record → transcribe → wait → respond” workflow
+Instead, Elina should feel like a live phone conversation.
+
+Environment
+Development machine:
+
+macOS
+Python 3.11+
+Existing Elina project
+Deployment target:
+
+Linux server
+Same Python codebase
+The code must work on both macOS and Linux.
+
+AI Architecture
+Do NOT replace Elina.
+
+Elina remains the operating system.
+
+Gemini Live is ONLY the real-time conversation layer.
+
+Architecture:
+
+User Voice
+
+↓
+
+Gemini Live API (streaming audio)
+
+↓
+
+Elina Brain
+
+↓
+
+Memory
+
+↓
+
+Tools
+
+↓
+
+Reasoning
+
+↓
+
+Gemini Live streams audio back
+
+Elina continues controlling:
+
+memory
+personality
+tools
+automation
+task execution
+plugins
+function calling
+Gemini Live should never become the operating system.
+
+It is only responsible for streaming conversation.
+
+Environment Variables
+Do not hardcode secrets.
+
+Read everything from environment variables.
+
+Example:
+
+GEMINI_API_KEY=
+
+MODEL_NAME=
+
+VOICE_NAME=
+
+PROJECT_ID=
+
+LOCATION=
+
+etc.
+
+Create a .env.example.
+
+Use python-dotenv.
+
+Project Requirements
+Refactor the project into modules.
+
+Suggested structure:
+
+voice/
+
+live_client.py
+
+audio_input.py
+
+audio_output.py
+
+vad.py
+
+stream_manager.py
+
+brain/
+
+reasoning.py
+
+memory.py
+
+tools.py
+
+conversation/
+
+session.py
+
+interruptions.py
+
+turn_manager.py
+
+config/
+
+settings.py
+
+.env.example
+
+main.py
+
+Keep the architecture modular.
+
+Audio Requirements
+Implement:
+
+Streaming microphone audio
+
+Streaming speaker audio
+
+Automatic Voice Activity Detection
+
+Interruptions
+
+Echo cancellation if supported
+
+Automatic reconnection
+
+Conversation sessions
+
+Partial transcripts
+
+Partial responses
+
+Streaming synthesis
+
+Low latency pipeline
+
+Conversation Features
+Implement:
+
+Continuous listening
+
+Natural pauses
+
+No button-to-talk
+
+Interrupt assistant when user speaks
+
+Resume conversation
+
+Conversation history
+
+Context window management
+
+Session persistence
+
+Silence timeout
+
+Wake word support (optional)
+
+Elina Integration
+Do not rewrite Elina.
+
+Instead expose methods like:
+
+Elina.process()
+
+Elina.reason()
+
+Elina.memory.search()
+
+Elina.memory.store()
+
+Elina.execute_tool()
+
+Gemini Live should call these methods whenever reasoning is required.
+
+Tool Calling
+If Gemini requests an action:
+
+Elina executes it.
+
+Examples:
+
+Search memory
+
+Run automation
+
+Execute Python tools
+
+Read files
+
+Use local plugins
+
+Control the operating system
+
+Gemini should never execute tools directly.
+
+Async Requirements
+Everything must use asyncio.
+
+Avoid blocking calls.
+
+Streaming must remain smooth while Elina reasons.
+
+Error Handling
+Implement:
+
+Automatic reconnect
+
+Network timeout recovery
+
+Retry logic
+
+Graceful shutdown
+
+Microphone failure handling
+
+API quota handling
+
+Audio device switching
+
+Logging
+
+Logging
+Create structured logging.
+
+Include:
+
+connection events
+
+latency
+
+response time
+
+audio timing
+
+stream failures
+
+tool calls
+
+memory lookups
+
+reasoning duration
+
+Performance
+Minimize latency.
+
+Avoid unnecessary buffering.
+
+Use streaming everywhere.
+
+Never wait for full transcripts before reasoning if partial processing is possible.
+
+Configuration
+Make every configurable option editable through environment variables.
+
+No hardcoded values.
+
+Deliverables
+Produce:
+
+Complete project architecture.
+Updated folder structure.
+All required Python modules.
+Installation commands.
+Dependency list.
+requirements.txt
+.env.example
+Startup script.
+macOS setup guide.
+Linux setup guide.
+README.md.
+Detailed comments explaining every major component.
+Instructions for extending Elina with additional providers in the future.
+Future Provider Support
+Design the voice layer so that providers can be swapped easily.
+
+Create an abstract interface.
+
+Example:
+
+VoiceProvider
+
+GeminiLiveProvider
+
+OpenAIRealtimeProvider
+
+AzureProvider
+
+Future providers should require minimal code changes.
+
+Final Goal
+After implementation, Elina should behave like a real conversational assistant:
+
+I speak naturally.
+Elina begins processing immediately.
+Elina can interrupt and be interrupted.
+Responses begin before the entire answer is generated.
+The interaction feels like speaking with ChatGPT Voice rather than using a chatbot.
+Prioritize clean architecture, maintainability, asynchronous programming, and low latency over shortcuts. i have google ap studio api for live ai. nameis GOGLE_LIVE
