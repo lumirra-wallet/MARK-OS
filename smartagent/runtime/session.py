@@ -112,7 +112,7 @@ _CONFIRMATION_PHRASES = {
 }
 _FAREWELL_PHRASES = {
     "bye", "goodbye", "see you", "that's all", "that's it",
-    "we're done", "end", "close", "exit", "stop", "quit",
+    "we're done", "done for now", "talk later",
 }
 _GREETING_PHRASES = {
     "hello", "hey", "hi", "good morning", "good afternoon",
@@ -281,7 +281,10 @@ class Session:
             return UtteranceKind.GREETING
 
         # Starts with negation — likely correction
-        if cleaned.startswith(("no ", "not ", "actually ", "wait ", "hmm no")):
+        # Normalise by removing commas so "Actually, I meant…" matches.
+        cleaned_norm = cleaned.replace(",", " ").replace("  ", " ")
+        if cleaned_norm.startswith(("no ", "not ", "actually ", "wait ", "hmm no",
+                                    "that's not ", "thats not ")):
             return UtteranceKind.CORRECTION
 
         # Command imperative (short, starts with verb)
