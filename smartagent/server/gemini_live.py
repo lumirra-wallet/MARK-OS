@@ -174,7 +174,12 @@ class GeminiLiveBridge:
             return
 
         system_prompt = _build_system_prompt()
-        client = genai.Client(api_key=self._api_key)
+        # Gemini Live (bidiGenerateContent) is only available on v1alpha.
+        # Using the default v1beta raises "not supported for bidiGenerateContent".
+        client = genai.Client(
+            api_key=self._api_key,
+            http_options={"api_version": "v1alpha"},
+        )
 
         config = self._build_config(gtypes, system_prompt)
 
